@@ -1,5 +1,6 @@
 import React from "react";
 import { useFridayStore } from "@/lib/store";
+import { invokeCommand } from "@/lib/ipc";
 import { Orb } from "./Orb";
 import { Caret } from "./Caret";
 import { InlineResult } from "./InlineResult";
@@ -22,6 +23,7 @@ export const Bar: React.FC = () => {
     setOrbState,
     setPaletteOpen,
     setActiveSurface,
+    openConsoleTab,
     submitQuery,
     confirmPendingPlan,
     cancelPendingPlan,
@@ -53,22 +55,8 @@ export const Bar: React.FC = () => {
   };
 
   React.useEffect(() => {
-    try {
-      if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
-        Promise.all([
-          import("@tauri-apps/api/webviewWindow"),
-          import("@tauri-apps/api/dpi"),
-        ]).then(([{ getCurrentWebviewWindow }, { LogicalSize }]) => {
-          const win = getCurrentWebviewWindow();
-          if (win && win.label === "main") {
-            const targetHeight = (pendingPlan || paletteOpen) ? 460 : 64;
-            win.setSize(new LogicalSize(720, targetHeight)).catch(() => {});
-          }
-        });
-      }
-    } catch {
-      // ignore
-    }
+    const targetHeight = (pendingPlan || paletteOpen) ? 460 : 64;
+    invokeCommand("set_bar_height", { height: targetHeight }).catch(() => {});
   }, [pendingPlan, paletteOpen]);
 
   return (
@@ -138,7 +126,7 @@ export const Bar: React.FC = () => {
 
           {/* Open Console button */}
           <button
-            onClick={() => setActiveSurface("console")}
+            onClick={() => openConsoleTab("chat")}
             title="Open Console (Alt+Shift+Space)"
             className="p-1.5 rounded-[var(--radius-control)] hover:bg-[var(--color-plate)] text-[var(--color-mute)] hover:text-[var(--color-text)] transition-colors cursor-pointer"
           >

@@ -241,10 +241,14 @@ fn get_telemetry() -> TelemetryResponse {
 }
 
 #[tauri::command]
-fn show_console(app: AppHandle) -> Result<(), String> {
+fn show_console(tab: Option<String>, app: AppHandle) -> Result<(), String> {
     if let Some(console_win) = app.get_webview_window("console") {
         console_win.show().map_err(|e| e.to_string())?;
+        console_win.unminimize().map_err(|e| e.to_string())?;
         console_win.set_focus().map_err(|e| e.to_string())?;
+        if let Some(t) = tab {
+            let _ = console_win.emit("switch-console-tab", t);
+        }
     }
     Ok(())
 }
@@ -270,6 +274,16 @@ fn show_bar(app: AppHandle) -> Result<(), String> {
 fn hide_bar(app: AppHandle) -> Result<(), String> {
     if let Some(bar_win) = app.get_webview_window("main") {
         bar_win.hide().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn set_bar_height(height: u32, app: AppHandle) -> Result<(), String> {
+    if let Some(bar_win) = app.get_webview_window("main") {
+        bar_win
+            .set_size(tauri::LogicalSize::new(720, height))
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -374,7 +388,8 @@ pub fn run() {
             show_console,
             hide_console,
             show_bar,
-            hide_bar
+            hide_bar,
+            set_bar_height
         ])
         .setup(|app| {
             #[cfg(target_os = "windows")]
@@ -382,6 +397,16 @@ pub fn run() {
                 if let Some(console_window) = app.get_webview_window("console") {
                     let _ = window_vibrancy::apply_mica(&console_window, None);
                 }
+            }
+
+            if let Some(console_win) = app.get_webview_window("console") {
+                let win_clone = console_win.clone();
+                console_win.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = win_clone.hide();
+                    }
+                });
             }
 
             if let Ok(alt_space) = "alt+space".parse::<Shortcut>() {

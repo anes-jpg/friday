@@ -5,6 +5,12 @@
   "windows": ["main", "console"],
   "permissions": [
     "core:default",
+    "core:window:default",
+    "core:window:allow-set-size",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:webview:default",
     "opener:default",
     "notification:default",
     "clipboard-manager:default",

@@ -38,6 +38,7 @@ export const Palette: React.FC<PaletteProps> = ({ docked = false }) => {
     setPaletteOpen,
     setActiveSurface,
     setActiveConsoleTab,
+    openConsoleTab,
     submitQuery,
     simulateVoiceTurn,
   } = useFridayStore();
@@ -160,7 +161,7 @@ export const Palette: React.FC<PaletteProps> = ({ docked = false }) => {
       tier: "Green",
       icon: <Layers className="w-4 h-4 text-[var(--color-text)]" />,
       action: () => {
-        setActiveSurface("console");
+        openConsoleTab("chat");
         setPaletteOpen(false);
       },
     },
@@ -172,8 +173,7 @@ export const Palette: React.FC<PaletteProps> = ({ docked = false }) => {
       tier: "Green",
       icon: <Settings className="w-4 h-4 text-[var(--color-text)]" />,
       action: () => {
-        setActiveSurface("console");
-        setActiveConsoleTab("settings");
+        openConsoleTab("settings");
         setPaletteOpen(false);
       },
     },

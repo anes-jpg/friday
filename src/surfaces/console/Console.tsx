@@ -1,5 +1,6 @@
 import React from "react";
 import { useFridayStore } from "@/lib/store";
+import { invokeCommand } from "@/lib/ipc";
 import { ChatTab } from "./ChatTab";
 import { AutomationsTab } from "./AutomationsTab";
 import { SkillsTab } from "./SkillsTab";
@@ -56,7 +57,11 @@ export const Console: React.FC = () => {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setActiveSurface("bar")}
+            onClick={() => {
+              setActiveSurface("bar");
+              invokeCommand("hide_console").catch(() => {});
+              invokeCommand("show_bar").catch(() => {});
+            }}
             className="h-6 px-2 text-xs"
           >
             <ArrowLeft className="w-3.5 h-3.5 mr-1" />

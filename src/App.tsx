@@ -15,6 +15,7 @@ export const App: React.FC = () => {
   const {
     activeSurface,
     setActiveSurface,
+    setActiveConsoleTab,
     paletteOpen,
     setPaletteOpen,
     simulateVoiceTurn,
@@ -103,13 +104,19 @@ export const App: React.FC = () => {
         listen<string>("global-shortcut-dictation", () => {
           setInputMode(inputMode === "dictation" ? "command" : "dictation");
         }).then((un) => unlisten.push(un));
+
+        listen<string>("switch-console-tab", (event) => {
+          if (event.payload) {
+            setActiveConsoleTab(event.payload as "chat" | "automations" | "skills" | "memory" | "audit" | "settings");
+          }
+        }).then((un) => unlisten.push(un));
       });
     }
 
     return () => {
       unlisten.forEach((fn) => fn());
     };
-  }, [activeSurface, orbState, inputMode, setActiveSurface, setInputMode, startVoiceCapture, stopVoiceCapture]);
+  }, [activeSurface, orbState, inputMode, setActiveSurface, setActiveConsoleTab, setInputMode, startVoiceCapture, stopVoiceCapture]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

@@ -44,6 +44,7 @@ interface FridayState {
   setCaretText: (text: string) => void;
   setAsrPartial: (partial: string) => void;
   setActiveConsoleTab: (tab: "chat" | "automations" | "skills" | "memory" | "audit" | "settings") => void;
+  openConsoleTab: (tab: "chat" | "automations" | "skills" | "memory" | "audit" | "settings") => Promise<void>;
   setActiveThreadId: (threadId: string) => void;
 
   startVoiceCapture: () => Promise<void>;
@@ -244,7 +245,20 @@ export const useFridayStore = create<FridayState>((set, get) => ({
     currentSpendUsd: 0.42,
   },
 
-  setActiveSurface: (surface) => set({ activeSurface: surface }),
+  setActiveSurface: (surface) => {
+    set({ activeSurface: surface });
+    if (surface === "console") {
+      invokeCommand("show_console").catch(() => {});
+    }
+  },
+  openConsoleTab: async (tab) => {
+    set({ activeSurface: "console", activeConsoleTab: tab });
+    try {
+      await invokeCommand("show_console", { tab });
+    } catch {
+      // ignore
+    }
+  },
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   setOrbState: (orbState) => set({ orbState }),
   setInputMode: (inputMode) => set({ inputMode }),
