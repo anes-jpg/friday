@@ -75,6 +75,42 @@ export const App: React.FC = () => {
     };
   }, [orbState, setOrbState, updateAudioRms]);
 
+  // Global OS-level hotkey event listener dispatched from Tauri background
+  useEffect(() => {
+    let unlisten: (() => void)[] = [];
+
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+      import("@tauri-apps/api/event").then(({ listen }) => {
+        listen<string>("global-shortcut-alt-space", (event) => {
+          if (event.payload === "pressed") {
+            if (activeSurface === "console") {
+              setActiveSurface("bar");
+            }
+            if (orbState === "idle" || orbState === "speaking") {
+              startVoiceCapture();
+            }
+          } else if (event.payload === "released") {
+            if (orbState === "listening") {
+              stopVoiceCapture();
+            }
+          }
+        }).then((un) => unlisten.push(un));
+
+        listen<string>("global-shortcut-console", () => {
+          setActiveSurface(activeSurface === "bar" ? "console" : "bar");
+        }).then((un) => unlisten.push(un));
+
+        listen<string>("global-shortcut-dictation", () => {
+          setInputMode(inputMode === "dictation" ? "command" : "dictation");
+        }).then((un) => unlisten.push(un));
+      });
+    }
+
+    return () => {
+      unlisten.forEach((fn) => fn());
+    };
+  }, [activeSurface, orbState, inputMode, setActiveSurface, setInputMode, startVoiceCapture, stopVoiceCapture]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Panic Kill Switch: Ctrl+Alt+Shift+F

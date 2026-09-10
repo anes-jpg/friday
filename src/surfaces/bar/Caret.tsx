@@ -26,6 +26,11 @@ export const Caret: React.FC<CaretProps> = ({
 
   useEffect(() => {
     inputRef.current?.focus();
+    const handleWindowFocus = () => {
+      inputRef.current?.focus();
+    };
+    window.addEventListener("focus", handleWindowFocus);
+    return () => window.removeEventListener("focus", handleWindowFocus);
   }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {

@@ -13,7 +13,8 @@ use scheduler::SchedulerManager;
 use serde::{Deserialize, Serialize};
 use skills::SkillRegistry;
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 use voice::AudioCaptureManager;
 
@@ -305,7 +306,45 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    if let Ok(alt_space) = "alt+space".parse::<Shortcut>() {
+                        if shortcut == &alt_space {
+                            if event.state() == ShortcutState::Pressed {
+                                if let Some(bar) = app.get_webview_window("main") {
+                                    let _ = bar.show();
+                                    let _ = bar.set_focus();
+                                    let _ = bar.emit("global-shortcut-alt-space", "pressed");
+                                }
+                            } else if event.state() == ShortcutState::Released {
+                                if let Some(bar) = app.get_webview_window("main") {
+                                    let _ = bar.emit("global-shortcut-alt-space", "released");
+                                }
+                            }
+                        }
+                    }
+                    if let Ok(alt_shift_space) = "alt+shift+space".parse::<Shortcut>() {
+                        if shortcut == &alt_shift_space && event.state() == ShortcutState::Pressed {
+                            if let Some(console) = app.get_webview_window("console") {
+                                let _ = console.show();
+                                let _ = console.set_focus();
+                                let _ = console.emit("global-shortcut-console", "toggle");
+                            }
+                        }
+                    }
+                    if let Ok(alt_shift_d) = "alt+shift+d".parse::<Shortcut>() {
+                        if shortcut == &alt_shift_d && event.state() == ShortcutState::Pressed {
+                            if let Some(bar) = app.get_webview_window("main") {
+                                let _ = bar.show();
+                                let _ = bar.set_focus();
+                                let _ = bar.emit("global-shortcut-dictation", "toggle");
+                            }
+                        }
+                    }
+                })
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             submit_utterance,
             confirm_plan,
@@ -343,6 +382,16 @@ pub fn run() {
                 if let Some(console_window) = app.get_webview_window("console") {
                     let _ = window_vibrancy::apply_mica(&console_window, None);
                 }
+            }
+
+            if let Ok(alt_space) = "alt+space".parse::<Shortcut>() {
+                let _ = app.global_shortcut().register(alt_space);
+            }
+            if let Ok(alt_shift_space) = "alt+shift+space".parse::<Shortcut>() {
+                let _ = app.global_shortcut().register(alt_shift_space);
+            }
+            if let Ok(alt_shift_d) = "alt+shift+d".parse::<Shortcut>() {
+                let _ = app.global_shortcut().register(alt_shift_d);
             }
 
             tracing::info!("FRIDAY core runtime ready.");
