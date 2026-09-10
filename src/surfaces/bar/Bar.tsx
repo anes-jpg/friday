@@ -50,6 +50,25 @@ export const Bar: React.FC = () => {
     }
   };
 
+  React.useEffect(() => {
+    try {
+      if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+        Promise.all([
+          import("@tauri-apps/api/webviewWindow"),
+          import("@tauri-apps/api/dpi"),
+        ]).then(([{ getCurrentWebviewWindow }, { LogicalSize }]) => {
+          const win = getCurrentWebviewWindow();
+          if (win && win.label === "main") {
+            const targetHeight = pendingPlan ? 480 : 64;
+            win.setSize(new LogicalSize(720, targetHeight)).catch(() => {});
+          }
+        });
+      }
+    } catch {
+      // ignore
+    }
+  }, [pendingPlan]);
+
   return (
     <div className="relative w-[720px] max-w-full rounded-[var(--radius-surface)] acrylic-bar overflow-hidden select-none transition-all duration-200">
       {/* Magic UI Border Beam: Active whenever FRIDAY is listening, thinking, or awaiting confirmation */}
@@ -63,7 +82,10 @@ export const Bar: React.FC = () => {
       )}
 
       {/* 64px Main Bar */}
-      <div className="flex items-center h-16 px-3.5 gap-2">
+      <div
+        data-tauri-drag-region
+        className="flex items-center h-16 px-3.5 gap-2 cursor-grab active:cursor-grabbing"
+      >
         {/* 40px Reactive 2D Canvas Orb */}
         <Orb
           state={orbState}

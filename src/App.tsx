@@ -30,13 +30,7 @@ export const App: React.FC = () => {
   } = useFridayStore();
 
   const [showShowcase, setShowShowcase] = useState<boolean>(false);
-  const [showOnboarding, setShowOnboarding] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem("friday_onboarded") !== "true";
-    } catch {
-      return false;
-    }
-  });
+  const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
 
   useEffect(() => {
     loadBackendData();
@@ -141,94 +135,55 @@ export const App: React.FC = () => {
   }, [activeSurface, setActiveSurface, orbState, setOrbState, inputMode, setInputMode, startVoiceCapture, stopVoiceCapture, bargeIn]);
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-[var(--color-void)] font-sans">
-      {/* Magic UI Ambient Particles Backdrop */}
-      <Particles quantity={30} size={1.4} color="#8b949e" />
+    <div
+      className={`relative w-full h-full overflow-hidden font-sans ${
+        activeSurface === "bar" ? "bg-transparent" : "bg-[var(--color-void)]"
+      }`}
+    >
+      {/* Magic UI Ambient Particles Backdrop - Console surface only */}
+      {activeSurface === "console" && (
+        <Particles quantity={30} size={1.4} color="#8b949e" />
+      )}
 
-      {/* Surface 1: The Bar (Centered at 22% from the top) */}
+      {/* Surface 1: The Floating Bar (Transparent background, centered) */}
       {activeSurface === "bar" && (
-        <div className="relative w-full h-full flex flex-col items-center justify-start pt-[18vh] p-4">
+        <div className="w-full h-full flex flex-col items-center justify-start bg-transparent select-none">
           <Bar />
-
-          {/* Development & Desktop Surface Navigator */}
-          <div className="mt-8 flex items-center gap-3 px-3 py-1.5 rounded-full bg-[oklch(14%_0.006_265_/_0.85)] border border-[var(--color-edge)] shadow-lg backdrop-blur text-xs text-[var(--color-mute)]">
-            <span className="flex items-center gap-1.5 font-medium text-[var(--color-text)]">
-              <span className="w-2 h-2 rounded-full bg-[var(--color-acid)]" />
-              FRIDAY S1 · The Bar
-            </span>
-            <div className="h-3 w-px bg-[var(--color-edge)]" />
-            <button
-              onClick={() => setActiveSurface("console")}
-              className="hover:text-[var(--color-text)] transition-colors flex items-center gap-1"
-            >
-              Switch to Console <Kbd>Alt+Shift+Space</Kbd>
-            </button>
-            <div className="h-3 w-px bg-[var(--color-edge)]" />
-            <button
-              onClick={() => setInputMode(inputMode === "dictation" ? "command" : "dictation")}
-              className={`hover:text-[var(--color-text)] transition-colors flex items-center gap-1 ${
-                inputMode === "dictation" ? "text-[var(--color-acid)]" : ""
-              }`}
-            >
-              Dictation <Kbd>Alt+Shift+D</Kbd>
-            </button>
-            <div className="h-3 w-px bg-[var(--color-edge)]" />
-            <button
-              onClick={() => setPaletteOpen(true)}
-              className="hover:text-[var(--color-text)] transition-colors flex items-center gap-1"
-            >
-              Palette <Kbd>Ctrl+K</Kbd>
-            </button>
-            <div className="h-3 w-px bg-[var(--color-edge)]" />
-            <button
-              onClick={() => setShowOnboarding(true)}
-              className="hover:text-[var(--color-text)] transition-colors flex items-center gap-1"
-            >
-              Guide <Kbd>?</Kbd>
-            </button>
-            <div className="h-3 w-px bg-[var(--color-edge)]" />
-            <button
-              onClick={() => setShowShowcase(true)}
-              className="hover:text-[var(--color-text)] transition-colors flex items-center gap-1"
-            >
-              Showcase
-            </button>
-          </div>
         </div>
       )}
 
-      {/* Surface 3: The Console */}
-      {activeSurface === "console" && <Console />}
+      {/* Surface 3: The Console Surface */}
+      {activeSurface === "console" && (
+        <>
+          <Console />
+          <OnboardingModal
+            isOpen={showOnboarding}
+            onClose={() => {
+              setShowOnboarding(false);
+              try {
+                localStorage.setItem("friday_onboarded", "true");
+              } catch {
+                // ignore
+              }
+            }}
+          />
+          <LandingShowcase
+            isOpen={showShowcase}
+            onClose={() => setShowShowcase(false)}
+            onLaunchBar={() => {
+              setShowShowcase(false);
+              setActiveSurface("bar");
+            }}
+            onLaunchConsole={() => {
+              setShowShowcase(false);
+              setActiveSurface("console");
+            }}
+          />
+        </>
+      )}
 
       {/* Surface 2: Command Palette Modal */}
       <Palette />
-
-      {/* Surface: Onboarding Flow (§11 M9 First-Run Experience) */}
-      <OnboardingModal
-        isOpen={showOnboarding}
-        onClose={() => {
-          setShowOnboarding(false);
-          try {
-            localStorage.setItem("friday_onboarded", "true");
-          } catch {
-            // ignore
-          }
-        }}
-      />
-
-      {/* Surface: 1.0 Product Showcase & Landing Page (§11 M11) */}
-      <LandingShowcase
-        isOpen={showShowcase}
-        onClose={() => setShowShowcase(false)}
-        onLaunchBar={() => {
-          setShowShowcase(false);
-          setActiveSurface("bar");
-        }}
-        onLaunchConsole={() => {
-          setShowShowcase(false);
-          setActiveSurface("console");
-        }}
-      />
     </div>
   );
 };
