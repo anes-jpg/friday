@@ -107,8 +107,9 @@ export const App: React.FC = () => {
       }
 
       // Summon / Voice Push-To-Talk: Alt+Space hold
-      if (e.altKey && !e.shiftKey && e.code === "Space") {
+      if (e.altKey && !e.shiftKey && (e.code === "Space" || e.key === " ")) {
         e.preventDefault();
+        e.stopPropagation();
         if (activeSurface === "console") {
           setActiveSurface("bar");
         }
@@ -120,17 +121,26 @@ export const App: React.FC = () => {
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === "Space" && orbState === "listening") {
+      if ((e.code === "Space" || e.key === " ") && orbState === "listening") {
         e.preventDefault();
+        e.stopPropagation();
         stopVoiceCapture();
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
+    const handleContextMenu = (e: MouseEvent) => {
+      if (activeSurface === "bar") {
+        e.preventDefault();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
+    window.addEventListener("keyup", handleKeyUp, { capture: true });
+    window.addEventListener("contextmenu", handleContextMenu);
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("keydown", handleKeyDown, { capture: true });
+      window.removeEventListener("keyup", handleKeyUp, { capture: true });
+      window.removeEventListener("contextmenu", handleContextMenu);
     };
   }, [activeSurface, setActiveSurface, orbState, setOrbState, inputMode, setInputMode, startVoiceCapture, stopVoiceCapture, bargeIn]);
 
@@ -156,6 +166,7 @@ export const App: React.FC = () => {
       {activeSurface === "console" && (
         <>
           <Console />
+          <Palette />
           <OnboardingModal
             isOpen={showOnboarding}
             onClose={() => {
@@ -181,9 +192,6 @@ export const App: React.FC = () => {
           />
         </>
       )}
-
-      {/* Surface 2: Command Palette Modal */}
-      <Palette />
     </div>
   );
 };

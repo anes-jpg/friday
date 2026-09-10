@@ -3,6 +3,7 @@ import { useFridayStore } from "@/lib/store";
 import { Orb } from "./Orb";
 import { Caret } from "./Caret";
 import { InlineResult } from "./InlineResult";
+import { Palette } from "../palette/Palette";
 import { Kbd } from "@/components/ui/Kbd";
 import { BorderBeam } from "@/components/magicui/BorderBeam";
 import { ShimmerButton } from "@/components/magicui/ShimmerButton";
@@ -15,6 +16,7 @@ export const Bar: React.FC = () => {
     caretText,
     asrPartial,
     pendingPlan,
+    paletteOpen,
     setCaretText,
     setInputMode,
     setOrbState,
@@ -59,7 +61,7 @@ export const Bar: React.FC = () => {
         ]).then(([{ getCurrentWebviewWindow }, { LogicalSize }]) => {
           const win = getCurrentWebviewWindow();
           if (win && win.label === "main") {
-            const targetHeight = pendingPlan ? 480 : 64;
+            const targetHeight = (pendingPlan || paletteOpen) ? 460 : 64;
             win.setSize(new LogicalSize(720, targetHeight)).catch(() => {});
           }
         });
@@ -67,12 +69,12 @@ export const Bar: React.FC = () => {
     } catch {
       // ignore
     }
-  }, [pendingPlan]);
+  }, [pendingPlan, paletteOpen]);
 
   return (
     <div className="relative w-[720px] max-w-full rounded-[var(--radius-surface)] acrylic-bar overflow-hidden select-none transition-all duration-200">
-      {/* Magic UI Border Beam: Active whenever FRIDAY is listening, thinking, or awaiting confirmation */}
-      {(orbState !== "idle" || pendingPlan?.status === "awaiting_confirm") && (
+      {/* Magic UI Border Beam: Active whenever FRIDAY is listening, thinking, awaiting confirmation, or palette is open */}
+      {(orbState !== "idle" || pendingPlan?.status === "awaiting_confirm" || paletteOpen) && (
         <BorderBeam
           size={80}
           duration={4}
@@ -125,9 +127,11 @@ export const Bar: React.FC = () => {
 
           {/* Palette button */}
           <button
-            onClick={() => setPaletteOpen(true)}
+            onClick={() => setPaletteOpen(!paletteOpen)}
             title="Command Palette (Ctrl+K or type >)"
-            className="p-1.5 rounded-[var(--radius-control)] hover:bg-[var(--color-plate)] text-[var(--color-mute)] hover:text-[var(--color-text)] transition-colors cursor-pointer"
+            className={`p-1.5 rounded-[var(--radius-control)] hover:bg-[var(--color-plate)] text-[var(--color-mute)] hover:text-[var(--color-text)] transition-colors cursor-pointer ${
+              paletteOpen ? "text-[var(--color-acid)] bg-[var(--color-plate)]" : ""
+            }`}
           >
             <Terminal className="w-4 h-4" />
           </button>
@@ -152,6 +156,9 @@ export const Bar: React.FC = () => {
           onUndo={undoLastAction}
         />
       )}
+
+      {/* Docked Command Palette */}
+      {paletteOpen && <Palette docked />}
     </div>
   );
 };

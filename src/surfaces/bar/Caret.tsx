@@ -44,6 +44,9 @@ export const Caret: React.FC<CaretProps> = ({
     } else if (e.key === "Tab" && !value) {
       e.preventDefault();
       onToggleMode();
+    } else if (e.altKey && (e.code === "Space" || e.key === " ")) {
+      e.preventDefault();
+      e.stopPropagation();
     }
   };
 
