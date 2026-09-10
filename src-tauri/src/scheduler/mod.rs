@@ -35,70 +35,85 @@ impl SchedulerManager {
         let db = self.db.clone();
         let tools = self.tools.clone();
 
-        tokio::spawn(async move {
-            tracing::info!("FRIDAY Automation Scheduler started.");
-            while running.load(Ordering::SeqCst) {
-                let now_sec = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs() as i64;
-
-                let automations = if let Ok(guard) = db.lock() {
-                    guard.get_automations().unwrap_or_default()
-                } else {
-                    Vec::new()
+        let _ = std::thread::Builder::new()
+            .name("friday-scheduler".to_string())
+            .spawn(move || {
+                let rt = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(r) => r,
+                    Err(e) => {
+                        tracing::error!("Failed to initialize scheduler tokio runtime: {}", e);
+                        return;
+                    }
                 };
 
-                for mut auto in automations {
-                    if !auto.enabled {
-                        continue;
-                    }
+                rt.block_on(async move {
+                    tracing::info!("FRIDAY Automation Scheduler started.");
+                    while running.load(Ordering::SeqCst) {
+                        let now_sec = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs() as i64;
 
-                    // Check schedule eligibility (e.g. at least 24 hours between runs for daily crons)
-                    let should_run = match auto.trigger_type.as_str() {
-                        "cron" => {
-                            if let Some(last) = auto.last_run {
-                                (now_sec - last) >= 86400
-                            } else {
-                                true
-                            }
-                        }
-                        "event" => false, // Event-driven automations triggered on FS/window events
-                        _ => false,
-                    };
-
-                    if should_run {
-                        let start_inst = Instant::now();
-                        let args: Value = serde_json::from_str(&auto.action_args).unwrap_or(serde_json::json!({}));
-                        let result = tools.invoke(&auto.action_tool, args).await;
-                        let duration_ms = start_inst.elapsed().as_millis() as i64;
-
-                        let decision = match result {
-                            Ok(_) => "auto_executed",
-                            Err(_) => "auto_failed",
+                        let automations = if let Ok(guard) = db.lock() {
+                            guard.get_automations().unwrap_or_default()
+                        } else {
+                            Vec::new()
                         };
 
-                        if let Ok(guard) = db.lock() {
-                            let _ = guard.insert_audit_entry(&DbAuditEntry {
-                                id: format!("audit-auto-{}", now_sec),
-                                tool_name: auto.action_tool.clone(),
-                                args_hash: format!("{:x}", md5_digest(&auto.action_args)),
-                                tier: "Green".to_string(),
-                                decision: decision.to_string(),
-                                duration_ms,
-                                created_at: now_sec,
-                            });
+                        for mut auto in automations {
+                            if !auto.enabled {
+                                continue;
+                            }
 
-                            auto.last_run = Some(now_sec);
-                            let _ = guard.insert_automation(&auto);
+                            // Check schedule eligibility (e.g. at least 24 hours between runs for daily crons)
+                            let should_run = match auto.trigger_type.as_str() {
+                                "cron" => {
+                                    if let Some(last) = auto.last_run {
+                                        (now_sec - last) >= 86400
+                                    } else {
+                                        true
+                                    }
+                                }
+                                "event" => false, // Event-driven automations triggered on FS/window events
+                                _ => false,
+                            };
+
+                            if should_run {
+                                let start_inst = Instant::now();
+                                let args: Value = serde_json::from_str(&auto.action_args).unwrap_or(serde_json::json!({}));
+                                let result = tools.invoke(&auto.action_tool, args).await;
+                                let duration_ms = start_inst.elapsed().as_millis() as i64;
+
+                                let decision = match result {
+                                    Ok(_) => "auto_executed",
+                                    Err(_) => "auto_failed",
+                                };
+
+                                if let Ok(guard) = db.lock() {
+                                    let _ = guard.insert_audit_entry(&DbAuditEntry {
+                                        id: format!("audit-auto-{}", now_sec),
+                                        tool_name: auto.action_tool.clone(),
+                                        args_hash: format!("{:x}", md5_digest(&auto.action_args)),
+                                        tier: "Green".to_string(),
+                                        decision: decision.to_string(),
+                                        duration_ms,
+                                        created_at: now_sec,
+                                    });
+
+                                    auto.last_run = Some(now_sec);
+                                    let _ = guard.insert_automation(&auto);
+                                }
+                            }
                         }
-                    }
-                }
 
-                tokio::time::sleep(Duration::from_secs(30)).await;
-            }
-            tracing::info!("FRIDAY Automation Scheduler stopped.");
-        });
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                    }
+                    tracing::info!("FRIDAY Automation Scheduler stopped.");
+                });
+            });
     }
 
     pub fn stop(&self) {
