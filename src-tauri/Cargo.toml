@@ -1,0 +1,53 @@
+[package]
+name = "friday"
+version = "1.0.0"
+description = "FRIDAY — Windows Desktop Assistant"
+authors = ["FRIDAY Team"]
+edition = "2021"
+
+[lib]
+name = "friday_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "friday"
+path = "src/main.rs"
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state    = "2"
+tauri-plugin-notification    = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-opener          = "2"
+
+# Native window look
+window-vibrancy = "0.5"
+
+# Core async, logging, and serialization
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# LLM + Networking
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"] }
+eventsource-stream = "0.2"
+futures-util = "0.3"
+
+# Data storage & platform
+rusqlite = { version = "0.32", features = ["bundled"] }
+keyring = "3"
+
+# Audio Subsystem (ADR 001)
+cpal = "0.15"
+rodio = "0.19"
+ringbuf = "0.4"
+hound = "3"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

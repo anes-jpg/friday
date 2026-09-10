@@ -1,0 +1,22 @@
+# FRIDAY Contextual Hotwords Biasing (§04 Voice Pipeline)
+# phrase : boost_score
+Tauri : 2.5
+Notion : 2.0
+OKLCH : 3.0
+Vercel : 2.0
+Awwwards : 2.0
+Antigravity : 2.5
+GLM : 2.5
+Zipformer : 2.5
+Kwame : 2.0
+AN STUDIO : 2.0
+Lagos : 2.0
+bge-small : 2.5
+Kokoro : 2.5
+Piper : 2.0
+SQLCipher : 2.5
+Mica : 2.0
+Acrylic : 2.0
+Alt Space : 2.0
+Zustand : 2.5
+Vite : 2.0

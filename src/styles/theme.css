@@ -1,0 +1,159 @@
+@import "tailwindcss";
+@source "../src";
+@source "../index.html";
+
+@theme {
+  /* monochrome ramp, OKLCH */
+  --color-void: oklch(12% 0.005 265);
+  --color-hull: oklch(18% 0.006 265);
+  --color-plate: oklch(24% 0.007 265);
+  --color-edge: oklch(32% 0.008 265);
+  --color-mute: oklch(58% 0.010 265);
+  --color-text: oklch(92% 0.004 265);
+
+  /* the single accent */
+  --color-acid: oklch(78% 0.19 152);
+
+  /* semantic */
+  --color-warn: oklch(72% 0.17 62);
+  --color-fail: oklch(63% 0.21 25);
+
+  /* typography */
+  --font-sans: "Inter Variable", "Segoe UI Variable Text", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+
+  --text-micro: 0.6875rem; /* 11px meta, timestamps */
+  --text-body: 0.8125rem;  /* 13px everything */
+  --text-input: 0.9375rem; /* 15px caret line */
+  --text-head: 1.125rem;   /* 18px panel titles */
+  --text-hero: 1.75rem;    /* 28px empty states only */
+
+  --radius-control: 8px;
+  --radius-surface: 16px;
+  --ease-friday: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes shimmer-slide {
+  to {
+    transform: translate(calc(100cqw - 100%), 0);
+  }
+}
+
+@keyframes spin-around {
+  0% {
+    transform: translateZ(0) rotate(0);
+  }
+  15%, 35% {
+    transform: translateZ(0) rotate(90deg);
+  }
+  65%, 85% {
+    transform: translateZ(0) rotate(270deg);
+  }
+  100% {
+    transform: translateZ(0) rotate(360deg);
+  }
+}
+
+@keyframes shiny-text {
+  0%, 90%, 100% {
+    background-position: calc(-100% - var(--shiny-width, 100px)) 0;
+  }
+  30%, 60% {
+    background-position: calc(100% + var(--shiny-width, 100px)) 0;
+  }
+}
+
+.animate-shimmer-slide {
+  animation: shimmer-slide 2.5s infinite linear;
+}
+
+.animate-spin-around {
+  animation: spin-around 2.5s infinite linear;
+}
+
+.animate-shiny-text {
+  animation: shiny-text 3s infinite;
+}
+
+/* Base resets & theme tokens mapped to FRIDAY OKLCH */
+:root {
+  color-scheme: dark;
+  --background: var(--color-void);
+  --foreground: var(--color-text);
+  --card: var(--color-hull);
+  --card-foreground: var(--color-text);
+  --popover: var(--color-hull);
+  --popover-foreground: var(--color-text);
+  --primary: var(--color-acid);
+  --primary-foreground: var(--color-void);
+  --secondary: var(--color-plate);
+  --secondary-foreground: var(--color-text);
+  --muted: var(--color-plate);
+  --muted-foreground: var(--color-mute);
+  --accent: var(--color-plate);
+  --accent-foreground: var(--color-text);
+  --destructive: var(--color-fail);
+  --destructive-foreground: var(--color-text);
+  --border: var(--color-edge);
+  --input: var(--color-plate);
+  --ring: var(--color-acid);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: transparent;
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+  overflow: hidden;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-edge);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-mute);
+}
+
+/* Keyboard focus style */
+*:focus-visible {
+  outline: 1.5px solid var(--color-acid);
+  outline-offset: 1px;
+}
+
+/* Glass & Surface utility */
+.mica-backdrop {
+  background-color: oklch(14% 0.006 265 / 0.88);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+}
+
+.acrylic-bar {
+  background-color: oklch(18% 0.006 265 / 0.94);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.65), 0 0 0 1px var(--color-edge);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

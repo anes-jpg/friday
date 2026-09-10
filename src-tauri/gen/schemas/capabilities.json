@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default permissions for Friday windows","local":true,"windows":["main","console"],"permissions":["core:default","opener:default","notification:default","clipboard-manager:default","global-shortcut:default"]}}
