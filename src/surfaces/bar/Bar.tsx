@@ -5,10 +5,11 @@ import { Orb } from "./Orb";
 import { Caret } from "./Caret";
 import { InlineResult } from "./InlineResult";
 import { Palette } from "../palette/Palette";
+import { BarSettings } from "./BarSettings";
 import { Kbd } from "@/components/ui/Kbd";
 import { BorderBeam } from "@/components/magicui/BorderBeam";
 import { ShimmerButton } from "@/components/magicui/ShimmerButton";
-import { Mic, Terminal, LayoutDashboard, Volume2, Sparkles } from "lucide-react";
+import { Mic, Terminal, LayoutDashboard, Settings } from "lucide-react";
 
 export const Bar: React.FC = () => {
   const {
@@ -22,7 +23,6 @@ export const Bar: React.FC = () => {
     setInputMode,
     setOrbState,
     setPaletteOpen,
-    setActiveSurface,
     openConsoleTab,
     submitQuery,
     confirmPendingPlan,
@@ -33,6 +33,8 @@ export const Bar: React.FC = () => {
     bargeIn,
     telemetry,
   } = useFridayStore();
+
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
 
   const handleToggleMode = () => {
     const modes: ("command" | "dictation" | "conversation")[] = [
@@ -55,14 +57,14 @@ export const Bar: React.FC = () => {
   };
 
   React.useEffect(() => {
-    const targetHeight = (pendingPlan || paletteOpen) ? 460 : 64;
+    const targetHeight = (pendingPlan || paletteOpen || settingsOpen) ? 480 : 64;
     invokeCommand("set_bar_height", { height: targetHeight }).catch(() => {});
-  }, [pendingPlan, paletteOpen]);
+  }, [pendingPlan, paletteOpen, settingsOpen]);
 
   return (
     <div className="relative w-[720px] max-w-full rounded-[var(--radius-surface)] acrylic-bar overflow-hidden select-none transition-all duration-200">
-      {/* Magic UI Border Beam: Active whenever FRIDAY is listening, thinking, awaiting confirmation, or palette is open */}
-      {(orbState !== "idle" || pendingPlan?.status === "awaiting_confirm" || paletteOpen) && (
+      {/* Magic UI Border Beam: Active whenever FRIDAY is listening, thinking, awaiting confirmation, palette or settings is open */}
+      {(orbState !== "idle" || pendingPlan?.status === "awaiting_confirm" || paletteOpen || settingsOpen) && (
         <BorderBeam
           size={80}
           duration={4}
@@ -92,7 +94,10 @@ export const Bar: React.FC = () => {
           mode={inputMode}
           onChange={setCaretText}
           onSubmit={submitQuery}
-          onOpenPalette={() => setPaletteOpen(true)}
+          onOpenPalette={() => {
+            setSettingsOpen(false);
+            setPaletteOpen(true);
+          }}
           onToggleMode={handleToggleMode}
         />
 
@@ -115,7 +120,10 @@ export const Bar: React.FC = () => {
 
           {/* Palette button */}
           <button
-            onClick={() => setPaletteOpen(!paletteOpen)}
+            onClick={() => {
+              setSettingsOpen(false);
+              setPaletteOpen(!paletteOpen);
+            }}
             title="Command Palette (Ctrl+K or type >)"
             className={`p-1.5 rounded-[var(--radius-control)] hover:bg-[var(--color-plate)] text-[var(--color-mute)] hover:text-[var(--color-text)] transition-colors cursor-pointer ${
               paletteOpen ? "text-[var(--color-acid)] bg-[var(--color-plate)]" : ""
@@ -124,10 +132,24 @@ export const Bar: React.FC = () => {
             <Terminal className="w-4 h-4" />
           </button>
 
+          {/* Settings button */}
+          <button
+            onClick={() => {
+              setPaletteOpen(false);
+              setSettingsOpen(!settingsOpen);
+            }}
+            title="Settings & Runtime Config (Ctrl+,)"
+            className={`p-1.5 rounded-[var(--radius-control)] hover:bg-[var(--color-plate)] text-[var(--color-mute)] hover:text-[var(--color-text)] transition-colors cursor-pointer ${
+              settingsOpen ? "text-[var(--color-acid)] bg-[var(--color-plate)]" : ""
+            }`}
+          >
+            <Settings className="w-4 h-4" />
+          </button>
+
           {/* Open Console button */}
           <button
             onClick={() => openConsoleTab("chat")}
-            title="Open Console (Alt+Shift+Space)"
+            title="Open Full Console (Alt+Shift+Space)"
             className="p-1.5 rounded-[var(--radius-control)] hover:bg-[var(--color-plate)] text-[var(--color-mute)] hover:text-[var(--color-text)] transition-colors cursor-pointer"
           >
             <LayoutDashboard className="w-4 h-4" />
@@ -146,7 +168,18 @@ export const Bar: React.FC = () => {
       )}
 
       {/* Docked Command Palette */}
-      {paletteOpen && <Palette docked />}
+      {paletteOpen && (
+        <Palette
+          docked
+          onOpenSettings={() => {
+            setPaletteOpen(false);
+            setSettingsOpen(true);
+          }}
+        />
+      )}
+
+      {/* Docked Bar Settings */}
+      {settingsOpen && <BarSettings onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 };

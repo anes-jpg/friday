@@ -249,14 +249,22 @@ export const useFridayStore = create<FridayState>((set, get) => ({
     set({ activeSurface: surface });
     if (surface === "console") {
       invokeCommand("show_console").catch(() => {});
+    } else if (surface === "bar") {
+      invokeCommand("hide_console").catch(() => {});
+      invokeCommand("show_bar").catch(() => {});
     }
   },
   openConsoleTab: async (tab) => {
-    set({ activeSurface: "console", activeConsoleTab: tab });
+    const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+    if (!isTauri) {
+      set({ activeSurface: "console", activeConsoleTab: tab });
+    } else {
+      set({ activeConsoleTab: tab });
+    }
     try {
       await invokeCommand("show_console", { tab });
     } catch {
-      // ignore
+      // Browser fallback
     }
   },
   setPaletteOpen: (open) => set({ paletteOpen: open }),

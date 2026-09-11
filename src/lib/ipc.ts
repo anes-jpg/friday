@@ -38,7 +38,16 @@ export async function invokeCommand<T>(cmd: string, args?: Record<string, unknow
     case "hide_bar":
       return true as T;
 
+    case "show_bar":
+      return true as T;
+
     case "show_console":
+      return true as T;
+
+    case "hide_console":
+      return true as T;
+
+    case "set_bar_height":
       return true as T;
 
     case "start_mic_capture":

@@ -7,9 +7,29 @@ import { Console } from "@/surfaces/console/Console";
 import { OnboardingModal } from "@/surfaces/onboarding/OnboardingModal";
 import { LandingShowcase } from "@/surfaces/landing/LandingShowcase";
 import { Particles } from "@/components/magicui/Particles";
-import { Kbd } from "@/components/ui/Kbd";
-import { Button } from "@/components/ui/Button";
-import { Layers, AlertTriangle } from "lucide-react";
+
+const getTauriWindowLabel = (): string => {
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+    return "browser";
+  }
+  try {
+    const internals = (window as unknown as {
+      __TAURI_INTERNALS__?: {
+        metadata?: {
+          currentWindow?: { label?: string };
+          currentWebview?: { label?: string };
+        };
+      };
+    }).__TAURI_INTERNALS__;
+    return (
+      internals?.metadata?.currentWindow?.label ||
+      internals?.metadata?.currentWebview?.label ||
+      "main"
+    );
+  } catch {
+    return "main";
+  }
+};
 
 export const App: React.FC = () => {
   const {
@@ -18,7 +38,6 @@ export const App: React.FC = () => {
     setActiveConsoleTab,
     paletteOpen,
     setPaletteOpen,
-    simulateVoiceTurn,
     startVoiceCapture,
     stopVoiceCapture,
     bargeIn,
@@ -30,6 +49,7 @@ export const App: React.FC = () => {
     setInputMode,
   } = useFridayStore();
 
+  const [windowLabel, setWindowLabel] = useState<string>(() => getTauriWindowLabel());
   const [showShowcase, setShowShowcase] = useState<boolean>(false);
   const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
 
@@ -39,8 +59,13 @@ export const App: React.FC = () => {
       if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
         import("@tauri-apps/api/webviewWindow").then(({ getCurrentWebviewWindow }) => {
           const win = getCurrentWebviewWindow();
-          if (win.label === "console") {
-            setActiveSurface("console");
+          if (win?.label) {
+            setWindowLabel(win.label);
+            if (win.label === "console") {
+              setActiveSurface("console");
+            } else if (win.label === "main") {
+              setActiveSurface("bar");
+            }
           }
         });
       }
@@ -84,10 +109,9 @@ export const App: React.FC = () => {
       import("@tauri-apps/api/event").then(({ listen }) => {
         listen<string>("global-shortcut-alt-space", (event) => {
           if (event.payload === "pressed") {
-            if (activeSurface === "console") {
-              setActiveSurface("bar");
-            }
-            if (orbState === "idle" || orbState === "speaking") {
+            if (orbState === "listening") {
+              stopVoiceCapture();
+            } else {
               startVoiceCapture();
             }
           } else if (event.payload === "released") {
@@ -98,7 +122,12 @@ export const App: React.FC = () => {
         }).then((un) => unlisten.push(un));
 
         listen<string>("global-shortcut-console", () => {
-          setActiveSurface(activeSurface === "bar" ? "console" : "bar");
+          if (windowLabel === "console") {
+            invokeCommand("hide_console").catch(() => {});
+            invokeCommand("show_bar").catch(() => {});
+          } else {
+            invokeCommand("show_console").catch(() => {});
+          }
         }).then((un) => unlisten.push(un));
 
         listen<string>("global-shortcut-dictation", () => {
@@ -116,7 +145,7 @@ export const App: React.FC = () => {
     return () => {
       unlisten.forEach((fn) => fn());
     };
-  }, [activeSurface, orbState, inputMode, setActiveSurface, setActiveConsoleTab, setInputMode, startVoiceCapture, stopVoiceCapture]);
+  }, [windowLabel, orbState, inputMode, setActiveConsoleTab, setInputMode, startVoiceCapture, stopVoiceCapture]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -125,6 +154,13 @@ export const App: React.FC = () => {
         e.preventDefault();
         bargeIn();
         alert("PANIC KILL SWITCH TRIGGERED: Mic released, turns cancelled, automations paused.");
+        return;
+      }
+
+      // Command Palette Toggle: Ctrl+K / Cmd+K (window-level)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen(!paletteOpen);
         return;
       }
 
@@ -138,7 +174,12 @@ export const App: React.FC = () => {
       // Toggle Console: Alt+Shift+Space
       if (e.altKey && e.shiftKey && e.code === "Space") {
         e.preventDefault();
-        setActiveSurface(activeSurface === "bar" ? "console" : "bar");
+        if (windowLabel === "console") {
+          invokeCommand("hide_console").catch(() => {});
+          invokeCommand("show_bar").catch(() => {});
+        } else {
+          invokeCommand("show_console").catch(() => {});
+        }
         return;
       }
 
@@ -149,14 +190,13 @@ export const App: React.FC = () => {
         return;
       }
 
-      // Summon / Voice Push-To-Talk: Alt+Space hold
+      // Summon / Voice Push-To-Talk: Alt+Space hold / toggle
       if (e.altKey && !e.shiftKey && (e.code === "Space" || e.key === " ")) {
         e.preventDefault();
         e.stopPropagation();
-        if (activeSurface === "console") {
-          setActiveSurface("bar");
-        }
-        if (orbState === "idle" || orbState === "speaking") {
+        if (orbState === "listening") {
+          stopVoiceCapture();
+        } else {
           startVoiceCapture();
         }
         return;
@@ -172,7 +212,7 @@ export const App: React.FC = () => {
     };
 
     const handleContextMenu = (e: MouseEvent) => {
-      if (activeSurface === "bar") {
+      if (windowLabel === "main" || activeSurface === "bar") {
         e.preventDefault();
       }
     };
@@ -185,29 +225,21 @@ export const App: React.FC = () => {
       window.removeEventListener("keyup", handleKeyUp, { capture: true });
       window.removeEventListener("contextmenu", handleContextMenu);
     };
-  }, [activeSurface, setActiveSurface, orbState, setOrbState, inputMode, setInputMode, startVoiceCapture, stopVoiceCapture, bargeIn]);
+  }, [windowLabel, activeSurface, paletteOpen, setPaletteOpen, orbState, inputMode, setInputMode, startVoiceCapture, stopVoiceCapture, bargeIn]);
+
+  const isConsoleWindow =
+    windowLabel === "console" || (windowLabel === "browser" && activeSurface === "console");
 
   return (
     <div
       className={`relative w-full h-full overflow-hidden font-sans ${
-        activeSurface === "bar" ? "bg-transparent" : "bg-[var(--color-void)]"
+        isConsoleWindow ? "bg-[var(--color-void)]" : "bg-transparent"
       }`}
     >
-      {/* Magic UI Ambient Particles Backdrop - Console surface only */}
-      {activeSurface === "console" && (
-        <Particles quantity={30} size={1.4} color="#8b949e" />
-      )}
-
-      {/* Surface 1: The Floating Bar (Transparent background, centered) */}
-      {activeSurface === "bar" && (
-        <div className="w-full h-full flex flex-col items-center justify-start bg-transparent select-none">
-          <Bar />
-        </div>
-      )}
-
-      {/* Surface 3: The Console Surface */}
-      {activeSurface === "console" && (
+      {/* Console Window Surface (1200x800 native desktop workbench) */}
+      {isConsoleWindow ? (
         <>
+          <Particles quantity={30} size={1.4} color="#8b949e" />
           <Console />
           <Palette />
           <OnboardingModal
@@ -234,6 +266,11 @@ export const App: React.FC = () => {
             }}
           />
         </>
+      ) : (
+        /* Floating Bar Surface (720x64 transparent desktop dock, expands on palette / plan / settings) */
+        <div className="w-full h-full flex flex-col items-center justify-start bg-transparent select-none">
+          <Bar />
+        </div>
       )}
     </div>
   );

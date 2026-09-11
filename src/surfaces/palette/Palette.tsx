@@ -30,9 +30,10 @@ interface PaletteCommand {
 
 interface PaletteProps {
   docked?: boolean;
+  onOpenSettings?: () => void;
 }
 
-export const Palette: React.FC<PaletteProps> = ({ docked = false }) => {
+export const Palette: React.FC<PaletteProps> = ({ docked = false, onOpenSettings }) => {
   const {
     paletteOpen,
     setPaletteOpen,
@@ -173,8 +174,12 @@ export const Palette: React.FC<PaletteProps> = ({ docked = false }) => {
       tier: "Green",
       icon: <Settings className="w-4 h-4 text-[var(--color-text)]" />,
       action: () => {
-        openConsoleTab("settings");
-        setPaletteOpen(false);
+        if (onOpenSettings) {
+          onOpenSettings();
+        } else {
+          openConsoleTab("settings");
+          setPaletteOpen(false);
+        }
       },
     },
   ];
