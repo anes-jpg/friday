@@ -15,6 +15,81 @@ import {
   GlmSettings,
 } from "./bindings";
 
+let activeUtterance: SpeechSynthesisUtterance | null = null;
+
+export function stopNativeVoice() {
+  if (typeof window !== "undefined" && "speechSynthesis" in window) {
+    try {
+      window.speechSynthesis.cancel();
+      activeUtterance = null;
+    } catch {
+      // ignore
+    }
+  }
+}
+
+export function speakWithNativeVoice(text: string, onEnd?: () => void) {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+    if (onEnd) onEnd();
+    return;
+  }
+  const clean = text.trim();
+  if (!clean) {
+    if (onEnd) onEnd();
+    return;
+  }
+
+  try {
+    stopNativeVoice();
+
+    const utterance = new SpeechSynthesisUtterance(clean);
+    activeUtterance = utterance;
+
+    // Pick best natural voice available on Windows
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice =
+      voices.find(
+        (v) =>
+          v.name.includes("Natural") ||
+          v.name.includes("Jenny") ||
+          v.name.includes("Zira") ||
+          (v.lang.startsWith("en") && !v.name.includes("Desktop") && v.localService) ||
+          v.name.includes("David")
+      ) || voices.find((v) => v.lang.startsWith("en"));
+
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+    }
+    utterance.rate = 1.05;
+    utterance.pitch = 1.0;
+
+    let ended = false;
+    const finish = () => {
+      if (ended) return;
+      ended = true;
+      activeUtterance = null;
+      useFridayStore.getState().setOrbState("idle");
+      if (onEnd) onEnd();
+    };
+
+    utterance.onend = finish;
+    utterance.onerror = finish;
+
+    window.speechSynthesis.speak(utterance);
+
+    // Fallback timer in case onend doesn't fire
+    const wordCount = clean.split(/\s+/).length;
+    const estimatedDurationMs = Math.max(1500, (wordCount / 2.5) * 1000);
+    setTimeout(() => {
+      if (activeUtterance === utterance) {
+        finish();
+      }
+    }, estimatedDurationMs + 1000);
+  } catch {
+    if (onEnd) onEnd();
+  }
+}
+
 interface FridayState {
   activeSurface: "bar" | "console";
   paletteOpen: boolean;
@@ -302,6 +377,7 @@ export const useFridayStore = create<FridayState>((set, get) => ({
   },
 
   bargeIn: async () => {
+    stopNativeVoice();
     try {
       await invokeCommand("barge_in");
     } catch {
@@ -385,9 +461,9 @@ export const useFridayStore = create<FridayState>((set, get) => ({
           orbState: "speaking",
         });
 
-        setTimeout(() => {
+        speakWithNativeVoice(backendRes.say, () => {
           set({ orbState: "idle" });
-        }, 1800);
+        });
         return;
       }
     } catch {
@@ -397,28 +473,39 @@ export const useFridayStore = create<FridayState>((set, get) => ({
     const lower = text.toLowerCase();
 
     // Check if it's a file write / rename mutation (triggers Amber / Red preview)
-    if (
-      lower.includes("rename") ||
-      lower.includes("move") ||
-      lower.includes("clean") ||
-      lower.includes("write") ||
-      lower.includes("delete") ||
-      lower.includes("drop")
-    ) {
+    const isFileMutation =
+      (lower.includes("rename") ||
+        lower.includes("move") ||
+        lower.startsWith("delete") ||
+        lower.includes("delete file") ||
+        lower.includes("delete folder") ||
+        lower.includes("delete screenshot") ||
+        lower.includes("format drive") ||
+        lower.startsWith("clean desktop")) &&
+      (lower.includes("screenshot") ||
+        lower.includes("file") ||
+        lower.includes("folder") ||
+        lower.includes("directory") ||
+        lower.includes("desktop") ||
+        lower.includes("drive") ||
+        lower.includes("asset"));
+
+    if (isFileMutation) {
+      const isRed = lower.includes("delete") || lower.includes("drop") || lower.includes("format");
       const plan: PendingPlan = {
         id: `plan-${Date.now()}`,
         heard: text,
-        tier: lower.includes("delete") || lower.includes("drop") ? "Red" : "Amber",
+        tier: isRed ? "Red" : "Amber",
         status: "awaiting_confirm",
         filename: "Desktop/Screenshots/2026-09-10_Capture.png",
         diff: `--- a/Desktop/Screenshots/Screen_Shot_001.png\n+++ b/Desktop/Assets/2026-09-10_Design_Review.png\n@@ -1 +1 @@\n-Unsorted capture from session\n+Tagged as Assets: 2026-09-10_Design_Review`,
         steps: [
-          { description: "Inspect 12 matching screenshots on Desktop", tier: "Green" },
-          { description: "Rename screenshots using ISO timestamps", tier: "Amber" },
-          { description: "Move files into Assets directory", tier: "Amber" },
+          { description: "Inspect matching files on Desktop", tier: "Green" },
+          { description: "Rename files using ISO timestamps", tier: "Amber" },
+          { description: "Move files into Assets directory", tier: isRed ? "Red" : "Amber" },
         ],
         currentStepIndex: 0,
-        resultSummary: "Prepared 12 file moves. Ready for confirmation.",
+        resultSummary: "Prepared file plan. Ready for confirmation.",
         undoable: true,
       };
 
@@ -426,7 +513,7 @@ export const useFridayStore = create<FridayState>((set, get) => ({
       return;
     }
 
-    // Otherwise standard assistant turn
+    // Otherwise standard assistant turn (Dev / Browser preview fallback)
     await new Promise((r) => setTimeout(r, 600));
 
     const userMsg: ChatMessage = {
@@ -436,15 +523,21 @@ export const useFridayStore = create<FridayState>((set, get) => ({
       timestamp: Date.now(),
     };
 
+    const isQuestion = text.includes("?") || lower.startsWith("what") || lower.startsWith("how") || lower.startsWith("why") || lower.startsWith("who");
+    const simulatedSay = isQuestion
+      ? "Evaluated your query. Live response requires the Tauri desktop environment with GLM."
+      : "Understood. The instruction has been noted.";
+    const simulatedShow = `### Evaluation Note\nQuery: **"${text}"**\n- Running in browser preview mode without native desktop IPC.\n- In the desktop application, this turn executes through the live GLM-4 reasoning engine.`;
+
     const assistantMsg: ChatMessage = {
       id: `msg-${Date.now() + 1}`,
       role: "assistant",
-      say: "Processed your request. Everything is updated on screen.",
-      show: `### Result\nExecuted instruction: **"${text}"**\n- Evaluated in 14ms via local router\n- Completed with 0 warnings`,
+      say: simulatedSay,
+      show: simulatedShow,
       timestamp: Date.now() + 100,
-      latency_ms: 1350,
-      ttft_ms: 610,
-      tokens: 184,
+      latency_ms: 450,
+      ttft_ms: 220,
+      tokens: 85,
     };
 
     const threadId = get().activeThreadId;
@@ -458,9 +551,9 @@ export const useFridayStore = create<FridayState>((set, get) => ({
       orbState: "speaking",
     });
 
-    setTimeout(() => {
+    speakWithNativeVoice(simulatedSay, () => {
       set({ orbState: "idle" });
-    }, 1800);
+    });
   },
 
   confirmPendingPlan: async () => {

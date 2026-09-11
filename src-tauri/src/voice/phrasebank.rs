@@ -69,31 +69,32 @@ impl PhraseBank {
     pub fn generate_cue_samples(&self) -> Vec<f32> {
         let variant = self.cue_counter.fetch_add(1, Ordering::Relaxed) % 3;
         let sample_rate = 16000;
-        let duration_secs = 0.12; // 120ms (< 150ms budget)
+        let duration_secs = 0.11; // 110ms (< 150ms budget, satisfies duration_ms >= 100)
         let total_samples = (sample_rate as f32 * duration_secs) as usize;
         let mut samples = Vec::with_capacity(total_samples);
 
         for i in 0..total_samples {
             let t = i as f32 / sample_rate as f32;
-            // Smooth Tukey/Hanning envelope to eliminate any clicks
-            let envelope = (std::f32::consts::PI * t / duration_secs).sin();
+            let decay = (-t * 30.0).exp();
+            let envelope = (std::f32::consts::PI * t / duration_secs).sin() * decay;
 
             let sample = match variant {
                 0 => {
-                    // Soft warm tick: 440Hz decaying fast
-                    let tone = (2.0 * std::f32::consts::PI * 440.0 * t).sin();
-                    tone * envelope * 0.15
+                    // Soft warm chord: 440Hz + 880Hz harmonic
+                    let tone = (2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.7
+                        + (2.0 * std::f32::consts::PI * 880.0 * t).sin() * 0.3;
+                    tone * envelope * 0.04
                 }
                 1 => {
                     // Dual tone chime: 520Hz + 660Hz
                     let t1 = (2.0 * std::f32::consts::PI * 520.0 * t).sin();
                     let t2 = (2.0 * std::f32::consts::PI * 660.0 * t).sin();
-                    (t1 + t2) * 0.5 * envelope * 0.12
+                    (t1 + t2) * 0.5 * envelope * 0.035
                 }
                 _ => {
-                    // Subtle low frequency resonance: 320Hz
-                    let tone = (2.0 * std::f32::consts::PI * 320.0 * t).sin();
-                    tone * envelope * 0.18
+                    // Subtle low frequency resonance: 330Hz
+                    let tone = (2.0 * std::f32::consts::PI * 330.0 * t).sin();
+                    tone * envelope * 0.04
                 }
             };
 
@@ -239,14 +240,11 @@ impl PhraseBank {
             return;
         }
 
-        // Try pre-recorded asset first, fallback to acoustic formant synthesis
-        let samples = self
-            .load_phrase_wav(clean_text)
-            .unwrap_or_else(|| self.generate_speech_samples(clean_text));
-
-        if samples.is_empty() {
-            return;
-        }
+        // Only play pre-recorded WAV assets over rodio; actual speech is handled by native TTS
+        let samples = match self.load_phrase_wav(clean_text) {
+            Some(s) => s,
+            None => return,
+        };
 
         self.is_speaking.store(true, Ordering::SeqCst);
         let is_speaking = self.is_speaking.clone();

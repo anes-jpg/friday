@@ -29,7 +29,7 @@ pub struct ToolExecutionResult {
 }
 
 #[cfg(target_os = "windows")]
-mod win32 {
+pub(crate) mod win32 {
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
 

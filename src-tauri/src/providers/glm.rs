@@ -42,6 +42,7 @@ struct ToolCallAccumulator {
     arguments_buffer: String,
 }
 
+#[derive(Clone)]
 pub struct GlmProvider {
     pub config: GlmConfig,
     pub http: reqwest::Client,
@@ -56,6 +57,19 @@ impl GlmProvider {
             .unwrap_or_default();
 
         Self { config, http }
+    }
+
+    /// Retrieve effective API key from config, env vars (GLM_API_KEY, ZHIPU_API_KEY), or Windows Credential Manager
+    pub fn get_effective_api_key(&self) -> String {
+        if !self.config.api_key.trim().is_empty() {
+            self.config.api_key.trim().to_string()
+        } else if let Ok(k) = std::env::var("GLM_API_KEY") {
+            k.trim().to_string()
+        } else if let Ok(k) = std::env::var("ZHIPU_API_KEY") {
+            k.trim().to_string()
+        } else {
+            Self::get_key_from_keyring().unwrap_or_default().trim().to_string()
+        }
     }
 
     /// Retrieve API key from Windows Credential Manager (§08 Security Model)
@@ -112,12 +126,7 @@ impl GlmProvider {
     where
         F: FnMut(StreamDelta),
     {
-        // Try to obtain the key from keyring if not supplied in config
-        let api_key = if !self.config.api_key.is_empty() {
-            self.config.api_key.clone()
-        } else {
-            Self::get_key_from_keyring().unwrap_or_default()
-        };
+        let api_key = self.get_effective_api_key();
 
         if api_key.is_empty() {
             return Err("GLM API Key not found. Please set your key in Settings or Windows Credential Manager.".to_string());
