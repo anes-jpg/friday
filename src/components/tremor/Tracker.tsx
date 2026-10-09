@@ -1,77 +1,99 @@
-// Tremor Tracker [v0.1.3] adapted for FRIDAY latency & telemetry monitoring
-import React from "react";
-import * as HoverCardPrimitives from "@radix-ui/react-hover-card";
-import { cx } from "@/lib/utils";
+import React from "react"
+import { cn } from "@/lib/utils"
+import {
+  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
+} from "@/components/ui/tooltip"
 
-export interface TrackerBlockProps {
-  key?: string | number;
-  color?: string;
-  tooltip?: string;
-  hoverEffect?: boolean;
-  defaultBackgroundColor?: string;
+export type SegmentTone = "idle" | "active" | "success" | "warning" | "danger"
+
+export type TrackerSegment = {
+  id: string
+  label: string
+  tone: SegmentTone
 }
 
-const Block = ({
-  color,
-  tooltip,
-  defaultBackgroundColor = "bg-[var(--color-edge)]",
-  hoverEffect = true,
-}: TrackerBlockProps) => {
-  const [open, setOpen] = React.useState(false);
+const toneClass: Record<SegmentTone, string> = {
+  idle: "bg-white/15",
+  active: "bg-[hsl(var(--signal))]",
+  success: "bg-[hsl(var(--signal))]",
+  warning: "bg-[hsl(var(--warning))]",
+  danger: "bg-[hsl(var(--danger))]",
+}
+
+export function SegmentedTracker({
+  segments,
+  label,
+  className,
+}: {
+  segments: TrackerSegment[]
+  label: string
+  className?: string
+}) {
   return (
-    <HoverCardPrimitives.Root
-      open={open}
-      onOpenChange={setOpen}
-      openDelay={0}
-      closeDelay={0}
-    >
-      <HoverCardPrimitives.Trigger onClick={() => setOpen(true)} asChild>
-        <div className="size-full overflow-hidden px-[1px] transition first:rounded-l-[4px] first:pl-0 last:rounded-r-[4px] last:pr-0 cursor-pointer">
-          <div
-            className={cx(
-              "h-3.5 w-full rounded-[2px]",
-              color || defaultBackgroundColor,
-              hoverEffect ? "hover:brightness-125 hover:scale-105 transition-all" : ""
-            )}
-          />
-        </div>
-      </HoverCardPrimitives.Trigger>
-      <HoverCardPrimitives.Portal>
-        <HoverCardPrimitives.Content
-          sideOffset={8}
-          side="top"
-          align="center"
-          avoidCollisions
-          className={cx(
-            "w-auto rounded-[var(--radius-control)] px-2.5 py-1 text-xs shadow-xl font-mono",
-            "text-[var(--color-text)] bg-[var(--color-plate)] border border-[var(--color-edge)] z-50 animate-in fade-in zoom-in-95"
-          )}
-        >
-          {tooltip}
-        </HoverCardPrimitives.Content>
-      </HoverCardPrimitives.Portal>
-    </HoverCardPrimitives.Root>
-  );
-};
+    <TooltipProvider delayDuration={250}>
+      <div
+        role="img"
+        aria-label={label}
+        className={cn("flex h-5 w-full items-center gap-[3px]", className)}
+      >
+        {segments.map((segment) => (
+          <Tooltip key={segment.id}>
+            <TooltipTrigger asChild>
+              <span
+                className={cn(
+                  "h-[10px] min-w-1 flex-1 rounded-[1px] transition-opacity duration-150 hover:opacity-65",
+                  toneClass[segment.tone],
+                )}
+              />
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={8}>
+              {segment.label}
+            </TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
+    </TooltipProvider>
+  )
+}
+
+// Backward-compatible Tracker wrapper for StatusMonitoring
+export interface TrackerBlockProps {
+  key?: string | number
+  color?: string
+  tooltip?: string
+  hoverEffect?: boolean
+  defaultBackgroundColor?: string
+}
 
 export interface TrackerProps extends React.HTMLAttributes<HTMLDivElement> {
-  data: TrackerBlockProps[];
+  data: TrackerBlockProps[]
 }
 
 export const Tracker = React.forwardRef<HTMLDivElement, TrackerProps>(
-  ({ data = [], className, ...props }, ref) => {
-    return (
-      <div
-        ref={ref}
-        className={cx("flex h-6 items-center justify-between w-full select-none", className)}
-        {...props}
-      >
-        {data.map((props, index) => (
-          <Block key={props.key ?? index} {...props} />
-        ))}
-      </div>
-    );
-  }
-);
+  ({ data, className, ...props }, ref) => {
+    const segments: TrackerSegment[] = data.map((d, i) => {
+      let tone: SegmentTone = "idle"
+      if (d.color?.includes("acid") || d.color?.includes("cyan") || d.color?.includes("signal")) {
+        tone = "active"
+      } else if (d.color?.includes("emerald") || d.color?.includes("green")) {
+        tone = "success"
+      } else if (d.color?.includes("warn") || d.color?.includes("amber")) {
+        tone = "warning"
+      } else if (d.color?.includes("fail") || d.color?.includes("red")) {
+        tone = "danger"
+      }
+      return {
+        id: String(d.key ?? i),
+        label: d.tooltip || `Segment ${i + 1}`,
+        tone,
+      }
+    })
 
-Tracker.displayName = "TremorTracker";
+    return (
+      <div ref={ref} {...props}>
+        <SegmentedTracker segments={segments} label="Status Tracker" className={className} />
+      </div>
+    )
+  }
+)
+Tracker.displayName = "Tracker"

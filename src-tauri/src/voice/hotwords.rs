@@ -79,7 +79,11 @@ impl HotwordsEngine {
 
     /// Add a hotword with a boost score
     pub fn register_hotword(&mut self, phrase: &str, boost_score: f32) {
-        if !self.hotwords.iter().any(|h| h.phrase.eq_ignore_ascii_case(phrase)) {
+        if !self
+            .hotwords
+            .iter()
+            .any(|h| h.phrase.eq_ignore_ascii_case(phrase))
+        {
             self.hotwords.push(HotwordEntry {
                 phrase: phrase.to_string(),
                 boost_score,
@@ -89,7 +93,8 @@ impl HotwordsEngine {
 
     /// Add a post-decode correction mapping
     pub fn register_correction(&mut self, mishearing: &str, correction: &str) {
-        self.corrections.insert(mishearing.to_lowercase(), correction.to_string());
+        self.corrections
+            .insert(mishearing.to_lowercase(), correction.to_string());
     }
 
     /// Learn from an inline transcript edit (§04: "A per-user correction dictionary learns from every inline transcript edit")
@@ -109,7 +114,13 @@ impl HotwordsEngine {
             for word in fact.split_whitespace() {
                 let clean = word.trim_matches(|c: char| !c.is_alphanumeric());
                 // Boost capitalized domain entities of length >= 3
-                if clean.len() >= 3 && clean.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                if clean.len() >= 3
+                    && clean
+                        .chars()
+                        .next()
+                        .map(|c| c.is_uppercase())
+                        .unwrap_or(false)
+                {
                     self.register_hotword(clean, 2.0);
                 }
             }

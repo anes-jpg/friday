@@ -162,85 +162,59 @@ impl Database {
                 enabled INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_models (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                base_url TEXT NOT NULL,
+                api_key TEXT,
+                capabilities TEXT NOT NULL,
+                status TEXT NOT NULL,
+                priority INTEGER NOT NULL,
+                is_active INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS model_telemetry (
+                model_id TEXT PRIMARY KEY,
+                availability_pct REAL NOT NULL,
+                ttft_p90_ms INTEGER NOT NULL,
+                avg_latency_ms INTEGER NOT NULL,
+                tracker_history TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id);
             CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_log(created_at);
+            CREATE INDEX IF NOT EXISTS idx_models_active ON ai_models(is_active);
             "#,
         )?;
         Ok(())
     }
 
     fn seed_defaults_if_empty(&self) -> Result<()> {
-        let thread_count: i64 = self
+        let skill_count: i64 = self
             .conn
-            .query_row("SELECT COUNT(*) FROM threads", [], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM skills", [], |r| r.get(0))
             .unwrap_or(0);
 
-        if thread_count == 0 {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64;
-
-            self.insert_thread(&DbThread {
-                id: "thread-1".to_string(),
-                title: "Active Desktop Session".to_string(),
-                created_at: now - 3600,
-                updated_at: now,
-            })?;
-
-            self.insert_thread(&DbThread {
-                id: "thread-2".to_string(),
-                title: "AN STUDIO Design Brief Sync".to_string(),
-                created_at: now - 86400,
-                updated_at: now - 82000,
-            })?;
-
-            self.insert_fact(&DbFact {
-                id: "fact-1".to_string(),
-                content: "Kwame prefers WhatsApp over email for fast coordination".to_string(),
-                confidence: 0.96,
-                source_message_id: Some("msg-1".to_string()),
-                created_at: now - 3600,
-            })?;
-
-            self.insert_fact(&DbFact {
-                id: "fact-2".to_string(),
-                content: "Desktop screenshots should be archived into Assets after review".to_string(),
-                confidence: 0.94,
-                source_message_id: None,
-                created_at: now - 1800,
-            })?;
-
-            self.insert_automation(&DbAutomation {
-                id: "auto-1".to_string(),
-                name: "Daily Standup Digest".to_string(),
-                trigger_type: "cron".to_string(),
-                trigger_expr: "0 45 8 * * MON-FRI".to_string(),
-                action_tool: "standup.generate".to_string(),
-                action_args: "{}".to_string(),
-                enabled: true,
-                last_run: Some(now - 86400),
-                next_run: Some(now + 36000),
-            })?;
-
-            self.insert_automation(&DbAutomation {
-                id: "auto-2".to_string(),
-                name: "Desktop Screenshot Auto-Tag".to_string(),
-                trigger_type: "event".to_string(),
-                trigger_expr: "fs.watch:Desktop/Screenshots".to_string(),
-                action_tool: "fs.move".to_string(),
-                action_args: "{\"target\": \"Desktop/Assets\"}".to_string(),
-                enabled: true,
-                last_run: Some(now - 14400),
-                next_run: None,
-            })?;
-
+        if skill_count == 0 {
             self.insert_skill(&DbSkill {
                 id: "standup-digest".to_string(),
                 name: "Standup Digest".to_string(),
                 version: "1.0.0".to_string(),
-                description: "Summarize yesterday's commits and task changes into a clean standup note.".to_string(),
-                permissions: vec!["notion.read".to_string(), "web.fetch:api.github.com".to_string(), "notify.toast".to_string()],
+                description:
+                    "Summarize yesterday's commits and task changes into a clean standup note."
+                        .to_string(),
+                permissions: vec![
+                    "notion.read".to_string(),
+                    "web.fetch:api.github.com".to_string(),
+                    "notify.toast".to_string(),
+                ],
                 enabled: true,
             })?;
 
@@ -248,20 +222,288 @@ impl Database {
                 id: "notion-operator".to_string(),
                 name: "Notion Workspace Bridge".to_string(),
                 version: "1.2.0".to_string(),
-                description: "Direct bi-directional search and task mutations across AN STUDIO Notion pages.".to_string(),
+                description:
+                    "Direct bi-directional search and task mutations across AN STUDIO Notion pages."
+                        .to_string(),
                 permissions: vec!["notion.read".to_string(), "notion.write".to_string()],
                 enabled: true,
             })?;
         }
 
+        let auto_count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM automations", [], |r| r.get(0))
+            .unwrap_or(0);
+
+        if auto_count == 0 {
+            self.insert_automation(&DbAutomation {
+                id: "auto-1".to_string(),
+                name: "Morning brief".to_string(),
+                trigger_type: "cron".to_string(),
+                trigger_expr: "0 9 * * 1-5".to_string(),
+                action_tool: "notify.toast".to_string(),
+                action_args:
+                    r#"{"title":"Morning brief","body":"Check calendar and unread emails"}"#
+                        .to_string(),
+                enabled: true,
+                last_run: None,
+                next_run: None,
+            })?;
+
+            self.insert_automation(&DbAutomation {
+                id: "auto-2".to_string(),
+                name: "Archive downloads older than 30 days".to_string(),
+                trigger_type: "cron".to_string(),
+                trigger_expr: "0 0 * * 0".to_string(),
+                action_tool: "fs.archive".to_string(),
+                action_args: r#"{"path":"~/Downloads","days":30}"#.to_string(),
+                enabled: true,
+                last_run: None,
+                next_run: None,
+            })?;
+        }
+
+        let fact_count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM facts", [], |r| r.get(0))
+            .unwrap_or(0);
+
+        if fact_count == 0 {
+            self.insert_fact(&DbFact {
+                id: "fact-init-1".to_string(),
+                content: "Kwame prefers WhatsApp over email".to_string(),
+                confidence: 0.95,
+                source_message_id: None,
+                created_at: 1000,
+            })?;
+        }
+
+        let model_count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM ai_models", [], |r| r.get(0))
+            .unwrap_or(0);
+
+        if model_count == 0 {
+            for model in crate::providers::models::get_default_models_fleet() {
+                let _ = self.save_ai_model(&model);
+            }
+        } else {
+            // Synchronize with user's Agent Router fleet:
+            // gpt-6-astra is Normal and ACTIVE
+            // glm-5.3, claude-fable-5, gpt-5.6-sol have No traffic
+            let _ = self.conn.execute(
+                "UPDATE ai_models SET status = 'No traffic', is_active = 0 WHERE id IN ('glm-5.3', 'claude-fable-5', 'gpt-5.6-sol')",
+                [],
+            );
+            let _ = self.conn.execute(
+                "UPDATE ai_models SET status = 'Normal', is_active = 1 WHERE id = 'gpt-6-astra'",
+                [],
+            );
+            let _ = self.conn.execute(
+                "UPDATE ai_models SET status = 'Demote' WHERE id IN ('deepseek-v4-flash', 'claude-opus-5', 'claude-opus-4-8')",
+                [],
+            );
+            let _ = self.conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('glm_heavy_model', 'gpt-6-astra')",
+                [],
+            );
+            let _ = self.conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('glm_light_model', 'deepseek-v4-flash')",
+                [],
+            );
+            let _ = self.conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('glm_base_url', 'https://agentrouter.org/v1')",
+                [],
+            );
+        }
+
+        Ok(())
+    }
+
+    // --- AI Model Operations ---
+    pub fn get_all_ai_models(&self) -> Result<Vec<crate::providers::models::AiModel>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, provider, base_url, api_key, capabilities, status, priority, is_active FROM ai_models ORDER BY priority ASC"
+        )?;
+
+        let model_rows = stmt.query_map([], |row| {
+            let id: String = row.get(0)?;
+            let name: String = row.get(1)?;
+            let provider: String = row.get(2)?;
+            let base_url: String = row.get(3)?;
+            let api_key: Option<String> = row.get(4)?;
+            let caps_str: String = row.get(5)?;
+            let status_str: String = row.get(6)?;
+            let priority: u32 = row.get(7)?;
+            let is_active_int: i64 = row.get(8)?;
+
+            let capabilities: Vec<String> = serde_json::from_str(&caps_str).unwrap_or_default();
+            let status = crate::providers::models::ModelStatus::from_str(&status_str);
+
+            Ok((
+                id,
+                name,
+                provider,
+                base_url,
+                api_key,
+                capabilities,
+                status,
+                priority,
+                is_active_int != 0,
+            ))
+        })?;
+
+        let mut models = Vec::new();
+        for res in model_rows {
+            let (id, name, provider, base_url, api_key, capabilities, status, priority, is_active) =
+                res?;
+
+            let telemetry = self.get_model_telemetry(&id).unwrap_or_else(|_| {
+                crate::providers::models::ModelTelemetry {
+                    availability_pct: 0.0,
+                    ttft_p90_ms: 0,
+                    avg_latency_ms: 0,
+                    tracker_history: Vec::new(),
+                }
+            });
+
+            models.push(crate::providers::models::AiModel {
+                id,
+                name,
+                provider,
+                base_url,
+                api_key,
+                capabilities,
+                status,
+                priority,
+                is_active,
+                telemetry,
+            });
+        }
+
+        Ok(models)
+    }
+
+    pub fn get_model_telemetry(
+        &self,
+        model_id: &str,
+    ) -> Result<crate::providers::models::ModelTelemetry> {
+        self.conn.query_row(
+            "SELECT availability_pct, ttft_p90_ms, avg_latency_ms, tracker_history FROM model_telemetry WHERE model_id = ?1",
+            params![model_id],
+            |row| {
+                let availability_pct: f64 = row.get(0)?;
+                let ttft_p90_ms: i64 = row.get(1)?;
+                let avg_latency_ms: i64 = row.get(2)?;
+                let history_str: String = row.get(3)?;
+                let tracker_history = serde_json::from_str(&history_str).unwrap_or_default();
+
+                Ok(crate::providers::models::ModelTelemetry {
+                    availability_pct,
+                    ttft_p90_ms: ttft_p90_ms as u64,
+                    avg_latency_ms: avg_latency_ms as u64,
+                    tracker_history,
+                })
+            }
+        )
+    }
+
+    pub fn save_ai_model(&self, model: &crate::providers::models::AiModel) -> Result<()> {
+        let caps_json =
+            serde_json::to_string(&model.capabilities).unwrap_or_else(|_| "[]".to_string());
+        let status_str = model.status.as_str();
+
+        self.conn.execute(
+            r#"
+            INSERT INTO ai_models (id, name, provider, base_url, api_key, capabilities, status, priority, is_active)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                provider = excluded.provider,
+                base_url = excluded.base_url,
+                api_key = excluded.api_key,
+                capabilities = excluded.capabilities,
+                status = excluded.status,
+                priority = excluded.priority,
+                is_active = excluded.is_active
+            "#,
+            params![
+                model.id,
+                model.name,
+                model.provider,
+                model.base_url,
+                model.api_key,
+                caps_json,
+                status_str,
+                model.priority,
+                if model.is_active { 1 } else { 0 },
+            ],
+        )?;
+
+        self.update_model_telemetry(&model.id, &model.telemetry)?;
+        Ok(())
+    }
+
+    pub fn set_active_ai_model(&self, id: &str) -> Result<()> {
+        self.conn
+            .execute("UPDATE ai_models SET is_active = 0", [])?;
+        self.conn.execute(
+            "UPDATE ai_models SET is_active = 1 WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_ai_model(&self, id: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM model_telemetry WHERE model_id = ?1",
+            params![id],
+        )?;
+        self.conn
+            .execute("DELETE FROM ai_models WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn update_model_telemetry(
+        &self,
+        model_id: &str,
+        telemetry: &crate::providers::models::ModelTelemetry,
+    ) -> Result<()> {
+        let history_json =
+            serde_json::to_string(&telemetry.tracker_history).unwrap_or_else(|_| "[]".to_string());
+        let now_sec = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+
+        self.conn.execute(
+            r#"
+            INSERT INTO model_telemetry (model_id, availability_pct, ttft_p90_ms, avg_latency_ms, tracker_history, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(model_id) DO UPDATE SET
+                availability_pct = excluded.availability_pct,
+                ttft_p90_ms = excluded.ttft_p90_ms,
+                avg_latency_ms = excluded.avg_latency_ms,
+                tracker_history = excluded.tracker_history,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                model_id,
+                telemetry.availability_pct,
+                telemetry.ttft_p90_ms as i64,
+                telemetry.avg_latency_ms as i64,
+                history_json,
+                now_sec,
+            ],
+        )?;
         Ok(())
     }
 
     // --- Thread Operations ---
     pub fn get_threads(&self) -> Result<Vec<DbThread>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, title, created_at, updated_at FROM threads ORDER BY updated_at DESC")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title, created_at, updated_at FROM threads ORDER BY updated_at DESC",
+        )?;
         let rows = stmt.query_map([], |row| {
             Ok(DbThread {
                 id: row.get(0)?,
@@ -287,8 +529,33 @@ impl Database {
     }
 
     pub fn delete_thread(&self, id: &str) -> Result<bool> {
-        let count = self.conn.execute("DELETE FROM threads WHERE id = ?1", params![id])?;
+        let count = self
+            .conn
+            .execute("DELETE FROM threads WHERE id = ?1", params![id])?;
         Ok(count > 0)
+    }
+
+    pub fn ensure_thread_exists(&self, thread_id: &str, title: &str) -> Result<()> {
+        let now_sec = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        self.conn.execute(
+            "INSERT OR IGNORE INTO threads (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+            params![thread_id, title, now_sec, now_sec],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_active_thread_id(&self) -> Result<String> {
+        match self.get_setting("active_thread_id")? {
+            Some(id) if !id.trim().is_empty() => Ok(id),
+            _ => Ok("thread-1".to_string()),
+        }
+    }
+
+    pub fn set_active_thread_id(&self, thread_id: &str) -> Result<()> {
+        self.save_setting("active_thread_id", thread_id)
     }
 
     // --- Message Operations ---
@@ -394,7 +661,9 @@ impl Database {
     }
 
     pub fn delete_fact(&self, id: &str) -> Result<bool> {
-        let count = self.conn.execute("DELETE FROM facts WHERE id = ?1", params![id])?;
+        let count = self
+            .conn
+            .execute("DELETE FROM facts WHERE id = ?1", params![id])?;
         Ok(count > 0)
     }
 
@@ -490,7 +759,11 @@ impl Database {
     pub fn toggle_automation(&self, id: &str) -> Result<bool> {
         let current: Option<i64> = self
             .conn
-            .query_row("SELECT enabled FROM automations WHERE id = ?1", params![id], |r| r.get(0))
+            .query_row(
+                "SELECT enabled FROM automations WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
             .ok();
 
         if let Some(en) = current {
@@ -506,7 +779,9 @@ impl Database {
     }
 
     pub fn delete_automation(&self, id: &str) -> Result<bool> {
-        let count = self.conn.execute("DELETE FROM automations WHERE id = ?1", params![id])?;
+        let count = self
+            .conn
+            .execute("DELETE FROM automations WHERE id = ?1", params![id])?;
         Ok(count > 0)
     }
 
@@ -537,7 +812,8 @@ impl Database {
     }
 
     pub fn insert_skill(&self, skill: &DbSkill) -> Result<()> {
-        let perms_json = serde_json::to_string(&skill.permissions).unwrap_or_else(|_| "[]".to_string());
+        let perms_json =
+            serde_json::to_string(&skill.permissions).unwrap_or_else(|_| "[]".to_string());
         self.conn.execute(
             "INSERT OR REPLACE INTO skills (id, name, version, description, permissions, enabled)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -556,7 +832,11 @@ impl Database {
     pub fn toggle_skill(&self, id: &str) -> Result<bool> {
         let current: Option<i64> = self
             .conn
-            .query_row("SELECT enabled FROM skills WHERE id = ?1", params![id], |r| r.get(0))
+            .query_row(
+                "SELECT enabled FROM skills WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
             .ok();
 
         if let Some(en) = current {
@@ -569,6 +849,62 @@ impl Database {
         } else {
             Ok(false)
         }
+    }
+
+    pub fn save_setting(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT value FROM settings WHERE key = ?1")?;
+        let mut rows = stmt.query(params![key])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn get_user_name(&self) -> Result<Option<String>> {
+        self.get_setting("user_name")
+    }
+
+    pub fn set_user_name(&self, name: &str) -> Result<()> {
+        let clean_name = name.trim();
+        if clean_name.is_empty() {
+            return Ok(());
+        }
+        self.save_setting("user_name", clean_name)?;
+
+        // Remove any prior conflicting user name facts and the seed placeholder if present
+        let _ = self.conn.execute(
+            "DELETE FROM facts WHERE content LIKE '%The user''s name is%' OR content LIKE '%user name is%' OR id = 'fact-init-1'",
+            [],
+        );
+
+        let now_sec = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+
+        let fact = DbFact {
+            id: format!("fact-name-{}", now_sec),
+            content: format!(
+                "The user's name is {}. Always address the user as {}.",
+                clean_name, clean_name
+            ),
+            confidence: 1.0,
+            source_message_id: Some("user-identity".to_string()),
+            created_at: now_sec,
+        };
+        self.insert_fact(&fact)?;
+        Ok(())
     }
 }
 
@@ -598,6 +934,20 @@ mod tests {
 
         let skills = db.get_skills().unwrap();
         assert!(!skills.is_empty());
+
+        // Test settings persistence
+        db.save_setting("glm_base_url", "https://agentrouter.org/")
+            .unwrap();
+        let val = db.get_setting("glm_base_url").unwrap();
+        assert_eq!(val, Some("https://agentrouter.org/".to_string()));
+
+        // Test active thread persistence and crash recovery
+        assert_eq!(db.get_active_thread_id().unwrap(), "thread-1");
+        db.ensure_thread_exists("session-42", "Project X Discussion")
+            .unwrap();
+        db.set_active_thread_id("session-42").unwrap();
+        assert_eq!(db.get_active_thread_id().unwrap(), "session-42");
+        let threads = db.get_threads().unwrap();
+        assert!(threads.iter().any(|t| t.id == "session-42"));
     }
 }
-

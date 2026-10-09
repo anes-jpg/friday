@@ -4,6 +4,7 @@ version = "1.0.0"
 description = "FRIDAY — Windows Desktop Assistant"
 authors = ["FRIDAY Team"]
 edition = "2021"
+autobins = false
 
 [lib]
 name = "friday_lib"
@@ -16,38 +17,78 @@ path = "src/main.rs"
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-autostart       = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-window-state    = "2"
 tauri-plugin-notification    = "2"
 tauri-plugin-clipboard-manager = "2"
+tauri-plugin-deep-link       = "2"
+tauri-plugin-updater         = "2"
+tauri-plugin-log             = "2"
 tauri-plugin-opener          = "2"
 
-# Native window look
-window-vibrancy = "0.5"
+# native window look
+window-vibrancy = "0.5"          # apply_mica / apply_acrylic
+windows = { version = "0.58", features = [
+  "Media_Ocr", "Graphics_Imaging", "Storage_Streams",
+  "Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging",
+  "Win32_System_Com",
+] }
+windows-capture = "1"            # Windows.Graphics.Capture screenshots
 
-# Core async, logging, and serialization
+# audio
+cpal   = "0.15"                  # mic in
+wasapi = "0.15"                  # loopback / system audio
+rodio  = "0.19"                  # TTS playback
+rubato = "0.15"                  # resample to 16 kHz
+ringbuf = "0.4"
+hound  = "3"
+
+# speech + embeddings — all local, all CPU, ONNX Runtime underneath everything
+sherpa-rs  = "0.6"               # the whole audio path
+
+# llm + net
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"] }
+eventsource-stream = "0.2"
+tiktoken-rs = "0.6"
+futures-util = "0.3"
+
+# data
+rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
+sqlite-vec = "0.1"
+refinery = "0.8"                 # migrations
+
+# platform
+keyring = "3"                    # Windows Credential Manager
+enigo   = "0.2"                  # keyboard/mouse synthesis
+notify  = "6"                    # file watch triggers
+tokio-cron-scheduler = "0.11"
+
+# core
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+schemars = "0.8"                 # derive tool JSON schemas
 thiserror = "2"
 anyhow = "1"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# LLM + Networking
-reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"] }
-eventsource-stream = "0.2"
-futures-util = "0.3"
-
-# Data storage & platform
-rusqlite = { version = "0.32", features = ["bundled"] }
-keyring = "3"
-
-# Audio Subsystem (ADR 001)
-cpal = "0.15"
-rodio = "0.19"
-ringbuf = "0.4"
-hound = "3"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+sentry = { version = "0.34", optional = true }
+git2 = "0.21.0"
+cap-std = "4.0.3"
+jsonschema = "0.58.5"
+uuid = { version = "1.27.0", features = ["v7"] }
+opentelemetry = "0.33.0"
+opentelemetry_sdk = "0.33.0"
+opentelemetry-stdout = "0.33.0"
+tracing-opentelemetry = "0.34.0"
+tree-sitter = "0.27.0"
+tree-sitter-rust = "0.24.2"
+fastembed = "7.1.0"
+ort = "2.0.0-rc.13"
+async-openai = "0.23.0"
+pmcp = "2.22.5"
+sherpa-onnx = { version = "1.13.8", path = "../vendor/sherpa-onnx/sherpa-onnx/rust/sherpa-onnx" }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

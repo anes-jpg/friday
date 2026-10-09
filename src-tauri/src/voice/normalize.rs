@@ -20,7 +20,6 @@ pub fn normalize_for_speech(raw: &str) -> String {
     text = text.replace("i7-8565U", "i seven, eighty-five sixty-five U");
     text = text.replace("15 W", "fifteen watts");
     text = text.replace("15W", "fifteen watts");
-    text = text.replace("ms", " milliseconds");
     text = text.replace("GB", " gigabytes");
     text = text.replace("MB", " megabytes");
     text = text.replace("GPU", "G P U");
@@ -29,8 +28,22 @@ pub fn normalize_for_speech(raw: &str) -> String {
     text = text.replace("TTS", "T T S");
     text = text.replace("VAD", "V A D");
     text = text.replace("KWS", "K W S");
-    text = text.replace("UI", "U I");
     text = text.replace("API", "A P I");
+
+    // Replace "ms" only when preceded by digits (e.g. "120ms") or standalone "ms"
+    let mut words_normalized = Vec::new();
+    for word in text.split_whitespace() {
+        let trimmed_punct = word.trim_end_matches(['.', ',', '!', '?', ';', ':']);
+        let punct = &word[trimmed_punct.len()..];
+        if trimmed_punct.ends_with("ms") && trimmed_punct.len() > 2 && trimmed_punct[..trimmed_punct.len() - 2].chars().all(|c| c.is_ascii_digit()) {
+            words_normalized.push(format!("{} milliseconds{}", &trimmed_punct[..trimmed_punct.len() - 2], punct));
+        } else if trimmed_punct.eq_ignore_ascii_case("ms") {
+            words_normalized.push(format!("milliseconds{}", punct));
+        } else {
+            words_normalized.push(word.to_string());
+        }
+    }
+    text = words_normalized.join(" ");
 
     // 4. Clean extra spaces and punctuation
     text = text
@@ -121,5 +134,15 @@ mod tests {
         assert!(!normalized.contains("**"));
         assert!(normalized.contains("the link"));
         assert!(normalized.contains("the file"));
+    }
+
+    #[test]
+    fn test_ms_word_preservation() {
+        let raw = "There are 64 items in the system. Latency is 120ms.";
+        let normalized = normalize_for_speech(raw);
+        assert!(normalized.contains("64 items"));
+        assert!(normalized.contains("system"));
+        assert!(!normalized.contains("ite milliseconds"));
+        assert!(normalized.contains("120 milliseconds"));
     }
 }

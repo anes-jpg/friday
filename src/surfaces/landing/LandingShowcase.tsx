@@ -15,8 +15,8 @@ import {
   X,
   Play,
 } from "lucide-react";
-import { Kbd } from "@/components/ui/Kbd";
-import { Button } from "@/components/ui/Button";
+import { Kbd } from "@/components/ui/kbd";
+import { Button } from "@/components/ui/button";
 
 interface LandingShowcaseProps {
   isOpen: boolean;
@@ -65,7 +65,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
             onClick={onLaunchBar}
             className="text-xs font-medium"
           >
-            Open Bar <Kbd className="ml-1.5">Alt+Space</Kbd>
+            Open Bar <Kbd className="ml-1.5">Alt+Shift</Kbd>
           </Button>
           <button
             onClick={onClose}
@@ -100,7 +100,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
             onClick={onLaunchBar}
             className="text-sm font-semibold px-6"
           >
-            Launch Operator <Kbd className="ml-2">Alt+Space</Kbd>
+            Launch Operator <Kbd className="ml-2">Alt+Shift</Kbd>
           </Button>
           <Button
             variant="secondary"
@@ -293,3 +293,4 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
     </div>
   );
 };
+

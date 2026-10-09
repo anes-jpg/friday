@@ -11,7 +11,7 @@ This document is non-negotiable. Every change must adhere to these laws and qual
    - Every panel is a rounded rectangle on an 8px grid (radius 16px for containers, 8px for controls).
    - Surfaces sit on Mica (Win11) or acrylic (Win10) / dark plates.
    - No gradients except the 40px reactive Orb.
-   - Single 40px ambient shadow on the floating Bar: `0 20px 40px -15px rgba(0,0,0,0.6)`.
+   - Ambient glow: Use subtle drop shadows `0 20px 40px -15px rgba(0,0,0,0.6)` on prominent dashboard cards.
 
 2. **One-Signal Law**:
    - A single accent — `--color-acid: oklch(78% 0.19 152)` — appears at most twice per viewport.
@@ -27,7 +27,7 @@ This document is non-negotiable. Every change must adhere to these laws and qual
 
 ## 2. The Voice-First Operating Rules
 
-- **Voice First**: The Bar must show the Utterance Contract on every spoken turn:
+- **Voice First**: The Dashboard must show the Utterance Contract on every spoken turn:
   1. `Heard` — Live ASR transcript, editable inline.
   2. `Plan` — Step-by-step plain language with risk color dots.
   3. `Doing` — Active step with elapsed time.

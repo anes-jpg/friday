@@ -17,3 +17,23 @@ src-tauri/target
 
 # Bundled skills and external asset catalogs
 ultimate-frontend
+ultimate-frontend.zip
+
+# Heavy neural models & weights (exceeds GitHub 100MB limit)
+models/
+*.onnx
+*.bin
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary scratch, recordings, test media, and large archive bundles
+scratch/
+scratch_extracted/
+resources/
+vendor/
+*.wav
+*.mp4
+*.zip

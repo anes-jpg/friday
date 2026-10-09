@@ -1,145 +1,199 @@
-use super::PhraseBank;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use ringbuf::traits::{Producer, Split};
-use ringbuf::HeapRb;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use serde_json::Value;
+use std::io::{BufRead, BufReader};
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex, RwLock};
+use tauri::Emitter;
+use tracing::{error, info};
 
-pub struct AudioCaptureManager {
-    is_capturing: Arc<AtomicBool>,
-    current_rms: Arc<Mutex<f32>>,
-    phrase_bank: Arc<Mutex<Option<Arc<PhraseBank>>>>,
+use crate::agent::loop_legacy::AgentCore;
+use crate::agent::machine::HarnessKernel;
+
+pub struct SherpaAudioNode {
+    _kernel: Arc<HarnessKernel>,
+    _agent: Arc<AgentCore>,
+    app_handle: Arc<RwLock<Option<tauri::AppHandle>>>,
+    active_child: Arc<Mutex<Option<Child>>>,
 }
 
-impl Default for AudioCaptureManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl AudioCaptureManager {
-    pub fn new() -> Self {
+impl SherpaAudioNode {
+    pub fn new(kernel: Arc<HarnessKernel>, agent: Arc<AgentCore>) -> Self {
         Self {
-            is_capturing: Arc::new(AtomicBool::new(false)),
-            current_rms: Arc::new(Mutex::new(0.0)),
-            phrase_bank: Arc::new(Mutex::new(None)),
+            _kernel: kernel,
+            _agent: agent,
+            app_handle: Arc::new(RwLock::new(None)),
+            active_child: Arc::new(Mutex::new(None)),
         }
     }
 
-    pub fn set_phrase_bank(&self, pb: Arc<PhraseBank>) {
-        if let Ok(mut lock) = self.phrase_bank.lock() {
-            *lock = Some(pb);
+    pub fn set_app_handle(&self, app: tauri::AppHandle) {
+        if let Ok(mut lock) = self.app_handle.write() {
+            *lock = Some(app);
         }
     }
 
-    pub fn get_current_rms(&self) -> f32 {
-        *self.current_rms.lock().unwrap_or_else(|e| e.into_inner())
+    pub fn stop(&self) {
+        if let Ok(mut lock) = self.active_child.lock() {
+            if let Some(mut child) = lock.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+                info!("Stopped STT daemon process.");
+            }
+        }
     }
 
-    /// Spawns the dedicated, time-critical audio capture thread (§02 Architecture Process Model)
-    pub fn start_capture(&self) -> Result<(), String> {
-        // Instant barge-in: If user presses push-to-talk while FRIDAY speaks, duck and stop voice immediately
-        if let Ok(pb_lock) = self.phrase_bank.lock() {
-            if let Some(ref pb) = *pb_lock {
-                if pb.is_speaking() {
-                    pb.barge_in();
-                    tracing::info!("Barge-in: Push-to-talk initiated during speech playback, voice stopped.");
+    pub fn start(&self) -> Result<(), String> {
+        // If already running, do not re-spawn
+        if let Ok(mut lock) = self.active_child.lock() {
+            if let Some(ref mut child) = *lock {
+                if let Ok(None) = child.try_wait() {
+                    info!("Whistle STT Daemon is already active.");
+                    return Ok(());
                 }
             }
         }
 
-        if self.is_capturing.load(Ordering::SeqCst) {
-            return Ok(());
+        info!("Starting Whistle STT Daemon...");
+
+        let app_handle_clone = self.app_handle.clone();
+        let active_child_clone = self.active_child.clone();
+
+        // Resolve absolute path to core/stt_daemon.py
+        let candidates = [
+            std::path::PathBuf::from(r"C:\Users\anesx\Desktop\friday\core\stt_daemon.py"),
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.join("core").join("stt_daemon.py")))
+                .unwrap_or_default(),
+            std::path::PathBuf::from("../core/stt_daemon.py"),
+            std::path::PathBuf::from("core/stt_daemon.py"),
+        ];
+
+        let found_script = candidates.into_iter().find(|p| p.exists());
+        let script_path = match found_script {
+            Some(p) => p,
+            None => {
+                let err_msg = "Could not find core/stt_daemon.py in standard locations.";
+                error!("{}", err_msg);
+                return Err(err_msg.to_string());
+            }
+        };
+
+        let script_dir = script_path.parent().unwrap_or(std::path::Path::new("."));
+
+        let mut cmd = Command::new("py");
+        cmd.arg("-3")
+            .arg(&script_path)
+            .current_dir(script_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
         }
 
-        self.is_capturing.store(true, Ordering::SeqCst);
-        let capturing = self.is_capturing.clone();
-        let rms_holder = self.current_rms.clone();
-        let pb_holder = self.phrase_bank.clone();
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                let err_msg = format!("Failed to spawn STT daemon: {}", e);
+                error!("{}", err_msg);
+                return Err(err_msg);
+            }
+        };
+
+        let stdout = child.stdout.take().ok_or("Failed to capture STT stdout")?;
+
+        if let Ok(mut lock) = active_child_clone.lock() {
+            *lock = Some(child);
+        }
 
         std::thread::spawn(move || {
-            let host = cpal::default_host();
-            let device = match host.default_input_device() {
-                Some(d) => d,
-                None => {
-                    tracing::warn!("No default audio input device found.");
-                    capturing.store(false, Ordering::SeqCst);
-                    return;
-                }
-            };
+            let reader = BufReader::new(stdout);
 
-            let config = match device.default_input_config() {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::warn!("Failed to obtain default input config: {}", e);
-                    capturing.store(false, Ordering::SeqCst);
-                    return;
-                }
-            };
-
-            // Lock-free ring buffer for 16kHz audio samples (32000 samples = 2 sec buffer)
-            let rb = HeapRb::<f32>::new(32000);
-            let (mut prod, _cons) = rb.split();
-
-            let err_fn = |err| tracing::error!("cpal input stream error: {}", err);
-
-            let stream_res = match config.sample_format() {
-                cpal::SampleFormat::F32 => device.build_input_stream(
-                    &config.into(),
-                    move |data: &[f32], _: &_| {
-                        // Calculate RMS for live Orb visualization and barge-in
-                        let sum_sq: f32 = data.iter().map(|&s| s * s).sum();
-                        let rms = (sum_sq / data.len().max(1) as f32).sqrt();
-
-                        if let Ok(mut lock) = rms_holder.try_lock() {
-                            *lock = rms.clamp(0.0, 1.0);
-                        }
-
-                        // Barge-in check: If user speaks (> 0.15 RMS) while FRIDAY is speaking, duck/stop voice immediately
-                        if rms > 0.15 {
-                            if let Ok(pb_lock) = pb_holder.try_lock() {
-                                if let Some(ref pb) = *pb_lock {
-                                    if pb.is_speaking() {
-                                        pb.barge_in();
-                                        tracing::info!("Barge-in: User speech detected ({:.2} RMS) during playback, interrupted within budget.", rms);
+            for line in reader.lines() {
+                match line {
+                    Ok(l) => {
+                        if let Ok(json) = serde_json::from_str::<Value>(&l) {
+                            if let Some(status) = json.get("status") {
+                                info!("Whistle Daemon Status: {}", status);
+                            }
+                            if let Some(text) = json.get("text").and_then(|t| t.as_str()) {
+                                let trimmed = text.trim();
+                                if !trimmed.is_empty() {
+                                    info!("Heard from STT daemon: {}", trimmed);
+                                    if let Ok(guard) = app_handle_clone.read() {
+                                        if let Some(ref app) = *guard {
+                                            let _ = app.emit("friday://voice-command", trimmed);
+                                        }
                                     }
                                 }
                             }
                         }
-
-                        for &sample in data {
-                            let _ = prod.try_push(sample);
-                        }
-                    },
-                    err_fn,
-                    None,
-                ),
-                _ => {
-                    tracing::warn!("Unsupported sample format for microphone");
-                    return;
+                    }
+                    Err(e) => {
+                        error!("Error reading from STT daemon: {}", e);
+                        break;
+                    }
                 }
-            };
+            }
 
-            if let Ok(stream) = stream_res {
-                if let Err(e) = stream.play() {
-                    tracing::error!("Failed to play cpal input stream: {}", e);
-                    return;
-                }
-
-                while capturing.load(Ordering::SeqCst) {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
+            if let Ok(mut lock) = active_child_clone.lock() {
+                if let Some(mut child) = lock.take() {
+                    let _ = child.wait();
                 }
             }
         });
 
         Ok(())
     }
-
-    pub fn stop_capture(&self) {
-        self.is_capturing.store(false, Ordering::SeqCst);
-        if let Ok(mut lock) = self.current_rms.lock() {
-            *lock = 0.0;
-        }
-    }
 }
 
+pub struct WakeWordStub {}
+impl WakeWordStub {
+    pub fn enable(&self, _s: Option<f32>) {}
+    pub fn disable(&self) {}
+    pub fn get_status(&self) -> crate::voice::wakeword::WakeWordStatus {
+        crate::voice::wakeword::WakeWordStatus {
+            enabled: true,
+            sensitivity: 0.5,
+            last_detected_ms: Some(0),
+            trigger_word: "friday".to_string(),
+        }
+    }
+    pub fn set_sensitivity(&self, _s: f32) {}
+}
+
+pub struct AudioCaptureManager {
+    node: SherpaAudioNode,
+    pub wake_word: WakeWordStub,
+}
+
+impl AudioCaptureManager {
+    pub fn new(kernel: Arc<HarnessKernel>, agent: Arc<AgentCore>) -> Self {
+        Self {
+            node: SherpaAudioNode::new(kernel, agent),
+            wake_word: WakeWordStub {},
+        }
+    }
+    pub fn start_capture(&self) -> Result<(), String> {
+        self.node.start()
+    }
+    pub fn stop_capture(&self) {
+        self.node.stop();
+    }
+    pub fn get_current_rms(&self) -> f32 {
+        0.0
+    }
+    pub fn ensure_stream_running(&self) -> Result<(), String> {
+        self.start_capture()
+    }
+    pub fn shutdown(&self) {
+        self.node.stop();
+    }
+    pub fn set_stt_cadence(&self, _frames: usize) {}
+    pub fn set_app_handle(&self, app: tauri::AppHandle) {
+        self.node.set_app_handle(app);
+    }
+    pub fn set_phrase_bank(&self, _pb: Arc<crate::voice::phrasebank::PhraseBank>) {}
+}

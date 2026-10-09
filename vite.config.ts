@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -21,7 +22,20 @@ export default defineConfig({
     strictPort: true,
     host: "0.0.0.0",
     watch: {
-      ignored: ["**/src-tauri/**"],
+      ignored: ["**/src-tauri/**", "**/resources/**", "**/*.zip", "**/*.tar.gz", "**/target/**"],
     },
   },
+  test: {
+    include: ["src/**/*.{test,spec}.{ts,tsx}", "tests/**/*.{test,spec}.{ts,tsx}"],
+    exclude: [
+      "**/node_modules/**",
+      "**/resources/**",
+      "**/target/**",
+      "**/scratch/**",
+      "**/scratch_extracted/**",
+      "**/dist/**",
+      "**/bench/**",
+    ],
+  },
 });
+

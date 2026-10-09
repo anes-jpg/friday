@@ -19,9 +19,7 @@ export const AnimatedShinyText: FC<AnimatedShinyTextProps> = ({
         } as CSSProperties
       }
       className={cn(
-        "inline-flex items-center text-[var(--color-text)]",
-        "animate-shiny-text bg-[length:var(--shiny-width)_100%] bg-clip-text bg-[0_0] bg-no-repeat",
-        "bg-gradient-to-r from-transparent via-[var(--color-acid)] via-50% to-transparent",
+        "inline-block bg-clip-text text-transparent bg-gradient-to-r from-neutral-500 via-white via-50% to-neutral-500 bg-[length:200%_100%] animate-pulse",
         className
       )}
       {...props}

@@ -14,8 +14,8 @@ pub enum VoiceEmotion {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DeliveryDirective {
     pub emotion: VoiceEmotion,
-    pub pace: f32,             // Clamped 0.85 to 1.12 (§05 The Emotion Engine)
-    pub energy: f32,           // 0.0 to 1.0
+    pub pace: f32,   // Clamped 0.85 to 1.12 (§05 The Emotion Engine)
+    pub energy: f32, // 0.0 to 1.0
     pub pause_before_ms: u32,
     pub emphasis: Vec<String>,
 }
@@ -70,8 +70,10 @@ mod tests {
 
     #[test]
     fn test_directive_clamping() {
-        let mut directive = DeliveryDirective::default();
-        directive.pace = 2.5; // Out of bounds
+        let mut directive = DeliveryDirective {
+            pace: 2.5,
+            ..Default::default()
+        };
         let params = directive.compile();
         assert_eq!(params.speed, 1.12);
 

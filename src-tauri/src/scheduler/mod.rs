@@ -83,7 +83,8 @@ impl SchedulerManager {
 
                             if should_run {
                                 let start_inst = Instant::now();
-                                let args: Value = serde_json::from_str(&auto.action_args).unwrap_or(serde_json::json!({}));
+                                let args: Value = serde_json::from_str(&auto.action_args)
+                                    .unwrap_or(serde_json::json!({}));
                                 let result = tools.invoke(&auto.action_tool, args).await;
                                 let duration_ms = start_inst.elapsed().as_millis() as i64;
 

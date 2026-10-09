@@ -48,7 +48,9 @@ impl SkillRegistry {
                 id: "standup-digest".to_string(),
                 name: "Standup Digest".to_string(),
                 version: "1.0.0".to_string(),
-                description: "Summarize yesterday's commits and Notion task changes into a standup note.".to_string(),
+                description:
+                    "Summarize yesterday's commits and Notion task changes into a standup note."
+                        .to_string(),
                 triggers: vec![
                     SkillTrigger {
                         r#type: "cron".to_string(),
@@ -58,7 +60,10 @@ impl SkillRegistry {
                     SkillTrigger {
                         r#type: "phrase".to_string(),
                         expr: None,
-                        r#match: Some(vec!["standup".to_string(), "what did I do yesterday".to_string()]),
+                        r#match: Some(vec![
+                            "standup".to_string(),
+                            "what did I do yesterday".to_string(),
+                        ]),
                     },
                 ],
                 permissions: vec![
@@ -72,7 +77,9 @@ impl SkillRegistry {
                 id: "notion-operator".to_string(),
                 name: "Notion Workspace Bridge".to_string(),
                 version: "1.2.0".to_string(),
-                description: "Direct bi-directional search and task mutations across AN STUDIO Notion pages.".to_string(),
+                description:
+                    "Direct bi-directional search and task mutations across AN STUDIO Notion pages."
+                        .to_string(),
                 triggers: vec![SkillTrigger {
                     r#type: "phrase".to_string(),
                     expr: None,
@@ -85,13 +92,22 @@ impl SkillRegistry {
                 id: "desktop-organizer".to_string(),
                 name: "Desktop Assets Organizer".to_string(),
                 version: "1.1.0".to_string(),
-                description: "Automatically moves and organizes screenshots into project asset directories.".to_string(),
+                description:
+                    "Automatically moves and organizes screenshots into project asset directories."
+                        .to_string(),
                 triggers: vec![SkillTrigger {
                     r#type: "phrase".to_string(),
                     expr: None,
-                    r#match: Some(vec!["organize screenshots".to_string(), "clean desktop".to_string()]),
+                    r#match: Some(vec![
+                        "organize screenshots".to_string(),
+                        "clean desktop".to_string(),
+                    ]),
                 }],
-                permissions: vec!["fs.read".to_string(), "fs.write".to_string(), "fs.move".to_string()],
+                permissions: vec![
+                    "fs.read".to_string(),
+                    "fs.write".to_string(),
+                    "fs.move".to_string(),
+                ],
                 entry: Some("run.ts".to_string()),
             },
         ];
@@ -125,7 +141,9 @@ impl SkillRegistry {
                         let manifest_path = path.join("manifest.json");
                         if manifest_path.exists() {
                             if let Ok(content) = std::fs::read_to_string(&manifest_path) {
-                                if let Ok(manifest) = serde_json::from_str::<SkillManifest>(&content) {
+                                if let Ok(manifest) =
+                                    serde_json::from_str::<SkillManifest>(&content)
+                                {
                                     if let Ok(mut lock) = self.skills.lock() {
                                         lock.insert(manifest.id.clone(), manifest);
                                         count += 1;
@@ -233,6 +251,8 @@ mod tests {
 
         // Verify violation logged to audit_log
         let audit = db.lock().unwrap().get_audit_log(5).unwrap();
-        assert!(audit.iter().any(|a| a.decision.contains("permission_blocked")));
+        assert!(audit
+            .iter()
+            .any(|a| a.decision.contains("permission_blocked")));
     }
 }

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "agent-watchdog": {
+      "source": "builderio/skills",
+      "sourceType": "github",
+      "skillPath": "skills/agent-watchdog/SKILL.md",
+      "computedHash": "649875c1f33ec6964b367ef73661ea1595606626a5e1a5e3d1c04326f89483d9"
+    }
+  }
+}
