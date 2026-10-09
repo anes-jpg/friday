@@ -261,10 +261,10 @@ export const ProjectsTab: React.FC = () => {
       setScaffoldName("")
       setScaffoldDir("")
       toast.success(
-        `Scaffolded ${created.name} via ${selectedArchetype}! Zero LLM tokens consumed.`
+        `Project "${created.name}" is ready! You can now ask FRIDAY to build features or inspect files.`
       )
     } catch {
-      toast.error("Failed to scaffold project workspace")
+      toast.error("Failed to create project workspace")
     } finally {
       setIsScaffolding(false)
     }
@@ -274,7 +274,7 @@ export const ProjectsTab: React.FC = () => {
     const imported = importDiscoveredRepo(repo)
     setProjects((prev) => [imported, ...prev.filter((p) => p.id !== imported.id)])
     setActiveId(imported.id)
-    toast.success(`Imported ${repo.name} into active workspace ledger!`)
+    toast.success(`Connected "${repo.name}" to FRIDAY! You can now ask FRIDAY to review code or build features.`)
   }
 
   const handleDecomposeTasks = () => {
@@ -299,14 +299,14 @@ export const ProjectsTab: React.FC = () => {
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-bold tracking-tight text-white font-sans flex items-center gap-2">
               <FolderKanban className="size-5 text-[hsl(var(--signal))]" />
-              Workspace Initiatives
+              Workspace Projects
             </h2>
             <span className="font-mono text-[10px] uppercase px-2 py-0.5 rounded-full border border-white/10 bg-white/5 text-[hsl(var(--signal))] font-semibold">
-              ACTIVE LEDGER
+              ACTIVE
             </span>
           </div>
-          <p className="font-mono text-[11px] text-white/50 tracking-wider mt-0.5 uppercase">
-            OPERATOR DIRECTIVE STREAM // ZERO-TOKEN SCAFFOLDING // DESKTOP TELEMETRY ACTIVE
+          <p className="text-xs text-white/55 tracking-normal mt-0.5 font-sans">
+            Manage your codebases, track development tasks, and collaborate with FRIDAY.
           </p>
         </div>
 
@@ -343,11 +343,11 @@ export const ProjectsTab: React.FC = () => {
           <div className="flex items-center justify-between mb-3 pb-2 border-b border-white/[0.06]">
             <div className="flex items-center gap-2">
               <FolderGit2 className="size-4 text-[hsl(var(--signal))]" />
-              <span className="font-mono text-xs font-semibold text-white/80 uppercase tracking-wider">
-                Desktop Repositories Discovered ({discoveredRepos.length})
+              <span className="font-sans text-xs font-semibold text-white/90">
+                Projects on Your Desktop ({discoveredRepos.length})
               </span>
-              <span className="font-mono text-[10px] text-white/40 uppercase">
-                // ZERO-TOKEN REPO IMPORT
+              <span className="font-mono text-[10px] text-white/40">
+                • 1-Click Connect
               </span>
             </div>
             <button
@@ -390,7 +390,7 @@ export const ProjectsTab: React.FC = () => {
                     onClick={() => handleImportRepo(repo)}
                     className="w-full text-center py-1.5 px-2 rounded-lg font-mono text-[10px] font-semibold border border-white/10 bg-white/5 hover:bg-[hsl(var(--signal))] hover:text-black hover:border-transparent text-white/80 transition-all cursor-pointer"
                   >
-                    Connect & Index
+                    Open in FRIDAY
                   </button>
                 </div>
               ))}
@@ -694,13 +694,13 @@ export const ProjectsTab: React.FC = () => {
           <div className="relative w-full max-w-2xl bg-[#18191B] border border-white/20 rounded-2xl shadow-[0_25px_50px_-12px_rgba(0,0,0,0.8)] overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
               <div className="flex items-center gap-2.5">
-                <Hammer className="size-5 text-[hsl(var(--signal))]" />
+                <Sparkles className="size-5 text-[hsl(var(--signal))]" />
                 <div>
                   <h3 className="font-bold text-white text-base">
-                    Project Scaffolding Studio
+                    Create New Project
                   </h3>
-                  <p className="font-mono text-[10px] text-white/50 uppercase tracking-wider">
-                    DETERMINISTIC ZERO-TOKEN SCAFFOLDING // BETTER-T-STACK ENABLED
+                  <p className="text-xs text-white/50 font-sans">
+                    Choose a beginner-friendly template to initialize your workspace
                   </p>
                 </div>
               </div>
@@ -716,50 +716,67 @@ export const ProjectsTab: React.FC = () => {
             <form onSubmit={handleExecuteScaffold} className="p-6 space-y-5">
               {/* Archetype Selector Matrix */}
               <div>
-                <label className="block font-mono text-[10px] uppercase tracking-wider text-white/60 mb-2 font-semibold">
-                  Select Scaffolding Archetype
+                <label className="block text-xs font-semibold text-white/80 mb-2 font-sans">
+                  Choose a Starting Template
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {SCAFFOLD_ARCHETYPES.map((arch) => (
-                    <div
-                      key={arch.id}
-                      onClick={() => setSelectedArchetype(arch.id)}
-                      className={cn(
-                        "p-3 rounded-xl border text-left cursor-pointer transition-all",
-                        selectedArchetype === arch.id
-                          ? "border-[hsl(var(--signal))] bg-[hsl(var(--signal))/0.06] shadow-sm"
-                          : "border-white/10 bg-white/[0.02] hover:border-white/20"
-                      )}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-semibold text-xs text-white">
-                          {arch.name}
-                        </span>
-                        <span className="font-mono text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--signal))/0.3] bg-[hsl(var(--signal))/0.1] text-[hsl(var(--signal))]">
-                          {arch.tokenSavingsMultiplier}
-                        </span>
+                  {SCAFFOLD_ARCHETYPES.map((arch) => {
+                    const isSelected = selectedArchetype === arch.id
+                    return (
+                      <div
+                        key={arch.id}
+                        onClick={() => {
+                          setSelectedArchetype(arch.id)
+                          if (!scaffoldName || scaffoldName.startsWith("my-")) {
+                            setScaffoldName(arch.defaultProjectName || "my-app")
+                          }
+                        }}
+                        className={cn(
+                          "p-3.5 rounded-xl border text-left cursor-pointer transition-all",
+                          isSelected
+                            ? "border-[hsl(var(--signal))] bg-[hsl(var(--signal))/0.10] shadow-[0_0_15px_-3px_hsl(var(--signal)/0.3)]"
+                            : "border-white/10 bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04]"
+                        )}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-semibold text-xs text-white">
+                            {arch.friendlyName || arch.name}
+                          </span>
+                          <span className={cn(
+                            "text-[9px] font-mono px-2 py-0.5 rounded-full font-medium",
+                            isSelected
+                              ? "bg-[hsl(var(--signal))] text-black"
+                              : "bg-white/10 text-[hsl(var(--signal))]"
+                          )}>
+                            {arch.badge || arch.tag}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-white/60 leading-relaxed mb-2 line-clamp-2">
+                          {arch.beginnerSummary || arch.description}
+                        </p>
+                        <div className="flex flex-wrap gap-1">
+                          {(arch.whatYouGet || arch.features.slice(0, 2)).map((feature, idx) => (
+                            <span key={idx} className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 border border-white/5 text-white/70 font-mono">
+                              ✓ {feature}
+                            </span>
+                          ))}
+                        </div>
                       </div>
-                      <p className="text-[11px] text-white/50 line-clamp-2 leading-relaxed mb-2">
-                        {arch.description}
-                      </p>
-                      <div className="font-mono text-[9px] text-white/40">
-                        {arch.framework}
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
 
               {/* Name & Directory Inputs */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block font-mono text-[10px] uppercase tracking-wider text-white/50 mb-1">
+                  <label className="block text-xs font-medium text-white/70 mb-1 font-sans">
                     Project Name *
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. terranova-api"
+                    placeholder="e.g. my-portfolio"
                     value={scaffoldName}
                     onChange={(e) => setScaffoldName(e.target.value)}
                     className="w-full px-3 py-2 text-xs bg-black/40 border border-white/15 rounded-lg text-white focus:outline-none focus:border-[hsl(var(--signal))]"
@@ -767,8 +784,8 @@ export const ProjectsTab: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block font-mono text-[10px] uppercase tracking-wider text-white/50 mb-1">
-                    Target Directory (Optional)
+                  <label className="block text-xs font-medium text-white/70 mb-1 font-sans">
+                    Location on Your PC (Optional)
                   </label>
                   <input
                     type="text"
@@ -782,24 +799,24 @@ export const ProjectsTab: React.FC = () => {
 
               {/* Footer */}
               <div className="flex items-center justify-between pt-4 border-t border-white/10">
-                <span className="font-mono text-[10px] text-white/40">
-                  Sub-5s deterministic generation • 0 LLM tokens burned
+                <span className="text-xs text-white/40 font-sans">
+                  Ready in seconds • All files stored locally on your PC
                 </span>
 
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setScaffoldModalOpen(false)}
-                    className="px-4 py-2 text-xs text-white/60 hover:text-white font-mono cursor-pointer"
+                    className="px-4 py-2 text-xs text-white/60 hover:text-white font-sans cursor-pointer"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={isScaffolding}
-                    className="px-5 py-2 text-xs font-semibold rounded-lg bg-[hsl(var(--signal))] text-black hover:opacity-90 font-mono transition-opacity cursor-pointer disabled:opacity-50"
+                    className="px-5 py-2 text-xs font-semibold rounded-lg bg-[hsl(var(--signal))] text-black hover:opacity-90 font-sans transition-opacity cursor-pointer disabled:opacity-50"
                   >
-                    {isScaffolding ? "Scaffolding..." : "Scaffold Workspace"}
+                    {isScaffolding ? "Creating Project..." : "Create Project"}
                   </button>
                 </div>
               </div>

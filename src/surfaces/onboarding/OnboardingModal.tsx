@@ -41,7 +41,7 @@ interface OnboardingModalProps {
 const STEPS = [
   { id: 1, label: "VOICE", title: "Acoustic Audition & Mic Check", desc: "Sub-150ms acoustic ack, Kerry Condon neural speech, and live mic telemetry." },
   { id: 2, label: "MODES", title: "Dual Operating Modes & Safety", desc: "Hold to command, tap to dictate directly into Windows with 3 safety tiers." },
-  { id: 3, label: "PROJECTS", title: "Dynamic Project Setup", desc: "Zero-token scaffolding (Better-T-Stack) or instant Desktop repo intelligence." },
+  { id: 3, label: "PROJECTS", title: "Start Your First Project", desc: "Pick a beginner-friendly template to build something new, or connect an existing project on your PC." },
   { id: 4, label: "BARGE-IN", title: "Instant Interrupt & Kill Switch", desc: "Sub-200ms barge-in drill and global panic kill switch." },
 ];
 
@@ -62,7 +62,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
   // Project setup state
   const [projectMode, setProjectMode] = useState<"scaffold" | "discover">("scaffold");
   const [selectedArchetype, setSelectedArchetype] = useState<ProjectArchetypeId>("better-t-stack");
-  const [projectName, setProjectName] = useState<string>("my-tstack-app");
+  const [projectName, setProjectName] = useState<string>("my-web-app");
   const [isScaffolding, setIsScaffolding] = useState<boolean>(false);
   const [scaffoldSuccess, setScaffoldSuccess] = useState<string | null>(null);
   const [discoveredRepos, setDiscoveredRepos] = useState<DiscoveredRepo[]>([]);
@@ -416,88 +416,137 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
               </div>
             )}
 
-            {/* STEP 3: DYNAMIC PROJECT SETUP (ZERO-TOKEN SCAFFOLDING & DESKTOP REPOS) */}
+            {/* STEP 3: DYNAMIC PROJECT SETUP (BEGINNER-FRIENDLY) */}
             {step === 3 && (
-              <div className="space-y-2.5 text-xs">
-                {/* Sub-Tabs: Scaffold Archetype vs Connect Desktop Repo */}
-                <div className="flex items-center p-0.5 rounded-[8px] bg-white/[0.04] border border-white/10">
+              <div className="space-y-3 text-xs">
+                {/* Mode Selector */}
+                <div className="flex items-center p-1 rounded-xl bg-white/[0.04] border border-white/10 gap-1">
                   <button
+                    type="button"
                     onClick={() => setProjectMode("scaffold")}
-                    className={`flex-1 py-1.5 rounded-[6px] font-mono text-[11px] transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
+                    className={`flex-1 py-1.5 px-3 rounded-lg font-mono text-[11px] transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
                       projectMode === "scaffold"
-                        ? "bg-white text-black font-medium"
+                        ? "bg-white text-black font-semibold shadow-xs"
                         : "text-white/60 hover:text-white"
                     }`}
                   >
-                    <Layers className="w-3.5 h-3.5" /> Scaffold New (Better-T-Stack)
+                    <Layers className="w-3.5 h-3.5" /> New Project Templates
                   </button>
                   <button
+                    type="button"
                     onClick={() => setProjectMode("discover")}
-                    className={`flex-1 py-1.5 rounded-[6px] font-mono text-[11px] transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
+                    className={`flex-1 py-1.5 px-3 rounded-lg font-mono text-[11px] transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
                       projectMode === "discover"
-                        ? "bg-white text-black font-medium"
+                        ? "bg-white text-black font-semibold shadow-xs"
                         : "text-white/60 hover:text-white"
                     }`}
                   >
-                    <FolderGit2 className="w-3.5 h-3.5" /> Connect Desktop Repo
+                    <FolderGit2 className="w-3.5 h-3.5" /> Connect Existing Folder {discoveredRepos.length > 0 && `(${discoveredRepos.length})`}
                   </button>
                 </div>
 
                 {scaffoldSuccess && (
-                  <div className="p-2.5 rounded-[8px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs flex items-center gap-2 font-mono">
-                    <CheckCircle2 className="w-4 h-4 shrink-0" />
-                    <span className="truncate">{scaffoldSuccess}</span>
+                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs space-y-1 font-sans">
+                    <div className="flex items-center gap-2 font-semibold">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>{scaffoldSuccess}</span>
+                    </div>
+                    <p className="text-[11px] text-white/70 pl-6">
+                      Your project is ready! Next, ask FRIDAY in the console to add features, explore code, or run a live preview.
+                    </p>
                   </div>
                 )}
 
                 {/* Submode A: Scaffold Archetype */}
                 {projectMode === "scaffold" && (
-                  <div className="space-y-2">
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {SCAFFOLD_ARCHETYPES.map((arch) => (
-                        <div
-                          key={arch.id}
-                          onClick={() => setSelectedArchetype(arch.id)}
-                          className={`p-2 rounded-[8px] border transition-all cursor-pointer ${
-                            selectedArchetype === arch.id
-                              ? "border-[hsl(var(--signal))] bg-[hsl(var(--signal))]/10"
-                              : "border-white/10 bg-white/[0.03] hover:border-white/20"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between mb-0.5">
-                            <span className="font-semibold text-white text-[11px]">{arch.framework}</span>
-                            <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-white/10 text-[hsl(var(--signal))]">
-                              {arch.tokenSavingsMultiplier}
-                            </span>
+                  <div className="space-y-2.5">
+                    <div className="grid grid-cols-2 gap-2">
+                      {SCAFFOLD_ARCHETYPES.map((arch) => {
+                        const isSelected = selectedArchetype === arch.id
+                        return (
+                          <div
+                            key={arch.id}
+                            onClick={() => {
+                              setSelectedArchetype(arch.id)
+                              if (!projectName || projectName === "my-web-app" || projectName === "my-tstack-app" || projectName.startsWith("my-")) {
+                                setProjectName(arch.defaultProjectName || "my-app")
+                              }
+                            }}
+                            className={`p-2.5 rounded-xl border transition-all cursor-pointer relative ${
+                              isSelected
+                                ? "border-[hsl(var(--signal))] bg-[hsl(var(--signal))]/10 shadow-[0_0_15px_-3px_hsl(var(--signal)/0.3)]"
+                                : "border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.05]"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-semibold text-white text-xs truncate">
+                                {arch.friendlyName || arch.framework}
+                              </span>
+                              <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-full font-medium ${
+                                isSelected
+                                  ? "bg-[hsl(var(--signal))] text-black"
+                                  : "bg-white/10 text-[hsl(var(--signal))]"
+                              }`}>
+                                {arch.badge || arch.tag}
+                              </span>
+                            </div>
+                            <p className="text-[10.5px] text-white/60 leading-tight mb-2 line-clamp-2">
+                              {arch.beginnerSummary || arch.description}
+                            </p>
+                            <div className="flex flex-wrap gap-1">
+                              {(arch.whatYouGet || arch.features.slice(0, 2)).map((feature, idx) => (
+                                <span key={idx} className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 border border-white/5 text-white/70 font-mono">
+                                  ✓ {feature}
+                                </span>
+                              ))}
+                            </div>
                           </div>
-                          <p className="text-[10px] text-white/50 line-clamp-1">{arch.description}</p>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={projectName}
-                        onChange={(e) => setProjectName(e.target.value)}
-                        placeholder="Project name (e.g. my-app)"
-                        className="flex-1 h-8 rounded-[6px] bg-white/[0.05] border border-white/10 px-2.5 text-xs text-white placeholder-white/30 focus:outline-none focus:border-[hsl(var(--signal))]"
-                      />
-                      <Button
-                        onClick={handleScaffoldProject}
-                        disabled={isScaffolding || !projectName.trim()}
-                        className="h-8 px-3 rounded-[6px] bg-white text-black hover:bg-white/90 font-mono text-[11px] font-medium shrink-0 cursor-pointer"
+                    <div className="p-3 rounded-xl border border-white/10 bg-white/[0.02] space-y-2">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-white/70 font-mono">Project Name:</span>
+                        <span className="text-white/40 text-[10px] font-mono">
+                          Saved in Desktop/{projectName || "my-app"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={projectName}
+                          onChange={(e) => setProjectName(e.target.value)}
+                          placeholder="e.g. my-portfolio"
+                          className="flex-1 h-8.5 rounded-lg bg-black/40 border border-white/15 px-3 text-xs text-white placeholder-white/30 focus:outline-none focus:border-[hsl(var(--signal))]"
+                        />
+                        <Button
+                          onClick={handleScaffoldProject}
+                          disabled={isScaffolding || !projectName.trim()}
+                          className="h-8.5 px-4 rounded-lg bg-white text-black hover:bg-white/90 font-mono text-xs font-semibold shrink-0 cursor-pointer"
+                        >
+                          {isScaffolding ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> Initializing...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-3.5 h-3.5 text-[hsl(var(--signal))] mr-1.5" /> Create Project
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Beginner Skip Option */}
+                    <div className="flex items-center justify-center pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setStep(4)}
+                        className="text-[11px] font-mono text-white/40 hover:text-white/80 transition-colors cursor-pointer underline underline-offset-2"
                       >
-                        {isScaffolding ? (
-                          <>
-                            <Loader2 className="w-3 h-3 animate-spin mr-1" /> Scaffolding...
-                          </>
-                        ) : (
-                          <>
-                            <FolderDown className="w-3 h-3 mr-1" /> Scaffold (Zero Tokens)
-                          </>
-                        )}
-                      </Button>
+                        Skip project setup for now — explore FRIDAY first →
+                      </button>
                     </div>
                   </div>
                 )}
@@ -518,37 +567,54 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
                       </button>
                     </div>
 
-                    <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1">
-                      {discoveredRepos.map((repo) => (
-                        <div
-                          key={repo.id}
-                          className="flex items-center justify-between p-2 rounded-[8px] bg-white/[0.03] border border-white/10 hover:border-white/20 transition-colors"
-                        >
-                          <div className="min-w-0 pr-2">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-semibold text-white text-xs truncate">{repo.name}</span>
-                              <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-white/10 text-white/70">
-                                {repo.framework}
+                    {discoveredRepos.length === 0 && !isScanningRepos ? (
+                      <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02] text-center text-white/50 text-xs">
+                        No projects detected on your Desktop. You can create a new one using the templates tab!
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
+                        {discoveredRepos.map((repo) => (
+                          <div
+                            key={repo.id}
+                            className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.03] border border-white/10 hover:border-white/20 transition-colors"
+                          >
+                            <div className="min-w-0 pr-2">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-semibold text-white text-xs truncate">{repo.name}</span>
+                                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/10 text-white/70">
+                                  {repo.framework}
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-white/40 font-mono truncate block mt-0.5">
+                                {repo.path}
                               </span>
                             </div>
-                            <span className="text-[10px] text-white/40 font-mono truncate block">
-                              {repo.path}
-                            </span>
+                            <Button
+                              size="sm"
+                              onClick={() => handleConnectRepo(repo)}
+                              disabled={connectingRepoId === repo.id}
+                              className="h-7 px-3 rounded-lg bg-white/10 hover:bg-white/20 text-white font-mono text-[10px] shrink-0 cursor-pointer"
+                            >
+                              {connectingRepoId === repo.id ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                "Open in FRIDAY"
+                              )}
+                            </Button>
                           </div>
-                          <Button
-                            size="sm"
-                            onClick={() => handleConnectRepo(repo)}
-                            disabled={connectingRepoId === repo.id}
-                            className="h-6 px-2 rounded-[4px] bg-white/10 hover:bg-white/20 text-white font-mono text-[10px] shrink-0 cursor-pointer"
-                          >
-                            {connectingRepoId === repo.id ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                            ) : (
-                              "Connect"
-                            )}
-                          </Button>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Beginner Skip Option */}
+                    <div className="flex items-center justify-center pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setStep(4)}
+                        className="text-[11px] font-mono text-white/40 hover:text-white/80 transition-colors cursor-pointer underline underline-offset-2"
+                      >
+                        Skip project setup for now — explore FRIDAY first →
+                      </button>
                     </div>
                   </div>
                 )}

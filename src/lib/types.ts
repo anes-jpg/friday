@@ -360,12 +360,17 @@ export type ProjectArchetypeId =
 export interface ScaffoldArchetype {
   id: ProjectArchetypeId
   name: string
+  friendlyName?: string
   description: string
+  beginnerSummary?: string
   tag: string
+  badge?: string
   framework: string
   features: string[]
+  whatYouGet?: string[]
   defaultInstallCmd: string
   tokenSavingsMultiplier: string
+  defaultProjectName?: string
 }
 
 export interface DiscoveredRepo {
