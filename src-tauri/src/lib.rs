@@ -1252,6 +1252,261 @@ fn scaffold_project_archetype(
     crate::tools::scaffold::ScaffoldEngine::scaffold_archetype(&archetype, &project_name, &target_path)
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProjectFileNode {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub size_bytes: Option<u64>,
+    pub children: Option<Vec<ProjectFileNode>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProjectCommandResult {
+    pub exit_code: i32,
+    pub stdout: String,
+    pub stderr: String,
+    pub duration_ms: u64,
+}
+
+fn build_project_tree(dir: &std::path::Path, current_depth: usize, max_depth: usize) -> Vec<ProjectFileNode> {
+    let mut nodes = Vec::new();
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return nodes,
+    };
+
+    let ignored_names = [
+        "node_modules", ".git", "target", "dist", ".next", "build", ".turbo",
+        "cache", "__pycache__", ".vscode", ".idea", ".DS_Store", "Thumbs.db",
+    ];
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+
+        if ignored_names.contains(&name.as_str()) {
+            continue;
+        }
+
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        let size_bytes = if !is_dir {
+            entry.metadata().ok().map(|m| m.len())
+        } else {
+            None
+        };
+
+        let children = if is_dir && current_depth < max_depth {
+            Some(build_project_tree(&path, current_depth + 1, max_depth))
+        } else if is_dir {
+            Some(Vec::new())
+        } else {
+            None
+        };
+
+        nodes.push(ProjectFileNode {
+            name,
+            path: path.to_string_lossy().to_string(),
+            is_dir,
+            size_bytes,
+            children,
+        });
+    }
+
+    nodes.sort_by(|a, b| {
+        match (a.is_dir, b.is_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        }
+    });
+
+    nodes
+}
+
+#[tauri::command]
+fn inspect_project_tree(path: String, max_depth: Option<usize>) -> Result<Vec<ProjectFileNode>, String> {
+    let root = std::path::PathBuf::from(&path);
+    if !root.exists() {
+        return Err(format!("Path does not exist: {}", path));
+    }
+    if !root.is_dir() {
+        return Err(format!("Path is not a directory: {}", path));
+    }
+    let depth_limit = max_depth.unwrap_or(3);
+    Ok(build_project_tree(&root, 0, depth_limit))
+}
+
+#[tauri::command]
+fn read_project_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))
+}
+
+#[tauri::command]
+fn write_project_file(path: String, content: String) -> Result<bool, String> {
+    let file_path = std::path::PathBuf::from(&path);
+    if let Some(parent) = file_path.parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create directories: {}", e))?;
+        }
+    }
+    std::fs::write(&file_path, content).map(|_| true).map_err(|e| format!("Failed to write file: {}", e))
+}
+
+#[tauri::command]
+fn create_project_file_or_dir(path: String, is_dir: bool) -> Result<bool, String> {
+    let target = std::path::PathBuf::from(&path);
+    if is_dir {
+        std::fs::create_dir_all(&target).map(|_| true).map_err(|e| format!("Failed to create directory: {}", e))
+    } else {
+        if let Some(parent) = target.parent() {
+            if !parent.exists() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create parent directory: {}", e))?;
+            }
+        }
+        if !target.exists() {
+            std::fs::write(&target, "").map(|_| true).map_err(|e| format!("Failed to create file: {}", e))
+        } else {
+            Ok(true)
+        }
+    }
+}
+
+#[tauri::command]
+fn delete_project_path(path: String) -> Result<bool, String> {
+    let target = std::path::PathBuf::from(&path);
+    if !target.exists() {
+        return Ok(true);
+    }
+    if target.is_dir() {
+        std::fs::remove_dir_all(&target).map(|_| true).map_err(|e| format!("Failed to remove directory: {}", e))
+    } else {
+        std::fs::remove_file(&target).map(|_| true).map_err(|e| format!("Failed to remove file: {}", e))
+    }
+}
+
+#[tauri::command]
+async fn execute_project_command(
+    project_path: String,
+    command: String,
+) -> Result<ProjectCommandResult, String> {
+    let start = std::time::Instant::now();
+    let root = std::path::PathBuf::from(&project_path);
+    if !root.exists() {
+        return Err(format!("Working directory does not exist: {}", project_path));
+    }
+
+    #[cfg(target_os = "windows")]
+    let output = {
+        let mut cmd = tokio::process::Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", &command]);
+        cmd.current_dir(&root);
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        cmd.output().await.map_err(|e| format!("Failed to execute command: {}", e))?
+    };
+
+    #[cfg(not(target_os = "windows"))]
+    let output = {
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.args(["-c", &command]);
+        cmd.current_dir(&root);
+        cmd.output().await.map_err(|e| format!("Failed to execute command: {}", e))?
+    };
+
+    let duration_ms = start.elapsed().as_millis() as u64;
+    let exit_code = output.status.code().unwrap_or(if output.status.success() { 0 } else { 1 });
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    Ok(ProjectCommandResult {
+        exit_code,
+        stdout,
+        stderr,
+        duration_ms,
+    })
+}
+
+#[tauri::command]
+fn get_project_git_diff(project_path: String) -> Result<serde_json::Value, String> {
+    let root = std::path::PathBuf::from(&project_path);
+    if !root.exists() {
+        return Err(format!("Project path does not exist: {}", project_path));
+    }
+
+    let branch_output = std::process::Command::new("git")
+        .args(["-C", &project_path, "rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok();
+    let branch = branch_output
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| "main".to_string());
+
+    let status_output = std::process::Command::new("git")
+        .args(["-C", &project_path, "status", "--porcelain"])
+        .output()
+        .ok();
+    let raw_status = status_output
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+
+    let mut modified_files = Vec::new();
+    for line in raw_status.lines() {
+        let trimmed = line.trim();
+        if trimmed.len() > 3 {
+            modified_files.push(trimmed[3..].trim().to_string());
+        }
+    }
+
+    let diff_output = std::process::Command::new("git")
+        .args(["-C", &project_path, "diff", "HEAD"])
+        .output()
+        .ok();
+    let diff = diff_output
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+
+    Ok(serde_json::json!({
+        "branch": branch,
+        "diff": diff,
+        "modified_files": modified_files,
+        "has_changes": !modified_files.is_empty() || !diff.is_empty(),
+    }))
+}
+
+#[tauri::command]
+fn commit_project_changes(project_path: String, message: String) -> Result<serde_json::Value, String> {
+    let clean_msg = message.trim();
+    if clean_msg.is_empty() {
+        return Err("Commit message cannot be empty".to_string());
+    }
+
+    let add_res = std::process::Command::new("git")
+        .args(["-C", &project_path, "add", "-A"])
+        .output()
+        .map_err(|e| format!("git add failed: {}", e))?;
+
+    if !add_res.status.success() {
+        return Err(String::from_utf8_lossy(&add_res.stderr).to_string());
+    }
+
+    let commit_res = std::process::Command::new("git")
+        .args(["-C", &project_path, "commit", "-m", clean_msg])
+        .output()
+        .map_err(|e| format!("git commit failed: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&commit_res.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&commit_res.stderr).to_string();
+
+    Ok(serde_json::json!({
+        "success": commit_res.status.success(),
+        "stdout": stdout,
+        "stderr": stderr,
+    }))
+}
+
 pub fn run() {
     let db = match Database::open_app_database() {
         Ok(d) => Arc::new(Mutex::new(d)),
@@ -1453,7 +1708,15 @@ pub fn run() {
             app_start_dragging,
             app_close,
             scan_desktop_repos,
-            scaffold_project_archetype
+            scaffold_project_archetype,
+            inspect_project_tree,
+            read_project_file,
+            write_project_file,
+            create_project_file_or_dir,
+            delete_project_path,
+            execute_project_command,
+            get_project_git_diff,
+            commit_project_changes
         ])
         .setup(|app| {
             let state = app.state::<AppState>();

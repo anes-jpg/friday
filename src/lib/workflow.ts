@@ -5,6 +5,10 @@ import type {
   DiscoveredRepo,
   ScaffoldArchetype,
   ProjectArchetypeId,
+  ProjectFileNode,
+  ProjectCommandResult,
+  ProjectScript,
+  ProjectGitDiffInfo,
 } from "./types"
 
 export const SCAFFOLD_ARCHETYPES: ScaffoldArchetype[] = [
@@ -382,19 +386,244 @@ export function importDiscoveredRepo(repo: DiscoveredRepo): ProjectWorkspace {
   return newWorkspace
 }
 
-/** AI & Deterministic Task Decomposition: parses a high-level directive into actionable tasks. */
-export function decomposeDirectiveIntoTasks(projectId: string, directive: string): WorkspaceItem[] {
-  const clean = directive.trim()
+/** AI & Deterministic Task Decomposition: parses project directive or objective into actionable tasks, goals, and milestones. */
+export function decomposeDirectiveIntoTasks(
+  projectId: string,
+  directive: string,
+  projectName?: string,
+  customObjective?: string
+): WorkspaceItem[] {
+  const cleanDirective = directive.trim()
+  const cleanName = (projectName || "").toLowerCase()
+  const obj = (customObjective || "").trim()
   const now = Date.now()
 
+  // Case 1: Custom Objective specified by user
+  if (obj) {
+    return [
+      {
+        id: `task-${now}-obj-1`,
+        projectId,
+        type: "task",
+        title: `Architect implementation plan: ${obj.slice(0, 50)}`,
+        description: `Define component structure, interfaces, and safety constraints for ${obj}.`,
+        status: "in-progress",
+        priority: "critical",
+        riskTier: "green",
+        dueDate: "Today",
+        tag: "Plan",
+      },
+      {
+        id: `task-${now}-obj-2`,
+        projectId,
+        type: "task",
+        title: `Implement core logic and modules for: ${obj.slice(0, 45)}`,
+        description: "Write type-safe functions, integrate state management, and ensure zero runtime errors.",
+        status: "todo",
+        priority: "high",
+        riskTier: "green",
+        dueDate: "Tomorrow",
+        tag: "Feature",
+      },
+      {
+        id: `task-${now}-obj-3`,
+        projectId,
+        type: "task",
+        title: `Run automated tests and verify diffs for: ${obj.slice(0, 40)}`,
+        description: "Verify bundle compiles cleanly and test cases pass without regressions.",
+        status: "todo",
+        priority: "medium",
+        riskTier: "green",
+        dueDate: "This Week",
+        tag: "Verify",
+      },
+      {
+        id: `goal-${now}-obj-1`,
+        projectId,
+        type: "goal",
+        title: `Complete Objective: ${obj.slice(0, 40)}`,
+        description: `Full implementation and test coverage for: ${obj}`,
+        status: "todo",
+        progress: 0,
+        tag: "Objective",
+      },
+    ]
+  }
+
+  // Case 2: Specific Project Domain: E-Commerce / Protein (e.g. "foxxon protein")
+  if (cleanName.includes("protein") || cleanDirective.toLowerCase().includes("protein") || cleanDirective.toLowerCase().includes("shop")) {
+    return [
+      {
+        id: `task-${now}-prot-1`,
+        projectId,
+        type: "task",
+        title: "Model protein catalogue schemas and nutrition taxonomy",
+        description: "Define product attributes: whey isolate vs concentrate, flavor profiles, amino acid ratios, and serving sizes.",
+        status: "todo",
+        priority: "high",
+        riskTier: "green",
+        dueDate: "Today",
+        tag: "Data Model",
+      },
+      {
+        id: `task-${now}-prot-2`,
+        projectId,
+        type: "task",
+        title: "Build responsive product showcase grid with filter drawer",
+        description: "Implement interactive filters for dietary preferences (vegan, lactose-free, gluten-free), flavors, and price brackets.",
+        status: "todo",
+        priority: "critical",
+        riskTier: "green",
+        dueDate: "Tomorrow",
+        tag: "UI / UX",
+      },
+      {
+        id: `task-${now}-prot-3`,
+        projectId,
+        type: "task",
+        title: "Implement persistent shopping cart & rapid checkout flow",
+        description: "Configure local cart synchronization with quantity toggles, promo code engine, and order summary totals.",
+        status: "todo",
+        priority: "high",
+        riskTier: "green",
+        dueDate: "This Week",
+        tag: "Checkout",
+      },
+      {
+        id: `task-${now}-prot-4`,
+        projectId,
+        type: "task",
+        title: "Audit inventory API integration and order tracking hooks",
+        description: "Connect real-time stock availability, backorder notifications, and customer receipt generation.",
+        status: "todo",
+        priority: "medium",
+        riskTier: "amber",
+        dueDate: "Next Week",
+        tag: "API",
+      },
+      {
+        id: `task-${now}-prot-5`,
+        projectId,
+        type: "task",
+        title: "Execute performance audit & lighthouse image optimization",
+        description: "Compress high-resolution tub packaging assets into WebP and verify 60fps scrolling on mobile devices.",
+        status: "todo",
+        priority: "medium",
+        riskTier: "green",
+        dueDate: "Next Week",
+        tag: "Performance",
+      },
+      {
+        id: `goal-${now}-prot-1`,
+        projectId,
+        type: "goal",
+        title: "Storefront MVP Launch Ready",
+        description: "Fully interactive product discovery, cart, and streamlined checkout experience.",
+        status: "todo",
+        progress: 0,
+        tag: "Storefront",
+      },
+      {
+        id: `goal-${now}-prot-2`,
+        projectId,
+        type: "goal",
+        title: "Sub-100ms Page Load & Checkout Latency",
+        description: "Optimized server responses and instant client-side cart calculations.",
+        status: "todo",
+        progress: 0,
+        tag: "Latency",
+      },
+      {
+        id: `milestone-${now}-prot-1`,
+        projectId,
+        type: "milestone",
+        title: "Product Grid & Dietary Filtering Complete",
+        status: "todo",
+        dueDate: "Oct 18, 2026",
+        tag: "Milestone",
+      },
+      {
+        id: `milestone-${now}-prot-2`,
+        projectId,
+        type: "milestone",
+        title: "Payment Processing & Production Launch",
+        status: "todo",
+        dueDate: "Oct 28, 2026",
+        tag: "Milestone",
+      },
+    ]
+  }
+
+  // Case 3: Desktop Operator / Voice / Rust System
+  if (cleanDirective.toLowerCase().includes("voice") || cleanDirective.toLowerCase().includes("tauri") || cleanDirective.toLowerCase().includes("rust")) {
+    return [
+      {
+        id: `task-${now}-sys-1`,
+        projectId,
+        type: "task",
+        title: "Optimize audio pipeline streaming & VAD endpointer",
+        description: "Ensure non-verbal acoustic acknowledgement under 150ms and zero CPU burn in idle state.",
+        status: "todo",
+        priority: "critical",
+        riskTier: "green",
+        dueDate: "Today",
+        tag: "Voice",
+      },
+      {
+        id: `task-${now}-sys-2`,
+        projectId,
+        type: "task",
+        title: "Enforce zero unwrap in Rust backend and add integration tests",
+        description: "Replace any remaining unwrap calls with robust Result<T, String> error propagation.",
+        status: "todo",
+        priority: "high",
+        riskTier: "green",
+        dueDate: "Tomorrow",
+        tag: "Safety",
+      },
+      {
+        id: `task-${now}-sys-3`,
+        projectId,
+        type: "task",
+        title: "Complete in-app code editor & terminal script runner",
+        description: "Full self-contained developer workstation with zero external IDE dependencies.",
+        status: "todo",
+        priority: "high",
+        riskTier: "green",
+        dueDate: "This Week",
+        tag: "Console",
+      },
+      {
+        id: `goal-${now}-sys-1`,
+        projectId,
+        type: "goal",
+        title: "Constitutional Safety & Sub-Frame Latency Compliance",
+        description: "100% adherence to Surface Law, One-Signal Law, and Sub-Frame Law.",
+        status: "todo",
+        progress: 0,
+        tag: "Constitution",
+      },
+      {
+        id: `milestone-${now}-sys-1`,
+        projectId,
+        type: "milestone",
+        title: "Self-Contained Standalone Desktop Release",
+        status: "todo",
+        dueDate: "Oct 25, 2026",
+        tag: "Release",
+      },
+    ]
+  }
+
+  // Default Standard Full-Stack Web / App Roadmap
   return [
     {
       id: `task-${now}-1`,
       projectId,
       type: "task",
-      title: `Architect system scaffolding for: ${clean.slice(0, 48)}`,
-      description: "Establish baseline components, configuration, and environment variables.",
-      status: "in-progress",
+      title: `Architect system scaffolding for: ${cleanDirective.slice(0, 48)}`,
+      description: "Establish baseline components, configuration, environment variables, and build tools.",
+      status: "todo",
       priority: "critical",
       riskTier: "green",
       dueDate: "Today",
@@ -404,8 +633,8 @@ export function decomposeDirectiveIntoTasks(projectId: string, directive: string
       id: `task-${now}-2`,
       projectId,
       type: "task",
-      title: "Implement primary data contracts and schemas",
-      description: "Define strongly-typed interfaces, models, and database migration files.",
+      title: "Implement primary data models and typed contracts",
+      description: "Define strongly-typed interfaces, database schemas, and validation boundaries.",
       status: "todo",
       priority: "high",
       riskTier: "amber",
@@ -416,8 +645,20 @@ export function decomposeDirectiveIntoTasks(projectId: string, directive: string
       id: `task-${now}-3`,
       projectId,
       type: "task",
+      title: "Develop user interface components with dark-mode styling",
+      description: "Craft responsive view layouts with fluid motion and keyboard accessibility.",
+      status: "todo",
+      priority: "high",
+      riskTier: "green",
+      dueDate: "This Week",
+      tag: "Frontend",
+    },
+    {
+      id: `task-${now}-4`,
+      projectId,
+      type: "task",
       title: "Execute automated code review and diff verification",
-      description: "Enforce strict constitutional safety laws, zero unwrap, and sub-frame performance.",
+      description: "Verify clean compilation, test coverage, and constitutional performance gates.",
       status: "todo",
       priority: "medium",
       riskTier: "green",
@@ -429,11 +670,200 @@ export function decomposeDirectiveIntoTasks(projectId: string, directive: string
       projectId,
       type: "goal",
       title: "Deliver Functional MVP Milestone",
-      description: `Successful delivery of: ${clean}`,
+      description: `Successful delivery of: ${cleanDirective}`,
       status: "todo",
-      progress: 15,
+      progress: 0,
       tag: "Goal",
     },
+    {
+      id: `milestone-${now}-1`,
+      projectId,
+      type: "milestone",
+      title: "Core Architecture & Scaffolding Landed",
+      status: "todo",
+      dueDate: "Oct 20, 2026",
+      tag: "Milestone",
+    },
+  ]
+}
+
+/* ── In-App Developer Workstation Helpers ───────────────────────────────────── */
+
+/** Recursively reads the project directory tree for the In-App Code Studio. */
+export async function inspectProjectTree(rootPath: string, maxDepth = 3): Promise<ProjectFileNode[]> {
+  if (isDesktop) {
+    try {
+      const nodes = await invokeCommand<ProjectFileNode[]>("inspect_project_tree", {
+        path: rootPath,
+        maxDepth,
+      })
+      if (Array.isArray(nodes)) return nodes
+    } catch (e) {
+      console.warn("[FRIDAY Workflow] inspect_project_tree IPC error:", e)
+    }
+  }
+
+  // Fallback placeholder tree for offline/browser mode
+  return [
+    {
+      name: "src",
+      path: `${rootPath}\\src`,
+      is_dir: true,
+      children: [
+        { name: "App.tsx", path: `${rootPath}\\src\\App.tsx`, is_dir: false, size_bytes: 4200 },
+        { name: "index.css", path: `${rootPath}\\src\\index.css`, is_dir: false, size_bytes: 1850 },
+        { name: "main.tsx", path: `${rootPath}\\src\\main.tsx`, is_dir: false, size_bytes: 850 },
+      ],
+    },
+    { name: "package.json", path: `${rootPath}\\package.json`, is_dir: false, size_bytes: 1420 },
+    { name: "README.md", path: `${rootPath}\\README.md`, is_dir: false, size_bytes: 2300 },
+  ]
+}
+
+/** Reads a project file from disk. */
+export async function readProjectFile(filePath: string): Promise<string> {
+  if (isDesktop) {
+    try {
+      const text = await invokeCommand<string>("read_project_file", { path: filePath })
+      if (typeof text === "string") return text
+    } catch (e) {
+      console.warn("[FRIDAY Workflow] read_project_file IPC error:", e)
+      throw e
+    }
+  }
+  return `// Offline mock content for ${filePath}\nexport default function App() {\n  return <div>Loaded in FRIDAY In-App Editor</div>;\n}`
+}
+
+/** Writes a file to disk directly from FRIDAY's In-App Editor. */
+export async function writeProjectFile(filePath: string, content: string): Promise<boolean> {
+  if (isDesktop) {
+    try {
+      return await invokeCommand<boolean>("write_project_file", { path: filePath, content })
+    } catch (e) {
+      console.error("[FRIDAY Workflow] write_project_file IPC error:", e)
+      throw e
+    }
+  }
+  return true
+}
+
+/** Creates a new file or directory inside the active project. */
+export async function createProjectFileOrDir(targetPath: string, isDir: boolean): Promise<boolean> {
+  if (isDesktop) {
+    try {
+      return await invokeCommand<boolean>("create_project_file_or_dir", { path: targetPath, isDir })
+    } catch (e) {
+      console.error("[FRIDAY Workflow] create_project_file_or_dir error:", e)
+      throw e
+    }
+  }
+  return true
+}
+
+/** Deletes a file or directory in the active project. */
+export async function deleteProjectPath(targetPath: string): Promise<boolean> {
+  if (isDesktop) {
+    try {
+      return await invokeCommand<boolean>("delete_project_path", { path: targetPath })
+    } catch (e) {
+      console.error("[FRIDAY Workflow] delete_project_path error:", e)
+      throw e
+    }
+  }
+  return true
+}
+
+/** Executes a terminal command in the project directory using the In-App Terminal runner. */
+export async function executeProjectCommand(
+  projectPath: string,
+  command: string
+): Promise<ProjectCommandResult> {
+  if (isDesktop) {
+    try {
+      return await invokeCommand<ProjectCommandResult>("execute_project_command", {
+        projectPath,
+        command,
+      })
+    } catch (e) {
+      return {
+        exit_code: 1,
+        stdout: "",
+        stderr: String(e),
+        duration_ms: 0,
+      }
+    }
+  }
+  return {
+    exit_code: 0,
+    stdout: `[FRIDAY In-App Terminal Sim]\nExecuted '${command}' in ${projectPath}\nDone in 42ms.`,
+    stderr: "",
+    duration_ms: 42,
+  }
+}
+
+/** Retrieves git diff and modified files for the active project. */
+export async function getProjectGitDiff(projectPath: string): Promise<ProjectGitDiffInfo> {
+  if (isDesktop) {
+    try {
+      const res = await invokeCommand<ProjectGitDiffInfo>("get_project_git_diff", { projectPath })
+      if (res && typeof res.branch === "string") return res
+    } catch (e) {
+      console.warn("[FRIDAY Workflow] get_project_git_diff IPC error:", e)
+    }
+  }
+  return {
+    branch: "main",
+    diff: "",
+    modified_files: [],
+    has_changes: false,
+  }
+}
+
+/** Commits git changes from FRIDAY's In-App Git Viewer. */
+export async function commitProjectChanges(
+  projectPath: string,
+  message: string
+): Promise<{ success: boolean; stdout: string; stderr: string }> {
+  if (isDesktop) {
+    try {
+      return await invokeCommand<{ success: boolean; stdout: string; stderr: string }>(
+        "commit_project_changes",
+        { projectPath, message }
+      )
+    } catch (e) {
+      return { success: false, stdout: "", stderr: String(e) }
+    }
+  }
+  return { success: true, stdout: "[Sim] Committed in offline mode", stderr: "" }
+}
+
+/** Detects runnable package scripts from package.json or Cargo.toml in the project root. */
+export async function detectProjectScripts(rootPath: string): Promise<ProjectScript[]> {
+  try {
+    const pkgText = await readProjectFile(`${rootPath}\\package.json`)
+    const parsed = JSON.parse(pkgText)
+    if (parsed.scripts && typeof parsed.scripts === "object") {
+      const result: ProjectScript[] = []
+      for (const [name, cmd] of Object.entries(parsed.scripts)) {
+        if (typeof cmd === "string") {
+          let category: ProjectScript["category"] = "other"
+          if (name.includes("dev") || name.includes("start")) category = "dev"
+          else if (name.includes("build")) category = "build"
+          else if (name.includes("test")) category = "test"
+          else if (name.includes("lint")) category = "lint"
+          result.push({ name, command: `npm run ${name}`, category })
+        }
+      }
+      return result
+    }
+  } catch {}
+
+  // Fallback defaults if no package.json or unreadable
+  return [
+    { name: "dev", command: "npm run dev", category: "dev" },
+    { name: "build", command: "npm run build", category: "build" },
+    { name: "test", command: "npm test", category: "test" },
+    { name: "status", command: "git status", category: "other" },
   ]
 }
 

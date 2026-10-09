@@ -435,4 +435,35 @@ export interface ProjectWorkflow {
   status: "idle" | "running" | "awaiting_confirm" | "completed" | "failed"
 }
 
+export interface ProjectFileNode {
+  name: string
+  path: string
+  is_dir: boolean
+  size_bytes?: number
+  children?: ProjectFileNode[]
+}
+
+export interface ProjectCommandResult {
+  exit_code: number
+  stdout: string
+  stderr: string
+  duration_ms: number
+}
+
+export type ProjectTabSubView = "roadmap" | "code" | "terminal" | "git" | "settings"
+
+export interface ProjectScript {
+  name: string
+  command: string
+  category?: "dev" | "build" | "test" | "lint" | "other"
+}
+
+export interface ProjectGitDiffInfo {
+  branch: string
+  diff: string
+  modified_files: string[]
+  has_changes: boolean
+}
+
+
 
