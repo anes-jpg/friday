@@ -1132,7 +1132,7 @@ export function useActiveThread(): Thread | null {
 }
 
 /** Dispatches a real message turn into the active thread and queries backend GLM. */
-export async function sendChatMessage(text: string) {
+export async function sendChatMessage(text: string, expandedMode: boolean = false) {
   const clean = text.trim()
   if (!clean) return
 
@@ -1172,7 +1172,11 @@ export async function sendChatMessage(text: string) {
       content: m.content,
     }))
 
-    const aiRes = await executeAiTurn(clean, recentMessages)
+    const promptPayload = expandedMode
+      ? `${clean}\n\n[Instruction: Expanded Mode is ON. Provide a comprehensive, in-depth breakdown with detailed comparisons, tables, and thorough options.]`
+      : `${clean}\n\n[Instruction: Concise Mode. Keep your visual and spoken answer concise, direct, and human. Give the key recommendation and summary without spitting out huge multi-page walls of text or endless tables.]`
+
+    const aiRes = await executeAiTurn(promptPayload, recentMessages, expandedMode ? "expanded" : "command")
 
     store.pushMessage(threadId, {
       id: asstMsgId,

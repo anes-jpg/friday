@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Mic, Paperclip, Send, Square, Bot, Sparkles, Terminal, Code2,
-  Check, ShieldAlert, Layers, FileText, X, Maximize2, Minimize2,
+  Check, ShieldAlert, Layers, FileText, X, Maximize2,
 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -235,6 +235,8 @@ export function FridayComposer({
   onVoice,
   onStop,
   busy,
+  expanded = false,
+  onToggleExpanded,
 }: {
   value: string
   onValueChange: (value: string) => void
@@ -242,6 +244,8 @@ export function FridayComposer({
   onVoice: () => void
   onStop: () => void
   busy: boolean
+  expanded?: boolean
+  onToggleExpanded?: () => void
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
 
@@ -270,13 +274,30 @@ export function FridayComposer({
         className="max-h-36 min-h-10 resize-none border-0 bg-transparent px-2 py-2 shadow-none focus-visible:ring-0 text-sm text-[hsl(var(--ink))] placeholder:text-[hsl(var(--muted))]"
       />
       <div className="flex items-center justify-between border-t border-black/10 px-1 pt-2 dark:border-white/10">
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
           <Button type="button" variant="ghost" size="icon-sm" aria-label="Attach file">
             <Paperclip aria-hidden className="size-4 text-[hsl(var(--muted))]" />
           </Button>
           <Button type="button" variant="ghost" size="icon-sm" onClick={onVoice} aria-label="Start voice input">
             <Mic aria-hidden className="size-4 text-[hsl(var(--muted))]" />
           </Button>
+          {onToggleExpanded && (
+            <button
+              type="button"
+              onClick={onToggleExpanded}
+              title={expanded ? "Expanded Mode: detailed breakdown with full tables" : "Concise Mode: brief, direct answer"}
+              aria-label={expanded ? "Expanded mode enabled" : "Expanded mode disabled"}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono font-medium border transition-colors cursor-pointer select-none ${
+                expanded
+                  ? "border-[hsl(var(--signal))]/50 bg-[hsl(var(--signal))]/15 text-[hsl(var(--signal))]"
+                  : "border-black/10 dark:border-white/10 bg-transparent text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))] hover:bg-black/5 dark:hover:bg-white/5"
+              }`}
+            >
+              <Maximize2 className="size-3" />
+              <span>Expanded</span>
+              {expanded && <span className="size-1.5 rounded-full bg-[hsl(var(--signal))] animate-pulse" />}
+            </button>
+          )}
         </div>
         <Button
           type={busy ? "button" : "submit"}
@@ -298,24 +319,10 @@ export const ChatTab: React.FC = () => {
   const partialText = useFriday((s) => s.utterance?.partial || "")
   const orbState = useFriday((s) => s.orb)
   const [inputText, setInputText] = useState("")
+  const [expandedMode, setExpandedMode] = useState(false)
   const threadMessages = activeThread?.messages || []
   const busy = orbState === "thinking" || orbState === "speaking"
   const messagesEndRef = useRef<HTMLDivElement>(null)
-
-  const [globalExpanded, setGlobalExpanded] = useState(false)
-  const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(new Set())
-
-  const toggleExpanded = (id: string) => {
-    setExpandedMessageIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) {
-        next.delete(id)
-      } else {
-        next.add(id)
-      }
-      return next
-    })
-  }
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -323,7 +330,7 @@ export const ChatTab: React.FC = () => {
 
   const handleSend = () => {
     if (!inputText.trim()) return
-    sendChatMessage(inputText)
+    sendChatMessage(inputText, expandedMode)
     setInputText("")
   }
 
@@ -349,28 +356,13 @@ export const ChatTab: React.FC = () => {
       {/* Messages area with editorial column layout */}
       <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto max-w-[760px] w-full space-y-6">
-          {/* Active Surface Header with Global Expanded Mode Toggle */}
+          {/* Subtle Operating Surface Header */}
           {threadMessages.length > 0 && (
-            <div className="flex items-center justify-between pb-3 border-b border-black/10 dark:border-white/[0.08] text-xs font-mono select-none">
-              <div className="flex items-center gap-2 text-[hsl(var(--muted))] text-[11px]">
-                <FridayOrb size={12} dotSize={1.2} />
-                <span className="tracking-wider uppercase font-semibold text-[hsl(var(--ink))]">OPERATING SURFACE</span>
-                <span>·</span>
-                <span>{threadMessages.length} {threadMessages.length === 1 ? "turn" : "turns"}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setGlobalExpanded((prev) => !prev)}
-                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono font-medium border transition-colors cursor-pointer shadow-xs ${
-                  globalExpanded
-                    ? "border-[hsl(var(--signal))]/50 bg-[hsl(var(--signal))]/15 text-[hsl(var(--signal))]"
-                    : "border-black/10 dark:border-white/10 bg-[hsl(var(--surface-raised))] text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))] hover:border-black/20 dark:hover:border-white/20"
-                }`}
-                title={globalExpanded ? "Switch to concise mode" : "Always show full tables and tool outputs"}
-              >
-                {globalExpanded ? <Maximize2 className="size-3 text-[hsl(var(--signal))]" /> : <Minimize2 className="size-3" />}
-                <span>Expanded Mode: {globalExpanded ? "ON" : "OFF"}</span>
-              </button>
+            <div className="flex items-center gap-2 pb-2 border-b border-black/10 dark:border-white/[0.08] text-[11px] font-mono text-[hsl(var(--muted))] select-none">
+              <FridayOrb size={12} dotSize={1.2} />
+              <span className="tracking-wider uppercase font-semibold text-[hsl(var(--ink))]">OPERATING SURFACE</span>
+              <span>·</span>
+              <span>{threadMessages.length} {threadMessages.length === 1 ? "turn" : "turns"}</span>
             </div>
           )}
           {threadMessages.length === 0 ? (
@@ -417,7 +409,7 @@ export const ChatTab: React.FC = () => {
                     msg.role === "user" ? "items-end" : "items-start"
                   }`}
                 >
-                  {/* 10px mono role/time header with Expand button */}
+                  {/* 10px mono role/time header */}
                   <div className="flex items-center justify-between w-full font-instrument text-[10px] uppercase tracking-[.11em] text-[hsl(var(--muted))] select-none">
                     <div className="flex items-center gap-2">
                       {msg.role !== "user" && <FridayOrb size={13} dotSize={1.2} className="mr-0.5 shrink-0" />}
@@ -433,38 +425,6 @@ export const ChatTab: React.FC = () => {
                         </>
                       )}
                     </div>
-
-                    {msg.role === "assistant" && (() => {
-                      const { showContent } = parseMessageDisplay(msg)
-                      const calls = msg.toolCalls || msg.tool_calls
-                      const hasCalls = Boolean(calls && calls.length > 0)
-                      const isLong = showContent.length > 220 || showContent.includes("|") || hasCalls
-                      if (!isLong) return null
-                      const isExpanded = globalExpanded || expandedMessageIds.has(msg.id)
-                      return (
-                        <button
-                          type="button"
-                          onClick={() => toggleExpanded(msg.id)}
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono border transition-colors cursor-pointer ${
-                            isExpanded
-                              ? "border-black/15 dark:border-white/15 bg-black/5 dark:bg-white/5 text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))]"
-                              : "border-[hsl(var(--signal))]/40 bg-[hsl(var(--signal))]/10 text-[hsl(var(--signal))] hover:bg-[hsl(var(--signal))]/20"
-                          }`}
-                        >
-                          {isExpanded ? (
-                            <>
-                              <Minimize2 className="size-2.5" />
-                              <span>Collapse</span>
-                            </>
-                          ) : (
-                            <>
-                              <Maximize2 className="size-2.5" />
-                              <span>Expanded Mode</span>
-                            </>
-                          )}
-                        </button>
-                      )
-                    })()}
                   </div>
 
                   {/* Message Body */}
@@ -478,8 +438,6 @@ export const ChatTab: React.FC = () => {
                         const { sayText, showContent } = parseMessageDisplay(msg)
                         const calls = msg.toolCalls || msg.tool_calls
                         const hasCalls = Boolean(calls && calls.length > 0)
-                        const isExpanded = globalExpanded || expandedMessageIds.has(msg.id)
-                        const isLongContent = showContent.length > 220 || showContent.includes("|") || hasCalls
 
                         return (
                           <>
@@ -495,163 +453,107 @@ export const ChatTab: React.FC = () => {
                             )}
 
                             {showContent && (
-                              <div className="space-y-3">
-                                <div
-                                  className={`text-[13.5px] leading-relaxed text-[hsl(var(--ink))]/90 font-sans space-y-3 overflow-hidden transition-all ${
-                                    !isExpanded && isLongContent
-                                      ? "max-h-[160px] relative select-none"
-                                      : ""
-                                  }`}
-                                >
-                                  <ReactMarkdown
-                                    remarkPlugins={[remarkGfm]}
-                                    components={{
-                                      h1: ({ children }) => (
-                                        <h1 className="mt-4 mb-2 text-[16px] font-semibold tracking-tight text-[hsl(var(--ink))] border-b border-white/[0.06] pb-1.5 flex items-center gap-2">
+                              <div className="space-y-3 text-[13.5px] leading-relaxed text-[hsl(var(--ink))]/90 font-sans">
+                                <ReactMarkdown
+                                  remarkPlugins={[remarkGfm]}
+                                  components={{
+                                    h1: ({ children }) => (
+                                      <h1 className="mt-4 mb-2 text-[16px] font-semibold tracking-tight text-[hsl(var(--ink))] border-b border-white/[0.06] pb-1.5 flex items-center gap-2">
+                                        {children}
+                                      </h1>
+                                    ),
+                                    h2: ({ children }) => (
+                                      <h2 className="mt-3.5 mb-1.5 text-[14px] font-semibold tracking-tight text-[hsl(var(--ink))]">
+                                        {children}
+                                      </h2>
+                                    ),
+                                    h3: ({ children }) => (
+                                      <h3 className="mt-3 mb-1 text-[11px] font-mono uppercase tracking-[0.08em] text-[hsl(var(--signal))] font-semibold">
+                                        {children}
+                                      </h3>
+                                    ),
+                                    p: ({ children }) => (
+                                      <p className="mb-2.5 text-[13px] leading-relaxed text-[hsl(var(--ink))]/90 last:mb-0">
+                                        {children}
+                                      </p>
+                                    ),
+                                    ul: ({ children }) => (
+                                      <ul className="my-2.5 ml-4 list-disc space-y-1.5 text-[13px] text-[hsl(var(--ink))]/90 marker:text-[hsl(var(--signal))]">
+                                        {children}
+                                      </ul>
+                                    ),
+                                    ol: ({ children }) => (
+                                      <ol className="my-2.5 ml-4 list-decimal space-y-1.5 text-[13px] text-[hsl(var(--ink))]/90 marker:text-[hsl(var(--signal))] marker:font-mono">
+                                        {children}
+                                      </ol>
+                                    ),
+                                    li: ({ children }) => (
+                                      <li className="leading-relaxed pl-1">{children}</li>
+                                    ),
+                                    strong: ({ children }) => (
+                                      <strong className="font-semibold text-white">{children}</strong>
+                                    ),
+                                    blockquote: ({ children }) => (
+                                      <blockquote className="my-3 border-l-2 border-[hsl(var(--signal))] bg-[hsl(var(--signal))]/5 px-3.5 py-2 rounded-r-lg text-[12.5px] text-[hsl(var(--muted))] italic">
+                                        {children}
+                                      </blockquote>
+                                    ),
+                                    table: ({ children }) => (
+                                      <div className="my-3 w-full overflow-x-auto rounded-xl border border-white/10 bg-black/40 shadow-sm">
+                                        <table className="w-full text-left text-xs border-collapse font-sans min-w-[500px]">
                                           {children}
-                                        </h1>
-                                      ),
-                                      h2: ({ children }) => (
-                                        <h2 className="mt-3.5 mb-1.5 text-[14px] font-semibold tracking-tight text-[hsl(var(--ink))]">
-                                          {children}
-                                        </h2>
-                                      ),
-                                      h3: ({ children }) => (
-                                        <h3 className="mt-3 mb-1 text-[11px] font-mono uppercase tracking-[0.08em] text-[hsl(var(--signal))] font-semibold">
-                                          {children}
-                                        </h3>
-                                      ),
-                                      p: ({ children }) => (
-                                        <p className="mb-2.5 text-[13px] leading-relaxed text-[hsl(var(--ink))]/90 last:mb-0">
-                                          {children}
-                                        </p>
-                                      ),
-                                      ul: ({ children }) => (
-                                        <ul className="my-2.5 ml-4 list-disc space-y-1.5 text-[13px] text-[hsl(var(--ink))]/90 marker:text-[hsl(var(--signal))]">
-                                          {children}
-                                        </ul>
-                                      ),
-                                      ol: ({ children }) => (
-                                        <ol className="my-2.5 ml-4 list-decimal space-y-1.5 text-[13px] text-[hsl(var(--ink))]/90 marker:text-[hsl(var(--signal))] marker:font-mono">
-                                          {children}
-                                        </ol>
-                                      ),
-                                      li: ({ children }) => (
-                                        <li className="leading-relaxed pl-1">{children}</li>
-                                      ),
-                                      strong: ({ children }) => (
-                                        <strong className="font-semibold text-white">{children}</strong>
-                                      ),
-                                      blockquote: ({ children }) => (
-                                        <blockquote className="my-3 border-l-2 border-[hsl(var(--signal))] bg-[hsl(var(--signal))]/5 px-3.5 py-2 rounded-r-lg text-[12.5px] text-[hsl(var(--muted))] italic">
-                                          {children}
-                                        </blockquote>
-                                      ),
-                                      table: ({ children }) => (
-                                        <div className="my-3 w-full overflow-x-auto rounded-xl border border-white/10 bg-black/40 shadow-sm">
-                                          <table className="w-full text-left text-xs border-collapse font-sans min-w-[500px]">
-                                            {children}
-                                          </table>
-                                        </div>
-                                      ),
-                                      thead: ({ children }) => (
-                                        <thead className="border-b border-white/10 bg-white/5 uppercase tracking-wider text-[10.5px] font-mono text-[hsl(var(--muted))]">
-                                          {children}
-                                        </thead>
-                                      ),
-                                      th: ({ children }) => (
-                                        <th className="px-3.5 py-2.5 font-semibold text-[hsl(var(--ink))] whitespace-nowrap">
-                                          {children}
-                                        </th>
-                                      ),
-                                      td: ({ children }) => (
-                                        <td className="px-3.5 py-2 border-t border-white/5 text-[hsl(var(--ink))]/90 whitespace-normal leading-relaxed text-[12px]">
-                                          {children}
-                                        </td>
-                                      ),
-                                      tr: ({ children }) => (
-                                        <tr className="hover:bg-white/[0.03] transition-colors even:bg-white/[0.015]">
-                                          {children}
-                                        </tr>
-                                      ),
-                                      code: ({ inline, className, children, ...props }: any) => {
-                                        if (inline) {
-                                          return (
-                                            <code className="px-1.5 py-0.5 rounded font-mono text-[11px] bg-white/10 text-[hsl(var(--signal))] border border-white/5" {...props}>
-                                              {children}
-                                            </code>
-                                          )
-                                        }
+                                        </table>
+                                      </div>
+                                    ),
+                                    thead: ({ children }) => (
+                                      <thead className="border-b border-white/10 bg-white/5 uppercase tracking-wider text-[10.5px] font-mono text-[hsl(var(--muted))]">
+                                        {children}
+                                      </thead>
+                                    ),
+                                    th: ({ children }) => (
+                                      <th className="px-3.5 py-2.5 font-semibold text-[hsl(var(--ink))] whitespace-nowrap">
+                                        {children}
+                                      </th>
+                                    ),
+                                    td: ({ children }) => (
+                                      <td className="px-3.5 py-2 border-t border-white/5 text-[hsl(var(--ink))]/90 whitespace-normal leading-relaxed text-[12px]">
+                                        {children}
+                                      </td>
+                                    ),
+                                    tr: ({ children }) => (
+                                      <tr className="hover:bg-white/[0.03] transition-colors even:bg-white/[0.015]">
+                                        {children}
+                                      </tr>
+                                    ),
+                                    code: ({ inline, className, children, ...props }: React.HTMLAttributes<HTMLElement> & { inline?: boolean }) => {
+                                      if (inline) {
                                         return (
-                                          <div className="my-3 rounded-xl border border-white/10 bg-black/50 p-3.5 overflow-x-auto font-mono text-xs shadow-inner">
-                                            <code className={className} {...props}>{children}</code>
-                                          </div>
+                                          <code className="px-1.5 py-0.5 rounded font-mono text-[11px] bg-white/10 text-[hsl(var(--signal))] border border-white/5" {...props}>
+                                            {children}
+                                          </code>
                                         )
-                                      },
-                                      hr: () => <hr className="my-3.5 border-t border-white/[0.08]" />,
-                                    }}
-                                  >
-                                    {showContent}
-                                  </ReactMarkdown>
-
-                                  {!isExpanded && isLongContent && (
-                                    <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-[hsl(var(--surface-raised))] via-[hsl(var(--surface-raised))]/80 to-transparent pointer-events-none" />
-                                  )}
-                                </div>
-
-                                {isLongContent && (
-                                  <div className="pt-1 flex items-center justify-between">
-                                    <button
-                                      type="button"
-                                      onClick={() => toggleExpanded(msg.id)}
-                                      className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-mono font-medium border transition-all cursor-pointer shadow-xs ${
-                                        isExpanded
-                                          ? "border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))]"
-                                          : "border-[hsl(var(--signal))]/40 bg-[hsl(var(--signal))]/10 hover:bg-[hsl(var(--signal))]/20 text-[hsl(var(--signal))]"
-                                      }`}
-                                    >
-                                      {isExpanded ? (
-                                        <>
-                                          <Minimize2 className="size-3.5" />
-                                          <span>Collapse Details</span>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <Maximize2 className="size-3.5" />
-                                          <span>Expanded Mode · Show Full Breakdown & Tables</span>
-                                          {hasCalls && (
-                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-black/30 dark:bg-black/40 text-[hsl(var(--signal))]">
-                                              {calls!.length} tools
-                                            </span>
-                                          )}
-                                        </>
-                                      )}
-                                    </button>
-                                  </div>
-                                )}
+                                      }
+                                      return (
+                                        <div className="my-3 rounded-xl border border-white/10 bg-black/50 p-3.5 overflow-x-auto font-mono text-xs shadow-inner">
+                                          <code className={className} {...props}>{children}</code>
+                                        </div>
+                                      )
+                                    },
+                                    hr: () => <hr className="my-3.5 border-t border-white/[0.08]" />,
+                                  }}
+                                >
+                                  {showContent}
+                                </ReactMarkdown>
                               </div>
                             )}
 
-                            {/* Tool lifecycle cards: shown in full when expanded */}
+                            {/* Tool lifecycle cards */}
                             {hasCalls && (
-                              isExpanded ? (
-                                <div className="mt-2 space-y-2">
-                                  {calls!.map((tc) => (
-                                    <ToolCallCard key={tc.id} call={tc} />
-                                  ))}
-                                </div>
-                              ) : !showContent ? (
-                                <div className="pt-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleExpanded(msg.id)}
-                                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-mono border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))] cursor-pointer"
-                                  >
-                                    <Maximize2 className="size-3 text-[hsl(var(--signal))]" />
-                                    <span>{calls!.length} tools executed · View results</span>
-                                  </button>
-                                </div>
-                              ) : null
+                              <div className="mt-2 space-y-2">
+                                {calls!.map((tc) => (
+                                  <ToolCallCard key={tc.id} call={tc} />
+                                ))}
+                              </div>
                             )}
                           </>
                         )
@@ -738,6 +640,8 @@ export const ChatTab: React.FC = () => {
               stopNativeVoice()
             }}
             busy={busy}
+            expanded={expandedMode}
+            onToggleExpanded={() => setExpandedMode((prev) => !prev)}
           />
         </div>
       </div>

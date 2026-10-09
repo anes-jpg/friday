@@ -59,7 +59,8 @@ Do not wrap the JSON in backticks or markdown code blocks if possible, or provid
 
 export async function executeAiTurn(
   userPrompt: string,
-  history: Array<{ role: string; content: string }> = []
+  history: Array<{ role: string; content: string }> = [],
+  mode: string = "command"
 ): Promise<AiTurnResult> {
   const startTime = performance.now()
   const cleanPrompt = userPrompt.trim()
@@ -80,7 +81,7 @@ export async function executeAiTurn(
 
       const res = await invokeCommand<BackendTurnRes>("submit_utterance", {
         utterance: cleanPrompt,
-        mode: "command",
+        mode,
       })
 
       if (res && (res.say || res.show)) {
