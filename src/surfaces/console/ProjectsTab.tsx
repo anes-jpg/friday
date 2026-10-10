@@ -110,6 +110,9 @@ export const ProjectsTab: React.FC = () => {
   const [selectedArchetype, setSelectedArchetype] = useState<ProjectArchetypeId>("better-t-stack")
   const [scaffoldName, setScaffoldName] = useState<string>("")
   const [scaffoldDir, setScaffoldDir] = useState<string>("")
+  const [scaffoldPackageManager, setScaffoldPackageManager] = useState<"pnpm" | "bun" | "npm">("pnpm")
+  const [scaffoldDirective, setScaffoldDirective] = useState<string>("")
+  const [tstackPreset, setTstackPreset] = useState<"fullstack" | "api" | "spa">("fullstack")
   const [aiIdeaPrompt, setAiIdeaPrompt] = useState<string>("")
   const [importFolderPath, setImportFolderPath] = useState<string>("")
   const [importFramework, setImportFramework] = useState<string>("React + Vite")
@@ -569,16 +572,26 @@ export const ProjectsTab: React.FC = () => {
       const created = await scaffoldProjectWorkspace(
         selectedArchetype,
         scaffoldName.trim(),
-        scaffoldDir.trim() || undefined
+        scaffoldDir.trim() || undefined,
+        scaffoldPackageManager,
+        scaffoldDirective
       )
       setProjects((prev) => [created, ...prev.filter((p) => p.id !== created.id)])
       setActiveId(created.id)
+      setActiveProjectId(created.id)
       setScaffoldModalOpen(false)
       setScaffoldName("")
       setScaffoldDir("")
-      toast.success(
-        `Project "${created.name}" is ready! You can now edit code and run scripts in FRIDAY.`
-      )
+      setScaffoldDirective("")
+      if (selectedArchetype === "better-t-stack") {
+        toast.success(
+          `Better-T-Stack initialized! The rest is left for FRIDAY to take care of.`
+        )
+      } else {
+        toast.success(
+          `Project "${created.name}" is ready! You can now edit code and run scripts in FRIDAY.`
+        )
+      }
     } catch {
       toast.error("Failed to create project workspace")
     } finally {
@@ -1576,35 +1589,107 @@ export const ProjectsTab: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-white/70 mb-1 font-sans">
-                        Project Name *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="e.g. my-app"
-                        value={scaffoldName}
-                        onChange={(e) => setScaffoldName(e.target.value)}
-                        className="w-full px-3 py-2 text-xs bg-black/40 border border-white/15 rounded-lg text-white focus:outline-none focus:border-[hsl(var(--signal))]"
-                      />
-                    </div>
+                    {/* T-Stack Specific Configuration */}
+                    {selectedArchetype === "better-t-stack" && (
+                      <div className="p-3.5 rounded-xl border border-[hsl(var(--signal))/0.3] bg-[hsl(var(--signal))/0.04] space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono text-[11px] uppercase tracking-wider text-white/70 font-semibold flex items-center gap-1.5">
+                            <Sparkles className="size-3 text-emerald-400" /> Better-T-Stack Configuration
+                          </span>
+                          <span className="text-[10px] font-mono text-emerald-400">Zero Tokens Burned</span>
+                        </div>
 
-                    <div>
-                      <label className="block text-xs font-medium text-white/70 mb-1 font-sans">
-                        Location on Your PC (Optional)
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Defaults to Desktop/projectName"
-                        value={scaffoldDir}
-                        onChange={(e) => setScaffoldDir(e.target.value)}
-                        className="w-full px-3 py-2 text-xs bg-black/40 border border-white/15 rounded-lg text-white focus:outline-none focus:border-[hsl(var(--signal))]"
-                      />
+                        {/* Preset Flavors */}
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            { id: "fullstack", label: "Full-Stack (Default)", desc: "Next.js 15 + Hono + Drizzle + Auth" },
+                            { id: "api", label: "API & Microservice", desc: "Hono API + Drizzle ORM + Zod" },
+                            { id: "spa", label: "Client SPA", desc: "React 19 + TanStack Query + Tailwind" },
+                          ].map((f) => (
+                            <button
+                              key={f.id}
+                              type="button"
+                              onClick={() => setTstackPreset(f.id as "fullstack" | "api" | "spa")}
+                              className={cn(
+                                "p-2 rounded-lg border text-left cursor-pointer transition-all",
+                                tstackPreset === f.id
+                                  ? "border-[hsl(var(--signal))] bg-[hsl(var(--signal))/0.15] text-white"
+                                  : "border-white/10 bg-black/20 text-white/60 hover:text-white hover:border-white/20"
+                              )}
+                            >
+                              <div className="text-[11px] font-semibold truncate leading-tight">{f.label}</div>
+                              <div className="text-[9px] text-white/50 truncate leading-tight mt-0.5">{f.desc}</div>
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Package Manager */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-mono text-white/50 shrink-0">Package Manager:</span>
+                          <div className="flex items-center gap-1.5 flex-1">
+                            {(["pnpm", "bun", "npm"] as const).map((pm) => (
+                              <button
+                                key={pm}
+                                type="button"
+                                onClick={() => setScaffoldPackageManager(pm)}
+                                className={cn(
+                                  "flex-1 py-1 px-2 rounded-md font-mono text-[10px] transition-all cursor-pointer uppercase font-medium",
+                                  scaffoldPackageManager === pm
+                                    ? "bg-white text-black font-semibold shadow-xs"
+                                    : "bg-white/[0.04] border border-white/10 text-white/60 hover:text-white"
+                                )}
+                              >
+                                {pm} {pm === "pnpm" && "★"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Directive for FRIDAY */}
+                        <div>
+                          <label className="block text-[10px] font-mono text-white/60 mb-1">
+                            Directive (What should FRIDAY build for you?)
+                          </label>
+                          <input
+                            type="text"
+                            value={scaffoldDirective}
+                            onChange={(e) => setScaffoldDirective(e.target.value)}
+                            placeholder="e.g. E-commerce store with product cards, cart drawer, and checkout..."
+                            className="w-full px-3 py-1.5 text-xs bg-black/40 border border-white/15 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-[hsl(var(--signal))]"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium text-white/70 mb-1 font-sans">
+                          Project Name *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. my-tstack-app"
+                          value={scaffoldName}
+                          onChange={(e) => setScaffoldName(e.target.value)}
+                          className="w-full px-3 py-2 text-xs bg-black/40 border border-white/15 rounded-lg text-white focus:outline-none focus:border-[hsl(var(--signal))]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-white/70 mb-1 font-sans">
+                          Location on Your PC (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Defaults to Desktop/projectName"
+                          value={scaffoldDir}
+                          onChange={(e) => setScaffoldDir(e.target.value)}
+                          className="w-full px-3 py-2 text-xs bg-black/40 border border-white/15 rounded-lg text-white focus:outline-none focus:border-[hsl(var(--signal))]"
+                        />
+                      </div>
                     </div>
-                  </div>
-                </>
+                  </>
               )}
 
               {/* Mode 2: AI Idea Generator */}

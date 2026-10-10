@@ -41,7 +41,7 @@ interface OnboardingModalProps {
 const STEPS = [
   { id: 1, label: "VOICE", title: "Acoustic Audition & Mic Check", desc: "Sub-150ms acoustic ack, Kerry Condon neural speech, and live mic telemetry." },
   { id: 2, label: "MODES", title: "Dual Operating Modes & Safety", desc: "Hold to command, tap to dictate directly into Windows with 3 safety tiers." },
-  { id: 3, label: "PROJECTS", title: "Start Your First Project", desc: "Pick a beginner-friendly template to build something new, or connect an existing project on your PC." },
+  { id: 3, label: "T-STACK", title: "T-Stack Onboarding & Scaffolding", desc: "Flagship Better-T-Stack setup (Next.js 15 + Hono + Drizzle + Better Auth). The rest is left for FRIDAY to build." },
   { id: 4, label: "BARGE-IN", title: "Instant Interrupt & Kill Switch", desc: "Sub-200ms barge-in drill and global panic kill switch." },
 ];
 
@@ -60,9 +60,12 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
   const animFrameRef = useRef<number | null>(null);
 
   // Project setup state
-  const [projectMode, setProjectMode] = useState<"scaffold" | "discover">("scaffold");
+  const [projectMode, setProjectMode] = useState<"tstack" | "other" | "discover">("tstack");
+  const [tstackPreset, setTstackPreset] = useState<"fullstack" | "api" | "spa">("fullstack");
+  const [packageManager, setPackageManager] = useState<"pnpm" | "bun" | "npm">("pnpm");
   const [selectedArchetype, setSelectedArchetype] = useState<ProjectArchetypeId>("better-t-stack");
-  const [projectName, setProjectName] = useState<string>("my-web-app");
+  const [projectName, setProjectName] = useState<string>("my-tstack-app");
+  const [projectDirective, setProjectDirective] = useState<string>("");
   const [isScaffolding, setIsScaffolding] = useState<boolean>(false);
   const [scaffoldSuccess, setScaffoldSuccess] = useState<string | null>(null);
   const [discoveredRepos, setDiscoveredRepos] = useState<DiscoveredRepo[]>([]);
@@ -207,9 +210,20 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
     setIsScaffolding(true);
     setScaffoldSuccess(null);
     try {
-      const workspace = await scaffoldProjectWorkspace(selectedArchetype, projectName);
+      const arch = projectMode === "tstack" ? "better-t-stack" : selectedArchetype;
+      const workspace = await scaffoldProjectWorkspace(
+        arch,
+        projectName,
+        undefined,
+        packageManager,
+        projectDirective
+      );
       setScaffoldSuccess(`Scaffolded ${workspace.name} at ${workspace.rootPath}`);
-      speakWithNativeVoice("Project initialized. Monorepo architecture generated with zero token consumption.");
+      if (arch === "better-t-stack") {
+        speakWithNativeVoice("Better-T-Stack initialized. The rest is left for me to take care of.");
+      } else {
+        speakWithNativeVoice("Project initialized. Architecture generated with zero token consumption.");
+      }
     } catch (e) {
       console.warn("Scaffold project error:", e);
     } finally {
@@ -416,63 +430,242 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
               </div>
             )}
 
-            {/* STEP 3: DYNAMIC PROJECT SETUP (BEGINNER-FRIENDLY) */}
+            {/* STEP 3: T-STACK ONBOARDING & SCAFFOLDING */}
             {step === 3 && (
               <div className="space-y-3 text-xs">
                 {/* Mode Selector */}
                 <div className="flex items-center p-1 rounded-xl bg-white/[0.04] border border-white/10 gap-1">
                   <button
                     type="button"
-                    onClick={() => setProjectMode("scaffold")}
-                    className={`flex-1 py-1.5 px-3 rounded-lg font-mono text-[11px] transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
-                      projectMode === "scaffold"
+                    onClick={() => {
+                      setProjectMode("tstack");
+                      setSelectedArchetype("better-t-stack");
+                      if (!projectName || projectName.startsWith("my-")) setProjectName("my-tstack-app");
+                    }}
+                    className={`flex-1 py-1.5 px-2 rounded-lg font-mono text-[11px] transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
+                      projectMode === "tstack"
                         ? "bg-white text-black font-semibold shadow-xs"
                         : "text-white/60 hover:text-white"
                     }`}
                   >
-                    <Layers className="w-3.5 h-3.5" /> New Project Templates
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-500" /> 🔥 Better-T-Stack (Flagship)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setProjectMode("other")}
+                    className={`flex-1 py-1.5 px-2 rounded-lg font-mono text-[11px] transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
+                      projectMode === "other"
+                        ? "bg-white text-black font-semibold shadow-xs"
+                        : "text-white/60 hover:text-white"
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5" /> Other Archetypes
                   </button>
                   <button
                     type="button"
                     onClick={() => setProjectMode("discover")}
-                    className={`flex-1 py-1.5 px-3 rounded-lg font-mono text-[11px] transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
+                    className={`flex-1 py-1.5 px-2 rounded-lg font-mono text-[11px] transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
                       projectMode === "discover"
                         ? "bg-white text-black font-semibold shadow-xs"
                         : "text-white/60 hover:text-white"
                     }`}
                   >
-                    <FolderGit2 className="w-3.5 h-3.5" /> Connect Existing Folder {discoveredRepos.length > 0 && `(${discoveredRepos.length})`}
+                    <FolderGit2 className="w-3.5 h-3.5" /> Existing Folder {discoveredRepos.length > 0 && `(${discoveredRepos.length})`}
                   </button>
                 </div>
 
                 {scaffoldSuccess && (
-                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs space-y-1 font-sans">
-                    <div className="flex items-center gap-2 font-semibold">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span>{scaffoldSuccess}</span>
+                  <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-white space-y-2.5 font-sans shadow-lg shadow-black/40">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                      <div>
+                        <h3 className="font-semibold text-emerald-400 text-xs">Better-T-Stack Initialized!</h3>
+                        <p className="text-[10px] font-mono text-white/50">{scaffoldSuccess}</p>
+                      </div>
                     </div>
-                    <p className="text-[11px] text-white/70 pl-6">
-                      Your project is ready! Next, ask FRIDAY in the console to add features, explore code, or run a live preview.
-                    </p>
+                    <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 space-y-1">
+                      <div className="flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-[hsl(var(--signal))]" />
+                        <span className="font-mono text-[11px] text-white font-medium">The rest is left for FRIDAY to take care of</span>
+                      </div>
+                      <p className="text-[10.5px] text-white/70 leading-relaxed">
+                        Your clean, type-safe foundation is ready. In the console, instruct FRIDAY by voice or prompt to construct pages, APIs, schemas, and components autonomously.
+                      </p>
+                    </div>
+                    <div className="flex items-center justify-between pt-0.5">
+                      <span className="font-mono text-[9px] text-white/40">Next.js 15 • TanStack Query • Hono • Drizzle • Better Auth</span>
+                      <Button
+                        onClick={handleComplete}
+                        className="h-7.5 px-3 rounded-lg bg-[hsl(var(--signal))] text-black hover:opacity-90 font-mono text-[11px] font-semibold cursor-pointer"
+                      >
+                        Launch in FRIDAY Console →
+                      </Button>
+                    </div>
                   </div>
                 )}
 
-                {/* Submode A: Scaffold Archetype */}
-                {projectMode === "scaffold" && (
+                {/* Submode 1: Dedicated Better-T-Stack Onboarding */}
+                {projectMode === "tstack" && !scaffoldSuccess && (
                   <div className="space-y-2.5">
-                    <div className="grid grid-cols-2 gap-2">
-                      {SCAFFOLD_ARCHETYPES.map((arch) => {
+                    {/* Hero Card */}
+                    <div className="p-3 rounded-xl border border-[hsl(var(--signal))/0.3] bg-[hsl(var(--signal))/0.04] space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-white text-xs">Better-T-Stack (T-Stack)</span>
+                          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-[hsl(var(--signal))] text-black font-semibold">
+                            🔥 Flagship Stack
+                          </span>
+                        </div>
+                        <span className="text-[9px] font-mono text-emerald-400">0 Tokens Burned</span>
+                      </div>
+                      <p className="text-[10.5px] text-white/70 leading-tight">
+                        End-to-end type-safe monorepo. Clean foundation scaffolded instantly. The rest is left for FRIDAY to autonomously construct upon your spoken or typed command.
+                      </p>
+                      <div className="flex flex-wrap gap-1 pt-0.5">
+                        {["Next.js 15 App Router", "TanStack Query v5", "Hono API Handlers", "Drizzle ORM & SQLite", "Better Auth", "Tailwind CSS"].map((tech) => (
+                          <span key={tech} className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/[0.06] border border-white/10 text-white/80">
+                            ✓ {tech}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Presets & Package Manager */}
+                    <div className="p-2.5 rounded-xl border border-white/10 bg-white/[0.02] space-y-2">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-mono text-[10px] uppercase tracking-wider text-white/60">T-Stack Preset</span>
+                          <span className="text-[9px] text-white/40 font-mono">Select configuration</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {[
+                            { id: "fullstack", label: "Full-Stack (Default)", desc: "Next.js 15 + Hono + Drizzle + Auth" },
+                            { id: "api", label: "API & Microservice", desc: "Hono API + Drizzle ORM + Zod" },
+                            { id: "spa", label: "Client SPA", desc: "React 19 + TanStack Query + Tailwind" },
+                          ].map((flavor) => (
+                            <button
+                              key={flavor.id}
+                              type="button"
+                              onClick={() => setTstackPreset(flavor.id as "fullstack" | "api" | "spa")}
+                              className={`p-1.5 rounded-lg border text-left transition-all cursor-pointer ${
+                                tstackPreset === flavor.id
+                                  ? "border-[hsl(var(--signal))] bg-[hsl(var(--signal))/0.12] text-white"
+                                  : "border-white/10 bg-white/[0.02] text-white/60 hover:text-white hover:border-white/20"
+                              }`}
+                            >
+                              <div className="font-semibold text-[10.5px] leading-tight mb-0.5 truncate">{flavor.label}</div>
+                              <div className="text-[8.5px] text-white/50 leading-tight line-clamp-1">{flavor.desc}</div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Package Manager */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-mono text-[10px] uppercase tracking-wider text-white/60">Package Manager</span>
+                          <span className="text-[9px] text-white/40 font-mono">Deterministically wired</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {(["pnpm", "bun", "npm"] as const).map((pm) => (
+                            <button
+                              key={pm}
+                              type="button"
+                              onClick={() => setPackageManager(pm)}
+                              className={`flex-1 py-1 px-2 rounded-lg font-mono text-[10px] transition-all cursor-pointer uppercase ${
+                                packageManager === pm
+                                  ? "bg-white text-black font-semibold shadow-xs"
+                                  : "bg-white/[0.04] border border-white/10 text-white/60 hover:text-white"
+                              }`}
+                            >
+                              {pm} {pm === "pnpm" && "★"}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Name & Directive */}
+                      <div className="space-y-1.5 pt-1 border-t border-white/[0.06]">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[9.5px] font-mono text-white/60 mb-0.5">Project Name</label>
+                            <input
+                              type="text"
+                              value={projectName}
+                              onChange={(e) => setProjectName(e.target.value)}
+                              placeholder="e.g. my-tstack-app"
+                              className="w-full h-7.5 rounded-lg bg-black/40 border border-white/15 px-2 text-xs text-white placeholder-white/30 focus:outline-none focus:border-[hsl(var(--signal))]"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[9.5px] font-mono text-white/60 mb-0.5">Target Location</label>
+                            <div className="h-7.5 rounded-lg bg-black/20 border border-white/10 px-2 text-[10.5px] font-mono text-white/40 flex items-center truncate">
+                              Desktop/{projectName || "app"}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[9.5px] font-mono text-white/60 mb-0.5">
+                            Directive (What should FRIDAY build for you?)
+                          </label>
+                          <input
+                            type="text"
+                            value={projectDirective}
+                            onChange={(e) => setProjectDirective(e.target.value)}
+                            placeholder="e.g. E-commerce store with product cards, cart drawer, and Stripe checkout..."
+                            className="w-full h-7.5 rounded-lg bg-black/40 border border-white/15 px-2 text-xs text-white placeholder-white/30 focus:outline-none focus:border-[hsl(var(--signal))]"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="pt-0.5">
+                        <Button
+                          onClick={handleScaffoldProject}
+                          disabled={isScaffolding || !projectName.trim()}
+                          className="w-full h-8.5 rounded-xl bg-white text-black hover:bg-white/90 font-mono text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer shadow-md"
+                        >
+                          {isScaffolding ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Scaffolding Better-T-Stack...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-3.5 h-3.5 text-emerald-500" /> Scaffold Better-T-Stack Workspace
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-center">
+                      <button
+                        type="button"
+                        onClick={() => setStep(4)}
+                        className="text-[10.5px] font-mono text-white/40 hover:text-white/80 transition-colors cursor-pointer underline underline-offset-2"
+                      >
+                        Skip project setup for now — explore FRIDAY first →
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Submode 2: Other Archetypes */}
+                {projectMode === "other" && !scaffoldSuccess && (
+                  <div className="space-y-2.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {SCAFFOLD_ARCHETYPES.filter((a) => a.id !== "better-t-stack").map((arch) => {
                         const isSelected = selectedArchetype === arch.id
                         return (
                           <div
                             key={arch.id}
                             onClick={() => {
                               setSelectedArchetype(arch.id)
-                              if (!projectName || projectName === "my-web-app" || projectName === "my-tstack-app" || projectName.startsWith("my-")) {
+                              if (!projectName || projectName.startsWith("my-")) {
                                 setProjectName(arch.defaultProjectName || "my-app")
                               }
                             }}
-                            className={`p-2.5 rounded-xl border transition-all cursor-pointer relative ${
+                            className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
                               isSelected
                                 ? "border-[hsl(var(--signal))] bg-[hsl(var(--signal))]/10 shadow-[0_0_15px_-3px_hsl(var(--signal)/0.3)]"
                                 : "border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.05]"
@@ -482,77 +675,43 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
                               <span className="font-semibold text-white text-xs truncate">
                                 {arch.friendlyName || arch.framework}
                               </span>
-                              <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-full font-medium ${
-                                isSelected
-                                  ? "bg-[hsl(var(--signal))] text-black"
-                                  : "bg-white/10 text-[hsl(var(--signal))]"
+                              <span className={`text-[8.5px] font-mono px-1 py-0.5 rounded-full font-medium ${
+                                isSelected ? "bg-[hsl(var(--signal))] text-black" : "bg-white/10 text-[hsl(var(--signal))]"
                               }`}>
-                                {arch.badge || arch.tag}
+                                {arch.tag}
                               </span>
                             </div>
-                            <p className="text-[10.5px] text-white/60 leading-tight mb-2 line-clamp-2">
+                            <p className="text-[10px] text-white/60 leading-tight mb-1.5 line-clamp-2">
                               {arch.beginnerSummary || arch.description}
                             </p>
-                            <div className="flex flex-wrap gap-1">
-                              {(arch.whatYouGet || arch.features.slice(0, 2)).map((feature, idx) => (
-                                <span key={idx} className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 border border-white/5 text-white/70 font-mono">
-                                  ✓ {feature}
-                                </span>
-                              ))}
-                            </div>
                           </div>
                         )
                       })}
                     </div>
 
-                    <div className="p-3 rounded-xl border border-white/10 bg-white/[0.02] space-y-2">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="text-white/70 font-mono">Project Name:</span>
-                        <span className="text-white/40 text-[10px] font-mono">
-                          Saved in Desktop/{projectName || "my-app"}
-                        </span>
-                      </div>
+                    <div className="p-2.5 rounded-xl border border-white/10 bg-white/[0.02] space-y-2">
                       <div className="flex items-center gap-2">
                         <input
                           type="text"
                           value={projectName}
                           onChange={(e) => setProjectName(e.target.value)}
-                          placeholder="e.g. my-portfolio"
-                          className="flex-1 h-8.5 rounded-lg bg-black/40 border border-white/15 px-3 text-xs text-white placeholder-white/30 focus:outline-none focus:border-[hsl(var(--signal))]"
+                          placeholder="Project name"
+                          className="flex-1 h-8 rounded-lg bg-black/40 border border-white/15 px-2.5 text-xs text-white placeholder-white/30 focus:outline-none focus:border-[hsl(var(--signal))]"
                         />
                         <Button
                           onClick={handleScaffoldProject}
                           disabled={isScaffolding || !projectName.trim()}
-                          className="h-8.5 px-4 rounded-lg bg-white text-black hover:bg-white/90 font-mono text-xs font-semibold shrink-0 cursor-pointer"
+                          className="h-8 px-4 rounded-lg bg-white text-black hover:bg-white/90 font-mono text-xs font-semibold shrink-0 cursor-pointer"
                         >
-                          {isScaffolding ? (
-                            <>
-                              <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> Initializing...
-                            </>
-                          ) : (
-                            <>
-                              <Sparkles className="w-3.5 h-3.5 text-[hsl(var(--signal))] mr-1.5" /> Create Project
-                            </>
-                          )}
+                          {isScaffolding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Create Project"}
                         </Button>
                       </div>
-                    </div>
-
-                    {/* Beginner Skip Option */}
-                    <div className="flex items-center justify-center pt-0.5">
-                      <button
-                        type="button"
-                        onClick={() => setStep(4)}
-                        className="text-[11px] font-mono text-white/40 hover:text-white/80 transition-colors cursor-pointer underline underline-offset-2"
-                      >
-                        Skip project setup for now — explore FRIDAY first →
-                      </button>
                     </div>
                   </div>
                 )}
 
-                {/* Submode B: Discover Repos */}
-                {projectMode === "discover" && (
+                {/* Submode 3: Discover Existing Desktop Repos */}
+                {projectMode === "discover" && !scaffoldSuccess && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] text-white/50 font-mono">
@@ -569,14 +728,14 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
 
                     {discoveredRepos.length === 0 && !isScanningRepos ? (
                       <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02] text-center text-white/50 text-xs">
-                        No projects detected on your Desktop. You can create a new one using the templates tab!
+                        No projects detected on your Desktop. You can create a new one using the Better-T-Stack tab!
                       </div>
                     ) : (
                       <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
                         {discoveredRepos.map((repo) => (
                           <div
                             key={repo.id}
-                            className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.03] border border-white/10 hover:border-white/20 transition-colors"
+                            className="flex items-center justify-between p-2 rounded-xl bg-white/[0.03] border border-white/10 hover:border-white/20 transition-colors"
                           >
                             <div className="min-w-0 pr-2">
                               <div className="flex items-center gap-1.5">
@@ -606,12 +765,11 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
                       </div>
                     )}
 
-                    {/* Beginner Skip Option */}
                     <div className="flex items-center justify-center pt-1">
                       <button
                         type="button"
                         onClick={() => setStep(4)}
-                        className="text-[11px] font-mono text-white/40 hover:text-white/80 transition-colors cursor-pointer underline underline-offset-2"
+                        className="text-[10.5px] font-mono text-white/40 hover:text-white/80 transition-colors cursor-pointer underline underline-offset-2"
                       >
                         Skip project setup for now — explore FRIDAY first →
                       </button>

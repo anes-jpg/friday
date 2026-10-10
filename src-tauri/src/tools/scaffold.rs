@@ -314,17 +314,35 @@ impl ScaffoldEngine {
         );
         fs::write(dir.join("README.md"), readme).map_err(|e| e.to_string())?;
 
+        let next_config = "import type { NextConfig } from 'next';\n\nconst nextConfig: NextConfig = {\n  reactStrictMode: true,\n};\n\nexport default nextConfig;\n";
+        fs::write(dir.join("next.config.ts"), next_config).map_err(|e| e.to_string())?;
+
+        let tailwind_config = "import type { Config } from 'tailwindcss';\n\nconst config: Config = {\n  content: [\n    './src/pages/**/*.{js,ts,jsx,tsx,mdx}',\n    './src/components/**/*.{js,ts,jsx,tsx,mdx}',\n    './src/app/**/*.{js,ts,jsx,tsx,mdx}',\n  ],\n  theme: {\n    extend: {},\n  },\n  plugins: [],\n};\nexport default config;\n";
+        fs::write(dir.join("tailwind.config.ts"), tailwind_config).map_err(|e| e.to_string())?;
+
+        let postcss_config = "module.exports = {\n  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n};\n";
+        fs::write(dir.join("postcss.config.js"), postcss_config).map_err(|e| e.to_string())?;
+
         let src_dir = dir.join("src");
         fs::create_dir_all(&src_dir).map_err(|e| e.to_string())?;
+
+        // TanStack Query Provider
+        let providers_dir = src_dir.join("providers");
+        fs::create_dir_all(&providers_dir).map_err(|e| e.to_string())?;
+        let query_provider_tsx = "\"use client\";\n\nimport { QueryClient, QueryClientProvider } from \"@tanstack/react-query\";\nimport { useState } from \"react\";\n\nexport function QueryProvider({ children }: { children: React.ReactNode }) {\n  const [queryClient] = useState(() => new QueryClient());\n  return (\n    <QueryClientProvider client={queryClient}>\n      {children}\n    </QueryClientProvider>\n  );\n}\n";
+        fs::write(providers_dir.join("query-provider.tsx"), query_provider_tsx).map_err(|e| e.to_string())?;
 
         // App Router
         let app_dir = src_dir.join("app");
         fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
 
-        let page_tsx = "export default function Page() {\n  return (\n    <main className=\"flex min-h-screen flex-col items-center justify-center p-8 bg-neutral-950 text-white font-sans\">\n      <div className=\"max-w-xl text-center space-y-4\">\n        <div className=\"inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-mono\">\n          Better-T-Stack Workspace Ready\n        </div>\n        <h1 className=\"text-4xl font-bold tracking-tight text-white\">Next.js 15 + Hono + Drizzle</h1>\n        <p className=\"text-neutral-400 text-sm leading-relaxed\">\n          Scaffolded deterministically by FRIDAY Desktop Operator with zero token consumption.\n        </p>\n      </div>\n    </main>\n  );\n}\n";
+        let globals_css = "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\n:root {\n  color-scheme: dark;\n}\n";
+        fs::write(app_dir.join("globals.css"), globals_css).map_err(|e| e.to_string())?;
+
+        let page_tsx = "export default function Page() {\n  return (\n    <main className=\"flex min-h-screen flex-col items-center justify-center p-8 bg-neutral-950 text-white font-sans\">\n      <div className=\"max-w-xl text-center space-y-4\">\n        <div className=\"inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-mono\">\n          Better-T-Stack Workspace Ready\n        </div>\n        <h1 className=\"text-4xl font-bold tracking-tight text-white\">Next.js 15 + Hono + Drizzle</h1>\n        <p className=\"text-neutral-400 text-sm leading-relaxed\">\n          Scaffolded deterministically by FRIDAY Desktop Operator. Speak or type in FRIDAY to construct your features.\n        </p>\n      </div>\n    </main>\n  );\n}\n";
         fs::write(app_dir.join("page.tsx"), page_tsx).map_err(|e| e.to_string())?;
 
-        let layout_tsx = "import type { Metadata } from \"next\";\n\nexport const metadata: Metadata = {\n  title: \"Better-T-Stack App\",\n  description: \"Scaffolded with FRIDAY\",\n};\n\nexport default function RootLayout({ children }: { children: React.ReactNode }) {\n  return (\n    <html lang=\"en\">\n      <body>{children}</body>\n    </html>\n  );\n}\n";
+        let layout_tsx = "import type { Metadata } from \"next\";\nimport { QueryProvider } from \"@/providers/query-provider\";\nimport \"./globals.css\";\n\nexport const metadata: Metadata = {\n  title: \"Better-T-Stack App\",\n  description: \"Scaffolded with FRIDAY\",\n};\n\nexport default function RootLayout({ children }: { children: React.ReactNode }) {\n  return (\n    <html lang=\"en\">\n      <body className=\"antialiased bg-neutral-950 text-white\">\n        <QueryProvider>{children}</QueryProvider>\n      </body>\n    </html>\n  );\n}\n";
         fs::write(app_dir.join("layout.tsx"), layout_tsx).map_err(|e| e.to_string())?;
 
         // Server / Hono

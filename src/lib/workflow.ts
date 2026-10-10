@@ -15,18 +15,30 @@ import type {
 export const SCAFFOLD_ARCHETYPES: ScaffoldArchetype[] = [
   {
     id: "better-t-stack",
-    name: "Better-T-Stack (Full-Stack Type-Safe)",
-    friendlyName: "Modern Web Application",
-    description: "Production full-stack workspace with Next.js 15, TanStack Query, Hono API, Drizzle ORM, and Better Auth.",
-    beginnerSummary: "Full-stack website with React, database, and auth ready to run out of the box.",
-    tag: "Recommended",
-    badge: "Most Popular",
+    name: "Better-T-Stack (Full-Stack TypeScript)",
+    friendlyName: "Better-T-Stack (T-Stack)",
+    description: "Production end-to-end type-safe monorepo with Next.js 15 App Router, TanStack Query v5, Hono API routes, Drizzle ORM, and Better Auth. FRIDAY takes care of all coding and implementation.",
+    beginnerSummary: "Flagship T-Stack architecture. Scaffolds instant type-safe foundation; FRIDAY builds and implements all features for you.",
+    tag: "T-Stack",
+    badge: "🔥 Flagship Stack",
     framework: "Next.js 15 + Hono + Drizzle",
-    features: ["Next.js App Router", "TanStack Query", "Hono API", "Drizzle ORM", "Better Auth"],
-    whatYouGet: ["Next.js & React 19", "Clean Tailwind Styling", "API & Database Pre-configured"],
+    features: [
+      "Next.js 15 App Router",
+      "TanStack Query v5",
+      "Hono API Route Handlers",
+      "Drizzle ORM & SQLite",
+      "Better Auth Session Engine",
+      "Tailwind CSS v3",
+    ],
+    whatYouGet: [
+      "Next.js 15 & React 19",
+      "TanStack Query v5",
+      "Hono API + Drizzle DB",
+      "Better Auth Pre-wired",
+    ],
     defaultInstallCmd: "pnpm install && pnpm dev",
-    tokenSavingsMultiplier: "98% tokens saved",
-    defaultProjectName: "my-web-app",
+    tokenSavingsMultiplier: "99% tokens saved",
+    defaultProjectName: "my-tstack-app",
   },
   {
     id: "react-bits-vite",
@@ -240,11 +252,14 @@ export async function scanDesktopRepos(): Promise<DiscoveredRepo[]> {
 export async function scaffoldProjectWorkspace(
   archetypeId: ProjectArchetypeId,
   name: string,
-  targetDirectory?: string
+  targetDirectory?: string,
+  packageManager?: "pnpm" | "bun" | "npm",
+  customDirective?: string
 ): Promise<ProjectWorkspace> {
-  const cleanName = name.trim() || "my-new-app"
+  const cleanName = name.trim() || (archetypeId === "better-t-stack" ? "my-tstack-app" : "my-new-app")
   const defaultDir = `C:\\Users\\anesx\\Desktop\\${cleanName}`
   const targetPath = targetDirectory?.trim() || defaultDir
+  const chosenPkg = packageManager || "pnpm"
 
   if (isDesktop) {
     try {
@@ -262,17 +277,27 @@ export async function scaffoldProjectWorkspace(
   const projectId = `proj-${Date.now().toString(36)}`
   const meta = await inspectProjectMetadata(targetPath)
 
+  const directiveText = customDirective?.trim()
+    || meta?.description
+    || (archetypeId === "better-t-stack"
+        ? `Better-T-Stack workspace. Build features with FRIDAY at ${targetPath}.`
+        : `${archetype.friendlyName || archetype.name} workspace at ${targetPath}`)
+
   const newWorkspace: ProjectWorkspace = {
     id: projectId,
     name: cleanName,
-    directive: meta?.description || `${archetype.friendlyName || archetype.name} workspace at ${targetPath}`,
+    directive: directiveText,
     rootPath: targetPath,
     archetype: archetypeId,
     framework: meta?.framework || archetype.framework,
-    packageManager: meta?.packageManager || "npm",
+    packageManager: chosenPkg || meta?.packageManager || "pnpm",
     status: "active",
     priority: "high",
-    tags: [archetype.framework.split(" ")[0] || "Code", "Active"],
+    tags: [
+      archetypeId === "better-t-stack" ? "T-Stack" : archetype.framework.split(" ")[0] || "Code",
+      chosenPkg.toUpperCase(),
+      "Active",
+    ],
     metadata: meta || undefined,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -284,8 +309,66 @@ export async function scaffoldProjectWorkspace(
   setActiveProjectId(newWorkspace.id)
 
   // Seed REAL actionable tasks for this project
-  const pkgCmd = meta?.packageManager || "npm"
-  const initialTasks: WorkspaceItem[] = [
+  const pkgCmd = chosenPkg
+  const initialTasks: WorkspaceItem[] = archetypeId === "better-t-stack" ? [
+    {
+      id: `task-${Date.now()}-1`,
+      projectId: newWorkspace.id,
+      type: "task",
+      title: `Run dev server (${pkgCmd} dev)`,
+      description: `Launch local dev server in ${targetPath} to view real-time Next.js and Hono preview.`,
+      status: "todo",
+      priority: "high",
+      riskTier: "green",
+      dueDate: "Today",
+      tag: "Terminal",
+    },
+    {
+      id: `task-${Date.now()}-2`,
+      projectId: newWorkspace.id,
+      type: "task",
+      title: "Inspect T-Stack foundation in Code Studio",
+      description: "Review Next.js App Router, Hono API routes, Drizzle schema, and TanStack Query setup.",
+      status: "todo",
+      priority: "medium",
+      riskTier: "green",
+      dueDate: "Today",
+      tag: "Code Studio",
+    },
+    {
+      id: `task-${Date.now()}-3`,
+      projectId: newWorkspace.id,
+      type: "task",
+      title: "Instruct FRIDAY to construct application features",
+      description: "Direct FRIDAY via voice or Prompting Pad to build your components, pages, APIs, or database models.",
+      status: "todo",
+      priority: "high",
+      riskTier: "green",
+      dueDate: "Today",
+      tag: "FRIDAY Agent",
+    },
+    {
+      id: `goal-${Date.now()}-1`,
+      projectId: newWorkspace.id,
+      type: "goal",
+      title: "Construct Application Features with FRIDAY",
+      description: "Autonomous generation of UI, APIs, and state via FRIDAY's agent loop.",
+      status: "todo",
+      priority: "high",
+      progress: 0,
+      tag: "Roadmap",
+    },
+    {
+      id: `milestone-${Date.now()}-1`,
+      projectId: newWorkspace.id,
+      type: "milestone",
+      title: "Foundation & Dev Server Online",
+      description: "Initial Better-T-Stack workspace verified and running.",
+      status: "todo",
+      dueDate: "Today",
+      tag: "Milestone",
+    },
+  ] : [
     {
       id: `task-${Date.now()}-1`,
       projectId: newWorkspace.id,
