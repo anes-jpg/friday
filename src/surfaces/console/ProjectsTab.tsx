@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
   FolderKanban,
@@ -35,6 +35,7 @@ import {
   Wrench,
   ShieldCheck,
   FolderOpen,
+  Square,
 } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -59,6 +60,7 @@ import type {
   ProjectArchetypeId,
   RiskTier,
   ProjectTabSubView,
+  ProjectMetadata,
 } from "@/lib/types"
 import {
   SCAFFOLD_ARCHETYPES,
@@ -72,6 +74,10 @@ import {
   scaffoldProjectWorkspace,
   importDiscoveredRepo,
   decomposeDirectiveIntoTasks,
+  inspectProjectMetadata,
+  initProjectGit,
+  executeProjectCommand,
+  generateRealTasksFromMetadata,
 } from "@/lib/workflow"
 
 export const ProjectsTab: React.FC = () => {
@@ -79,7 +85,7 @@ export const ProjectsTab: React.FC = () => {
   const [activeProjectId, setActiveId] = useState<string>(() => getActiveProjectId())
   const [items, setItems] = useState<WorkspaceItem[]>(() => loadWorkspaceItems())
   const [discoveredRepos, setDiscoveredRepos] = useState<DiscoveredRepo[]>([])
-  const [showReposShelf, setShowReposShelf] = useState<boolean>(true)
+  const [showReposShelf, setShowReposShelf] = useState<boolean>(false)
   const [isScanningRepos, setIsScanningRepos] = useState<boolean>(false)
 
   // Sub-navigation view: roadmap | code | terminal | git | settings
@@ -89,8 +95,14 @@ export const ProjectsTab: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>("")
   const [inlineTaskText, setInlineTaskText] = useState("")
 
-  // Autonomous execution tracking
+  // Autonomous execution tracking & cancellation
   const [executingTaskId, setExecutingTaskId] = useState<string | null>(null)
+  const executionAbortControllerRef = useRef<AbortController | null>(null)
+
+  // Real on-disk project metadata state
+  const [liveMeta, setLiveMeta] = useState<ProjectMetadata | null>(null)
+  const [isLoadingMeta, setIsLoadingMeta] = useState<boolean>(false)
+  const [isInitializingGit, setIsInitializingGit] = useState<boolean>(false)
 
   // Scaffolding & Quick Create Modals
   const [scaffoldModalOpen, setScaffoldModalOpen] = useState<boolean>(false)
@@ -115,19 +127,39 @@ export const ProjectsTab: React.FC = () => {
   const activeProject =
     projects.find((p) => p.id === activeProjectId) || projects[0] || {
       id: "proj-1",
-      name: "FRIDAY Desktop Operator v1.0",
-      directive: "Voice-first Windows desktop controller with Piper TTS, local Whisper STT, and native tool bridge.",
+      name: "FRIDAY Desktop Operator",
+      directive: "Intelligent, voice-first Windows desktop controller and developer workstation.",
       rootPath: "C:\\Users\\anesx\\Desktop\\friday",
       framework: "Tauri v2 + Rust",
       status: "active" as const,
-      targetDelivery: "Oct 20, 2026",
       priority: "critical" as const,
-      ttsEngine: "Piper v1.2",
-      searchEngine: "DuckDuckGo Crawler",
-      tags: ["Core", "Windows", "Voice"],
+      tags: ["Core", "Windows", "Voice", "Rust"],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }
+
+  // Fetch real on-disk metadata whenever active project changes
+  useEffect(() => {
+    if (!activeProject.rootPath) {
+      setLiveMeta(null)
+      return
+    }
+    let isMounted = true
+    setIsLoadingMeta(true)
+    inspectProjectMetadata(activeProject.rootPath)
+      .then((meta) => {
+        if (isMounted) {
+          setLiveMeta(meta)
+          setIsLoadingMeta(false)
+        }
+      })
+      .catch(() => {
+        if (isMounted) setIsLoadingMeta(false)
+      })
+    return () => {
+      isMounted = false
+    }
+  }, [activeProject.id, activeProject.rootPath])
 
   // Scan desktop repositories on mount
   useEffect(() => {
@@ -204,27 +236,149 @@ export const ProjectsTab: React.FC = () => {
     )
   }
 
-  // Autonomous Task Execution with FRIDAY
-  const handleRunWithFriday = async (item: WorkspaceItem) => {
-    setExecutingTaskId(item.id)
+  // Stop currently executing task
+  const handleStopTaskExecution = (taskId: string) => {
+    if (executionAbortControllerRef.current) {
+      executionAbortControllerRef.current.abort()
+      executionAbortControllerRef.current = null
+    }
+    setExecutingTaskId(null)
     setItems((prev) =>
-      prev.map((it) => (it.id === item.id ? { ...it, status: "in-progress" } : it))
+      prev.map((it) => (it.id === taskId ? { ...it, status: "todo" } : it))
     )
+    toast.info("Task execution stopped.")
+  }
+
+  // Autonomous Task Execution with FRIDAY (supports scripts & agent directives)
+  const handleRunWithFriday = async (item: WorkspaceItem) => {
+    if (executingTaskId) {
+      toast.warning("Another task is currently executing.")
+      return
+    }
+
+    setExecutingTaskId(item.id)
+    const abortCtrl = new AbortController()
+    executionAbortControllerRef.current = abortCtrl
+
     toast.info(`FRIDAY is executing: "${item.title}"...`)
 
+    // Detect if this is an executable npm/pnpm script task
+    const isScriptTask =
+      item.tag === "Terminal" ||
+      item.tag === "Build" ||
+      item.title.toLowerCase().includes("run dev") ||
+      item.title.toLowerCase().includes("build")
+
+    // Safety timeout: auto-release after 25s
+    const timeoutId = setTimeout(() => {
+      if (executionAbortControllerRef.current === abortCtrl) {
+        executionAbortControllerRef.current = null
+        setExecutingTaskId(null)
+        toast.warning("Task execution reached timeout limit (25s). Check In-App Terminal.")
+      }
+    }, 25000)
+
     try {
+      if (isScriptTask && activeProject.rootPath) {
+        let cmd = ""
+        const match = item.title.match(/\(([^)]+)\)/)
+        if (match && match[1]) {
+          cmd = match[1]
+        } else if (item.title.toLowerCase().includes("dev")) {
+          const pm = liveMeta?.packageManager || "npm"
+          cmd = `${pm} run dev`
+        } else if (item.title.toLowerCase().includes("build")) {
+          const pm = liveMeta?.packageManager || "npm"
+          cmd = `${pm} run build`
+        }
+
+        if (cmd) {
+          toast.info(`Running '${cmd}' in In-App Terminal runner...`)
+          const result = await executeProjectCommand(activeProject.rootPath, cmd)
+          if (abortCtrl.signal.aborted) return
+
+          if (result.exit_code === 0) {
+            setItems((prev) =>
+              prev.map((it) => (it.id === item.id ? { ...it, status: "done" } : it))
+            )
+            toast.success(`'${cmd}' completed successfully!`)
+          } else {
+            toast.error(
+              `Script exited with code ${result.exit_code}: ${
+                result.stderr.slice(0, 100) || "Check terminal for error"
+              }`
+            )
+            setActiveSubView("terminal")
+          }
+          return
+        }
+      }
+
+      // Voice/agent directive dispatch
       const directivePrompt = `[Project: ${activeProject.name} at ${activeProject.rootPath || ""}] Execute task: ${item.title}. Details: ${item.description || "Implement and verify changes."}`
       if (isDesktop) {
         await invokeCommand("submit_utterance", { utterance: directivePrompt, mode: "command" })
       }
+
+      if (abortCtrl.signal.aborted) return
+
       setItems((prev) =>
         prev.map((it) => (it.id === item.id ? { ...it, status: "done" } : it))
       )
       toast.success(`FRIDAY completed: "${item.title}"!`)
     } catch (e) {
-      toast.error(`Execution error: ${e}`)
+      if (!abortCtrl.signal.aborted) {
+        toast.error(`Execution error: ${e}`)
+      }
     } finally {
-      setExecutingTaskId(null)
+      clearTimeout(timeoutId)
+      if (executionAbortControllerRef.current === abortCtrl) {
+        executionAbortControllerRef.current = null
+        setExecutingTaskId(null)
+      }
+    }
+  }
+
+  // 1-Click Git Initialization for projects without git repo
+  const handleInitGit = async () => {
+    if (!activeProject.rootPath) return
+    setIsInitializingGit(true)
+    try {
+      const res = await initProjectGit(activeProject.rootPath)
+      toast.success(res || "Git initialized successfully!")
+      const fresh = await inspectProjectMetadata(activeProject.rootPath)
+      if (fresh) setLiveMeta(fresh)
+    } catch (e) {
+      toast.error(`Failed to initialize git: ${e}`)
+    } finally {
+      setIsInitializingGit(false)
+    }
+  }
+
+  // 1-Click Codebase Inspection & Real Task Generation
+  const handleInspectAndGenerateTasks = async () => {
+    if (!activeProject.rootPath) {
+      toast.error("No project root path found")
+      return
+    }
+    toast.info(`Inspecting codebase at ${activeProject.rootPath}...`)
+    try {
+      const meta = await inspectProjectMetadata(activeProject.rootPath)
+      if (!meta) {
+        toast.error("Could not inspect project metadata")
+        return
+      }
+      setLiveMeta(meta)
+      const realTasks = generateRealTasksFromMetadata(activeProject.id, meta, activeProject.rootPath)
+      setItems((prev) => {
+        const otherProjectsItems = prev.filter(
+          (it) => it.projectId && it.projectId !== activeProject.id
+        )
+        return [...realTasks, ...otherProjectsItems]
+      })
+      toast.success(`Generated ${realTasks.length} real tasks from ${meta.name} codebase!`)
+    } catch (e) {
+      toast.error(`Inspection error: ${e}`)
     }
   }
 
@@ -369,25 +523,39 @@ export const ProjectsTab: React.FC = () => {
         toast.error("Please provide a folder path on your computer")
         return
       }
-      const folderName = importFolderPath.trim().split(/[\\/]/).pop() || "imported-project"
-      const imported: ProjectWorkspace = {
-        id: `proj-${folderName.toLowerCase().replace(/[^a-z0-9]/g, "-")}`,
-        name: folderName,
-        directive: `Local repository at ${importFolderPath.trim()}. Operator intelligence enabled.`,
-        rootPath: importFolderPath.trim(),
-        framework: importFramework,
-        status: "active",
-        targetDelivery: "Sprint 42",
-        priority: "high",
-        tags: [importFramework, "Local"],
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+      setIsScaffolding(true)
+      try {
+        const folderName = importFolderPath.trim().split(/[\\/]/).pop() || "imported-project"
+        const meta = await inspectProjectMetadata(importFolderPath.trim())
+        const imported: ProjectWorkspace = {
+          id: `proj-${folderName.toLowerCase().replace(/[^a-z0-9]/g, "-")}`,
+          name: meta?.name || folderName,
+          directive: meta?.description || `Local repository at ${importFolderPath.trim()}`,
+          rootPath: importFolderPath.trim(),
+          framework: meta?.framework || importFramework,
+          packageManager: meta?.packageManager || "npm",
+          status: "active",
+          priority: "high",
+          tags: [meta?.framework || importFramework, "Local"],
+          metadata: meta || undefined,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }
+        setProjects((prev) => [imported, ...prev.filter((p) => p.id !== imported.id)])
+        setActiveId(imported.id)
+        setActiveProjectId(imported.id)
+        setScaffoldModalOpen(false)
+        setImportFolderPath("")
+        if (meta) {
+          const realTasks = generateRealTasksFromMetadata(imported.id, meta, importFolderPath.trim())
+          setItems((prev) => [...realTasks, ...prev])
+        }
+        toast.success(`Connected "${imported.name}" to FRIDAY!`)
+      } catch (e) {
+        toast.error(`Import failed: ${e}`)
+      } finally {
+        setIsScaffolding(false)
       }
-      setProjects((prev) => [imported, ...prev.filter((p) => p.id !== imported.id)])
-      setActiveId(imported.id)
-      setScaffoldModalOpen(false)
-      setImportFolderPath("")
-      toast.success(`Connected "${imported.name}" to FRIDAY!`)
       return
     }
 
@@ -418,11 +586,16 @@ export const ProjectsTab: React.FC = () => {
     }
   }
 
-  const handleImportRepo = (repo: DiscoveredRepo) => {
-    const imported = importDiscoveredRepo(repo)
-    setProjects((prev) => [imported, ...prev.filter((p) => p.id !== imported.id)])
-    setActiveId(imported.id)
-    toast.success(`Connected "${repo.name}" to FRIDAY! You can now manage it with zero VS Code reliance.`)
+  const handleImportRepo = async (repo: DiscoveredRepo) => {
+    try {
+      const imported = await importDiscoveredRepo(repo)
+      setProjects((prev) => [imported, ...prev.filter((p) => p.id !== imported.id)])
+      setActiveId(imported.id)
+      setActiveProjectId(imported.id)
+      toast.success(`Connected "${repo.name}" to FRIDAY! You can now manage it with zero VS Code reliance.`)
+    } catch (e) {
+      toast.error(`Failed to import repository: ${e}`)
+    }
   }
 
   // Decompose Directive / Initialize Roadmap
@@ -617,7 +790,7 @@ export const ProjectsTab: React.FC = () => {
               {activeProject.name}
             </h3>
             <p className="text-xs text-white/70 mt-1.5 leading-relaxed max-w-3xl">
-              {activeProject.directive}
+              {liveMeta?.description || activeProject.directive}
             </p>
 
             {/* Precision Progress Bar */}
@@ -676,6 +849,16 @@ export const ProjectsTab: React.FC = () => {
 
               <button
                 type="button"
+                onClick={handleInspectAndGenerateTasks}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-mono text-[11px] font-semibold border border-[hsl(var(--signal))/0.3] bg-[hsl(var(--signal))/0.08] hover:bg-[hsl(var(--signal))/0.2] text-[hsl(var(--signal))] transition-colors cursor-pointer"
+                title="Scan project files and generate real development tasks based on package scripts and git status"
+              >
+                <Sparkles className="size-3.5 text-current" />
+                Inspect & Generate Tasks
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setCustomObjectiveModalOpen(true)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-mono text-[11px] font-semibold border border-white/10 bg-white/[0.02] hover:bg-white/5 text-white/70 hover:text-white transition-colors cursor-pointer"
               >
@@ -691,28 +874,93 @@ export const ProjectsTab: React.FC = () => {
             </div>
           </div>
 
-          {/* Terse Monospace Metrics */}
-          <div className="grid grid-cols-3 lg:grid-cols-1 gap-2 border-t lg:border-t-0 lg:border-l border-white/[0.08] pt-3 lg:pt-0 lg:pl-6">
+          {/* Real On-Disk Project Telemetry */}
+          <div className="grid grid-cols-3 lg:grid-cols-1 gap-2.5 border-t lg:border-t-0 lg:border-l border-white/[0.08] pt-3 lg:pt-0 lg:pl-6">
             <div>
-              <span className="block font-mono text-[10px] text-white/40 uppercase">TTS Engine</span>
-              <span className="font-mono text-xs text-white/80 font-medium">
-                {activeProject.ttsEngine || "Piper v1.2"}
-              </span>
+              <span className="block font-mono text-[10px] text-white/40 uppercase">Package Manager</span>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="font-mono text-xs text-[hsl(var(--signal))] font-semibold">
+                  {liveMeta?.packageManager || activeProject.packageManager || "npm"}
+                </span>
+                {liveMeta && (
+                  <span className="font-mono text-[10px] text-white/50">
+                    ({liveMeta.dependenciesCount} deps · {liveMeta.devDependenciesCount} dev)
+                  </span>
+                )}
+              </div>
             </div>
+
             <div>
-              <span className="block font-mono text-[10px] text-white/40 uppercase">Search Fallback</span>
-              <span className="font-mono text-xs text-[hsl(var(--signal))] font-medium">
-                {activeProject.searchEngine || "DuckDuckGo Crawler"}
-              </span>
+              <span className="block font-mono text-[10px] text-white/40 uppercase">Git Status</span>
+              {liveMeta?.gitBranch ? (
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <GitBranch className="size-3 text-white/60" />
+                  <span className="font-mono text-xs text-white/85 font-medium">
+                    {liveMeta.gitBranch}
+                  </span>
+                  <span
+                    className={cn(
+                      "font-mono text-[9px] px-1.5 py-0.2 rounded border",
+                      liveMeta.uncommittedChangesCount > 0
+                        ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
+                        : "border-white/10 bg-white/5 text-white/50"
+                    )}
+                  >
+                    {liveMeta.uncommittedChangesCount > 0
+                      ? `${liveMeta.uncommittedChangesCount} modified`
+                      : "clean"}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="font-mono text-[11px] text-white/50">No Git repository</span>
+                  <button
+                    type="button"
+                    onClick={handleInitGit}
+                    disabled={isInitializingGit}
+                    className="font-mono text-[9px] px-2 py-0.5 rounded border border-[hsl(var(--signal))/0.3] bg-[hsl(var(--signal))/0.1] text-[hsl(var(--signal))] hover:bg-[hsl(var(--signal))] hover:text-black font-semibold transition-colors cursor-pointer"
+                  >
+                    {isInitializingGit ? "Initing..." : "Init Git"}
+                  </button>
+                </div>
+              )}
             </div>
+
             <div>
-              <span className="block font-mono text-[10px] text-white/40 uppercase">Target Delivery</span>
-              <span className="font-mono text-xs text-white/80 font-medium">
-                {activeProject.targetDelivery || "Sprint 42"}
+              <span className="block font-mono text-[10px] text-white/40 uppercase">Codebase Scope</span>
+              <span className="font-mono text-xs text-white/80 font-medium block mt-0.5">
+                {liveMeta ? `${liveMeta.totalFilesCount} files tracked` : "Local Workspace"}
               </span>
+              {liveMeta?.lastModified && (
+                <span className="font-mono text-[10px] text-white/40 block">
+                  Last active: {liveMeta.lastModified}
+                </span>
+              )}
             </div>
           </div>
         </div>
+
+        {/* Real Runnable Package Scripts */}
+        {liveMeta?.scripts && liveMeta.scripts.length > 0 && (
+          <div className="mt-4 pt-3 border-t border-white/[0.08] flex flex-wrap items-center gap-2">
+            <span className="font-mono text-[10px] text-white/40 uppercase mr-1">Package Scripts:</span>
+            {liveMeta.scripts.map((sc) => (
+              <button
+                key={sc.name}
+                type="button"
+                onClick={() => {
+                  setActiveSubView("terminal")
+                  toast.info(`Opening In-App Terminal for '${liveMeta.packageManager || "npm"} run ${sc.name}'`)
+                }}
+                className="font-mono text-[10px] px-2.5 py-1 rounded-lg border border-white/10 bg-white/5 hover:border-[hsl(var(--signal))/0.4] hover:bg-[hsl(var(--signal))/0.1] text-white/85 hover:text-[hsl(var(--signal))] transition-colors cursor-pointer flex items-center gap-1.5"
+                title={sc.command}
+              >
+                <Play className="size-2.5 text-[hsl(var(--signal))]" />
+                {sc.name}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ======================================================== */}
@@ -916,9 +1164,20 @@ export const ProjectsTab: React.FC = () => {
                   <span className="font-mono text-xs uppercase text-white/60 tracking-wider font-semibold">
                     Actionable Tasks ({pendingTasks.length} Pending / {completedTasks.length} Completed)
                   </span>
-                  <span className="font-mono text-[10px] text-white/40">
-                    {progressPercent}% RESOLVED
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleInspectAndGenerateTasks}
+                      className="font-mono text-[10px] px-2.5 py-1 rounded-lg border border-white/15 bg-white/5 hover:border-[hsl(var(--signal))/0.4] hover:bg-[hsl(var(--signal))/0.1] text-white/80 hover:text-[hsl(var(--signal))] transition-colors cursor-pointer flex items-center gap-1"
+                      title="Inspect project files and generate real development tasks based on package scripts"
+                    >
+                      <Sparkles className="size-2.5 text-[hsl(var(--signal))]" />
+                      Inspect & Generate Real Tasks
+                    </button>
+                    <span className="font-mono text-[10px] text-white/40">
+                      {progressPercent}% RESOLVED
+                    </span>
+                  </div>
                 </div>
 
                 {/* Inline Add Task Form */}
@@ -942,7 +1201,7 @@ export const ProjectsTab: React.FC = () => {
                 {/* Task Item Rows with "Run with FRIDAY" Bridge */}
                 <div className="space-y-2">
                   {filteredItems.map((item) => {
-                    const isRunning = executingTaskId === item.id || item.status === "in-progress"
+                    const isRunning = executingTaskId === item.id
 
                     return (
                       <div
@@ -999,23 +1258,31 @@ export const ProjectsTab: React.FC = () => {
                           )}
                         </div>
 
-                        {/* Run with FRIDAY autonomous action */}
+                        {/* Run / Stop with FRIDAY autonomous action */}
                         {item.status !== "done" && (
-                          <button
-                            type="button"
-                            onClick={() => handleRunWithFriday(item)}
-                            disabled={isRunning}
-                            className={cn(
-                              "flex items-center gap-1 px-2 py-1 rounded-lg font-mono text-[10px] font-semibold transition-all cursor-pointer flex-shrink-0",
-                              isRunning
-                                ? "bg-[hsl(var(--signal))] text-black"
-                                : "bg-white/5 hover:bg-[hsl(var(--signal))/0.15] text-white/70 hover:text-[hsl(var(--signal))] border border-white/10 hover:border-[hsl(var(--signal))/0.3]"
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            {isRunning ? (
+                              <button
+                                type="button"
+                                onClick={() => handleStopTaskExecution(item.id)}
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg font-mono text-[10px] font-semibold bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 transition-all cursor-pointer shadow-sm animate-pulse"
+                                title="Stop active task execution"
+                              >
+                                <Square className="size-2.5 fill-current" />
+                                Stop
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleRunWithFriday(item)}
+                                className="flex items-center gap-1 px-2 py-1 rounded-lg font-mono text-[10px] font-semibold bg-white/5 hover:bg-[hsl(var(--signal))/0.15] text-white/70 hover:text-[hsl(var(--signal))] border border-white/10 hover:border-[hsl(var(--signal))/0.3] transition-all cursor-pointer"
+                                title="Instruct FRIDAY to execute this task"
+                              >
+                                <Sparkles className="size-2.5 text-[hsl(var(--signal))]" />
+                                Run with FRIDAY
+                              </button>
                             )}
-                            title="Instruct FRIDAY to execute this task"
-                          >
-                            <Sparkles className="size-2.5 text-[hsl(var(--signal))]" />
-                            {isRunning ? "Running..." : "Run with FRIDAY"}
-                          </button>
+                          </div>
                         )}
 
                         <div className="flex items-center gap-2 font-mono text-[10px] text-white/40 flex-shrink-0">

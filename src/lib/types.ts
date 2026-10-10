@@ -385,6 +385,20 @@ export interface DiscoveredRepo {
   dependenciesCount: number
 }
 
+export interface ProjectMetadata {
+  name: string
+  description: string
+  framework: string
+  packageManager: string
+  gitBranch?: string
+  uncommittedChangesCount: number
+  dependenciesCount: number
+  devDependenciesCount: number
+  scripts: { name: string; command: string }[]
+  totalFilesCount: number
+  lastModified: string
+}
+
 export interface ProjectWorkspace {
   id: string
   name: string
@@ -392,12 +406,11 @@ export interface ProjectWorkspace {
   rootPath?: string
   archetype?: ProjectArchetypeId
   framework?: string
+  packageManager?: string
   status: "active" | "completed" | "archived"
-  targetDelivery: string
-  priority: "low" | "medium" | "high" | "critical"
-  ttsEngine?: string
-  searchEngine?: string
+  priority?: "low" | "medium" | "high" | "critical"
   tags: string[]
+  metadata?: ProjectMetadata
   created_at: string
   updated_at: string
 }

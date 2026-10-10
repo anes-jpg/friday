@@ -1507,6 +1507,283 @@ fn commit_project_changes(project_path: String, message: String) -> Result<serde
     }))
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectScriptInfo {
+    pub name: String,
+    pub command: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMetadataDto {
+    pub name: String,
+    pub description: String,
+    pub framework: String,
+    pub package_manager: String,
+    pub git_branch: Option<String>,
+    pub uncommitted_changes_count: usize,
+    pub dependencies_count: usize,
+    pub dev_dependencies_count: usize,
+    pub scripts: Vec<ProjectScriptInfo>,
+    pub total_files_count: usize,
+    pub last_modified: String,
+}
+
+#[tauri::command]
+fn inspect_project_metadata(path: String) -> Result<ProjectMetadataDto, String> {
+    let root = std::path::PathBuf::from(&path);
+    if !root.exists() {
+        return Err(format!("Project directory does not exist: {}", path));
+    }
+
+    let folder_name = root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("project")
+        .to_string();
+
+    let mut name = folder_name.clone();
+    let mut description = String::new();
+    let mut framework = "Generic Workspace".to_string();
+    let mut package_manager = "npm".to_string();
+    let mut dependencies_count = 0;
+    let mut dev_dependencies_count = 0;
+    let mut scripts = Vec::new();
+
+    let pkg_json_path = root.join("package.json");
+    let cargo_path = root.join("Cargo.toml");
+    let readme_path = root.join("README.md");
+
+    // Read README.md for real project description if available
+    if readme_path.exists() {
+        if let Ok(readme_content) = std::fs::read_to_string(&readme_path) {
+            for line in readme_content.lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if trimmed.starts_with('#') {
+                    let heading_text = trimmed.trim_start_matches('#').trim();
+                    if !heading_text.eq_ignore_ascii_case(&name) && description.is_empty() {
+                        description = heading_text.to_string();
+                    }
+                    continue;
+                }
+                if description.is_empty() && !trimmed.starts_with("```") {
+                    description = trimmed.to_string();
+                    break;
+                }
+            }
+        }
+    }
+
+    // Inspect package.json
+    if pkg_json_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&pkg_json_path) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(n) = json.get("name").and_then(|v| v.as_str()) {
+                    if !n.trim().is_empty() {
+                        name = n.to_string();
+                    }
+                }
+                if description.is_empty() {
+                    if let Some(desc) = json.get("description").and_then(|v| v.as_str()) {
+                        description = desc.to_string();
+                    }
+                }
+
+                let mut deps_list = Vec::new();
+                if let Some(d) = json.get("dependencies").and_then(|v| v.as_object()) {
+                    dependencies_count = d.len();
+                    for k in d.keys() {
+                        deps_list.push(k.as_str());
+                    }
+                }
+                if let Some(d) = json.get("devDependencies").and_then(|v| v.as_object()) {
+                    dev_dependencies_count = d.len();
+                    for k in d.keys() {
+                        deps_list.push(k.as_str());
+                    }
+                }
+
+                // Detect framework from dependencies
+                if deps_list.iter().any(|&d| d == "next") {
+                    framework = "Next.js".to_string();
+                } else if root.join("src-tauri").exists() || deps_list.iter().any(|&d| d.starts_with("@tauri-apps")) {
+                    framework = "Tauri Desktop".to_string();
+                } else if deps_list.iter().any(|&d| d == "vite") {
+                    framework = if deps_list.iter().any(|&d| d == "react") {
+                        "React + Vite".to_string()
+                    } else if deps_list.iter().any(|&d| d == "vue") {
+                        "Vue + Vite".to_string()
+                    } else {
+                        "Vite".to_string()
+                    };
+                } else if deps_list.iter().any(|&d| d == "react") {
+                    framework = "React".to_string();
+                } else if deps_list.iter().any(|&d| d == "express" || d == "hono" || d == "fastify") {
+                    framework = "Node.js API".to_string();
+                } else {
+                    framework = "JavaScript/TypeScript".to_string();
+                }
+
+                // Extract scripts
+                if let Some(s) = json.get("scripts").and_then(|v| v.as_object()) {
+                    for (k, v) in s {
+                        if let Some(cmd) = v.as_str() {
+                            scripts.push(ProjectScriptInfo {
+                                name: k.clone(),
+                                command: cmd.to_string(),
+                            });
+                        }
+                    }
+                }
+
+                // Detect package manager from lockfiles
+                if root.join("bun.lock").exists() || root.join("bun.lockb").exists() {
+                    package_manager = "bun".to_string();
+                } else if root.join("pnpm-lock.yaml").exists() {
+                    package_manager = "pnpm".to_string();
+                } else if root.join("yarn.lock").exists() {
+                    package_manager = "yarn".to_string();
+                } else if root.join("package-lock.json").exists() {
+                    package_manager = "npm".to_string();
+                } else {
+                    package_manager = "npm".to_string();
+                }
+            }
+        }
+    } else if cargo_path.exists() {
+        framework = if root.join("src-tauri").exists() {
+            "Tauri Desktop".to_string()
+        } else {
+            "Rust Crate".to_string()
+        };
+        package_manager = "cargo".to_string();
+        if let Ok(content) = std::fs::read_to_string(&cargo_path) {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("name =") && name == folder_name {
+                    if let Some(val) = trimmed.split('=').nth(1) {
+                        name = val.trim().trim_matches('"').to_string();
+                    }
+                }
+                if trimmed.starts_with("description =") && description.is_empty() {
+                    if let Some(val) = trimmed.split('=').nth(1) {
+                        description = val.trim().trim_matches('"').to_string();
+                    }
+                }
+            }
+        }
+        scripts.push(ProjectScriptInfo { name: "run".to_string(), command: "cargo run".to_string() });
+        scripts.push(ProjectScriptInfo { name: "build".to_string(), command: "cargo build".to_string() });
+        scripts.push(ProjectScriptInfo { name: "test".to_string(), command: "cargo test".to_string() });
+    }
+
+    if description.is_empty() {
+        description = format!("Active workspace at {}", path);
+    }
+
+    // Git branch detection
+    let mut git_branch = None;
+    let head_path = root.join(".git").join("HEAD");
+    if head_path.exists() {
+        if let Ok(head_str) = std::fs::read_to_string(&head_path) {
+            let trimmed = head_str.trim();
+            if let Some(branch) = trimmed.strip_prefix("ref: refs/heads/") {
+                git_branch = Some(branch.to_string());
+            } else if !trimmed.is_empty() {
+                git_branch = Some(trimmed.chars().take(7).collect());
+            }
+        }
+    }
+
+    // Git uncommitted changes count
+    let mut uncommitted_changes_count = 0;
+    if root.join(".git").exists() {
+        let status_res = std::process::Command::new("git")
+            .args(["-C", &path, "status", "--porcelain"])
+            .output()
+            .ok();
+        if let Some(output) = status_res {
+            let raw_str = String::from_utf8_lossy(&output.stdout);
+            uncommitted_changes_count = raw_str.lines().filter(|l| !l.trim().is_empty()).count();
+        }
+    }
+
+    // Count files recursively excluding node_modules, target, .git
+    let mut total_files_count = 0;
+    let mut stack = vec![root.clone()];
+    while let Some(dir) = stack.pop() {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                if file_name.starts_with('.') || file_name == "node_modules" || file_name == "target" || file_name == "dist" {
+                    continue;
+                }
+                if let Ok(ft) = entry.file_type() {
+                    if ft.is_dir() {
+                        if stack.len() < 30 {
+                            stack.push(entry.path());
+                        }
+                    } else {
+                        total_files_count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    // Last modified time
+    let last_modified = root
+        .metadata()
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|time| std::time::SystemTime::now().duration_since(time).ok())
+        .map(|dur| {
+            let hours = dur.as_secs() / 3600;
+            if hours < 24 {
+                "Today".to_string()
+            } else {
+                let days = hours / 24;
+                if days == 1 {
+                    "Yesterday".to_string()
+                } else {
+                    format!("{}d ago", days)
+                }
+            }
+        })
+        .unwrap_or_else(|| "Recently".to_string());
+
+    Ok(ProjectMetadataDto {
+        name,
+        description,
+        framework,
+        package_manager,
+        git_branch,
+        uncommitted_changes_count,
+        dependencies_count,
+        dev_dependencies_count,
+        scripts,
+        total_files_count,
+        last_modified,
+    })
+}
+
+#[tauri::command]
+fn init_project_git(path: String) -> Result<String, String> {
+    let output = std::process::Command::new("git")
+        .args(["-C", &path, "init"])
+        .output()
+        .map_err(|e| format!("Failed to run git init: {}", e))?;
+    if output.status.success() {
+        Ok("Initialized empty Git repository".to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}
+
 pub fn run() {
     let db = match Database::open_app_database() {
         Ok(d) => Arc::new(Mutex::new(d)),
@@ -1716,7 +1993,9 @@ pub fn run() {
             delete_project_path,
             execute_project_command,
             get_project_git_diff,
-            commit_project_changes
+            commit_project_changes,
+            inspect_project_metadata,
+            init_project_git
         ])
         .setup(|app| {
             let state = app.state::<AppState>();

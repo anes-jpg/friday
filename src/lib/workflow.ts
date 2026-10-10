@@ -9,6 +9,7 @@ import type {
   ProjectCommandResult,
   ProjectScript,
   ProjectGitDiffInfo,
+  ProjectMetadata,
 } from "./types"
 
 export const SCAFFOLD_ARCHETYPES: ScaffoldArchetype[] = [
@@ -81,17 +82,15 @@ const STORAGE_ACTIVE_PROJECT_KEY = "friday_active_project_id_v1"
 export const INITIAL_DEFAULT_PROJECTS: ProjectWorkspace[] = [
   {
     id: "proj-1",
-    name: "FRIDAY Desktop Operator v1.0",
-    directive: "Voice-first Windows desktop controller with Piper TTS, local Whisper STT, and native tool bridge with offline fallback capabilities.",
+    name: "FRIDAY Desktop Operator",
+    directive: "Intelligent, voice-first Windows desktop controller and developer workstation.",
     rootPath: "C:\\Users\\anesx\\Desktop\\friday",
     archetype: "rust-tauri-operator",
     framework: "Tauri v2 + Rust",
+    packageManager: "pnpm",
     status: "active",
-    targetDelivery: "Oct 20, 2026",
     priority: "critical",
-    ttsEngine: "Piper v1.2",
-    searchEngine: "DuckDuckGo Crawler",
-    tags: ["Core", "Windows", "Voice"],
+    tags: ["Core", "Windows", "Rust", "Voice"],
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -261,20 +260,20 @@ export async function scaffoldProjectWorkspace(
 
   const archetype = SCAFFOLD_ARCHETYPES.find((a) => a.id === archetypeId) || SCAFFOLD_ARCHETYPES[0]
   const projectId = `proj-${Date.now().toString(36)}`
+  const meta = await inspectProjectMetadata(targetPath)
 
   const newWorkspace: ProjectWorkspace = {
     id: projectId,
     name: cleanName,
-    directive: `Deliver production-grade ${archetype.name} with clean architecture and continuous operator verification.`,
+    directive: meta?.description || `${archetype.friendlyName || archetype.name} workspace at ${targetPath}`,
     rootPath: targetPath,
     archetype: archetypeId,
-    framework: archetype.framework,
+    framework: meta?.framework || archetype.framework,
+    packageManager: meta?.packageManager || "npm",
     status: "active",
-    targetDelivery: "Nov 15, 2026",
     priority: "high",
-    ttsEngine: "Piper v1.2",
-    searchEngine: "DuckDuckGo Crawler",
     tags: [archetype.framework.split(" ")[0] || "Code", "Active"],
+    metadata: meta || undefined,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   }
@@ -284,40 +283,32 @@ export async function scaffoldProjectWorkspace(
   saveProjectWorkspaces([newWorkspace, ...allProjects])
   setActiveProjectId(newWorkspace.id)
 
-  // Seed initial tasks for this scaffolded project
+  // Seed REAL actionable tasks for this project
+  const pkgCmd = meta?.packageManager || "npm"
   const initialTasks: WorkspaceItem[] = [
     {
       id: `task-${Date.now()}-1`,
       projectId: newWorkspace.id,
       type: "task",
-      title: `Explore your new project files and run your live preview`,
-      description: `Run "${archetype.defaultInstallCmd}" in your terminal to view the project live.`,
-      status: "done",
+      title: `Run dev server (${pkgCmd} run dev)`,
+      description: `Execute development server in ${targetPath} to view local preview.`,
+      status: "todo",
       priority: "high",
       riskTier: "green",
       dueDate: "Today",
-      tag: "Getting Started",
+      tag: "Run Script",
     },
     {
       id: `task-${Date.now()}-2`,
       projectId: newWorkspace.id,
       type: "task",
-      title: "Ask FRIDAY to add your first feature or custom design",
-      description: "Speak or type in chat: e.g. 'Add a clean hero banner' or 'Customize the main page'.",
-      status: "in-progress",
-      priority: "critical",
+      title: "Inspect codebase in In-App Code Studio",
+      description: "Review App.tsx, configuration files, and package dependencies inside FRIDAY.",
+      status: "todo",
+      priority: "medium",
       riskTier: "green",
       dueDate: "Today",
-      tag: "Next Step",
-    },
-    {
-      id: `milestone-${Date.now()}-1`,
-      projectId: newWorkspace.id,
-      type: "milestone",
-      title: "Project Ready for Development",
-      status: "in-progress",
-      dueDate: "This Week",
-      tag: "Milestone",
+      tag: "Code Studio",
     },
   ]
 
@@ -328,62 +319,160 @@ export async function scaffoldProjectWorkspace(
 }
 
 /** Imports an existing desktop repository into the FRIDAY workspace ledger. */
-export function importDiscoveredRepo(repo: DiscoveredRepo): ProjectWorkspace {
+export async function importDiscoveredRepo(repo: DiscoveredRepo): Promise<ProjectWorkspace> {
   const projectId = `proj-${repo.name.toLowerCase().replace(/\s+/g, "-")}`
+  const meta = await inspectProjectMetadata(repo.path)
+
   const newWorkspace: ProjectWorkspace = {
     id: projectId,
-    name: repo.name,
-    directive: `Active desktop repository at ${repo.path}. Operator intelligence enabled for inspection, refactoring, and code review.`,
+    name: meta?.name || repo.name,
+    directive: meta?.description || `Local repository at ${repo.path}`,
     rootPath: repo.path,
-    framework: repo.framework,
+    framework: meta?.framework || repo.framework,
+    packageManager: meta?.packageManager || repo.packageManager || "npm",
     status: "active",
-    targetDelivery: "Sprint 42",
     priority: "high",
-    ttsEngine: "Piper v1.2",
-    searchEngine: "DuckDuckGo Crawler",
-    tags: [repo.framework, repo.packageManager.toUpperCase()],
+    tags: [meta?.framework || repo.framework, (meta?.packageManager || repo.packageManager || "npm").toUpperCase()],
+    metadata: meta || undefined,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   }
 
   const allProjects = loadProjectWorkspaces()
-  if (!allProjects.some((p) => p.id === newWorkspace.id)) {
-    saveProjectWorkspaces([newWorkspace, ...allProjects])
-  }
+  saveProjectWorkspaces([newWorkspace, ...allProjects.filter((p) => p.id !== newWorkspace.id)])
   setActiveProjectId(newWorkspace.id)
 
-  // Generate initial indexing tasks
-  const initialTasks: WorkspaceItem[] = [
-    {
-      id: `task-${Date.now()}-import-1`,
-      projectId: newWorkspace.id,
+  // Seed real tasks from detected project metadata
+  const initialTasks = meta
+    ? generateRealTasksFromMetadata(newWorkspace.id, meta, repo.path)
+    : []
+
+  if (initialTasks.length > 0) {
+    const allItems = loadWorkspaceItems()
+    saveWorkspaceItems([...initialTasks, ...allItems])
+  }
+
+  return newWorkspace
+}
+
+/** Generates real, functional tasks, goals, and milestones directly from on-disk project metadata. */
+export function generateRealTasksFromMetadata(
+  projectId: string,
+  meta: ProjectMetadata,
+  rootPath: string
+): WorkspaceItem[] {
+  const tasks: WorkspaceItem[] = []
+  const now = Date.now()
+  const pkgCmd = meta.packageManager || "npm"
+
+  // 1. Script-based actionable tasks
+  if (meta.scripts && meta.scripts.length > 0) {
+    const devScript = meta.scripts.find(
+      (s) => s.name === "dev" || s.name === "start" || s.name === "serve"
+    )
+    if (devScript) {
+      tasks.push({
+        id: `task-${now}-dev`,
+        projectId,
+        type: "task",
+        title: `Run dev server (${pkgCmd} run ${devScript.name})`,
+        description: `Execute development server for ${meta.name} on local port.`,
+        status: "todo",
+        priority: "high",
+        riskTier: "green",
+        dueDate: "Today",
+        tag: "Terminal",
+      })
+    }
+
+    const buildScript = meta.scripts.find((s) => s.name === "build")
+    if (buildScript) {
+      tasks.push({
+        id: `task-${now}-build`,
+        projectId,
+        type: "task",
+        title: `Build production bundle (${pkgCmd} run ${buildScript.name})`,
+        description: `Compile type-checked production bundle and assets in ${meta.name}.`,
+        status: "todo",
+        priority: "medium",
+        riskTier: "green",
+        dueDate: "Today",
+        tag: "Build",
+      })
+    }
+
+    const lintOrTest = meta.scripts.find(
+      (s) => s.name === "lint" || s.name === "test" || s.name === "check"
+    )
+    if (lintOrTest) {
+      tasks.push({
+        id: `task-${now}-verify`,
+        projectId,
+        type: "task",
+        title: `Run code verification (${pkgCmd} run ${lintOrTest.name})`,
+        description: `Validate lint rules and unit test specifications across the codebase.`,
+        status: "todo",
+        priority: "medium",
+        riskTier: "green",
+        dueDate: "Tomorrow",
+        tag: "Verify",
+      })
+    }
+  }
+
+  // 2. Git task if repo is not yet initialized
+  if (!meta.gitBranch) {
+    tasks.push({
+      id: `task-${now}-git`,
+      projectId,
       type: "task",
-      title: `Inspect git status and branches on ${repo.name}`,
-      description: `Tracked branch: ${repo.gitBranch || "main"}. Checked for uncommitted changes.`,
-      status: "done",
-      priority: "medium",
+      title: "Initialize Git repository for project",
+      description: "Initialize version control to track file diffs and commit changes in FRIDAY.",
+      status: "todo",
+      priority: "high",
       riskTier: "green",
       dueDate: "Today",
       tag: "Git",
-    },
-    {
-      id: `task-${Date.now()}-import-2`,
-      projectId: newWorkspace.id,
-      type: "task",
-      title: `Audit ${repo.dependenciesCount} dependencies via Beast & Open-Code-Review`,
-      description: "Check for security advisories and outdated packages.",
-      status: "in-progress",
-      priority: "high",
-      riskTier: "amber",
-      dueDate: "Tomorrow",
-      tag: "Audit",
-    },
-  ]
+    })
+  }
 
-  const allItems = loadWorkspaceItems()
-  saveWorkspaceItems([...initialTasks, ...allItems])
+  // 3. Code Studio inspection task
+  tasks.push({
+    id: `task-${now}-inspect`,
+    projectId,
+    type: "task",
+    title: `Review ${meta.name} codebase architecture`,
+    description: `Inspect ${meta.totalFilesCount} files and ${meta.dependenciesCount} dependencies in In-App Code Studio.`,
+    status: "todo",
+    priority: "medium",
+    riskTier: "green",
+    dueDate: "This Week",
+    tag: "Code Studio",
+  })
 
-  return newWorkspace
+  // 4. Goal & Milestone
+  tasks.push({
+    id: `goal-${now}-launch`,
+    projectId,
+    type: "goal",
+    title: `${meta.name} Production Readiness`,
+    description: `Verify and deliver all features for ${meta.name} with clean build and zero regressions.`,
+    status: "todo",
+    progress: 0,
+    tag: "Goal",
+  })
+
+  tasks.push({
+    id: `milestone-${now}-delivery`,
+    projectId,
+    type: "milestone",
+    title: `${meta.framework} MVP Landed`,
+    status: "todo",
+    dueDate: "Upcoming",
+    tag: "Milestone",
+  })
+
+  return tasks
 }
 
 /** AI & Deterministic Task Decomposition: parses project directive or objective into actionable tasks, goals, and milestones. */
@@ -407,7 +496,7 @@ export function decomposeDirectiveIntoTasks(
         type: "task",
         title: `Architect implementation plan: ${obj.slice(0, 50)}`,
         description: `Define component structure, interfaces, and safety constraints for ${obj}.`,
-        status: "in-progress",
+        status: "todo",
         priority: "critical",
         riskTier: "green",
         dueDate: "Today",
@@ -689,6 +778,33 @@ export function decomposeDirectiveIntoTasks(
 
 /* ── In-App Developer Workstation Helpers ───────────────────────────────────── */
 
+/** Queries real on-disk project metadata via Tauri backend IPC. */
+export async function inspectProjectMetadata(path: string): Promise<ProjectMetadata | null> {
+  if (isDesktop) {
+    try {
+      const res = await invokeCommand<ProjectMetadata>("inspect_project_metadata", { path })
+      if (res && typeof res.name === "string") {
+        return res
+      }
+    } catch (e) {
+      console.warn("[FRIDAY Workflow] inspect_project_metadata error:", e)
+    }
+  }
+  return null
+}
+
+/** Initializes a git repository in the project root path. */
+export async function initProjectGit(path: string): Promise<string> {
+  if (isDesktop) {
+    try {
+      return await invokeCommand<string>("init_project_git", { path })
+    } catch (e) {
+      throw e
+    }
+  }
+  return "Initialized Git repository"
+}
+
 /** Recursively reads the project directory tree for the In-App Code Studio. */
 export async function inspectProjectTree(rootPath: string, maxDepth = 3): Promise<ProjectFileNode[]> {
   if (isDesktop) {
@@ -840,6 +956,25 @@ export async function commitProjectChanges(
 /** Detects runnable package scripts from package.json or Cargo.toml in the project root. */
 export async function detectProjectScripts(rootPath: string): Promise<ProjectScript[]> {
   try {
+    const meta = await inspectProjectMetadata(rootPath)
+    const pm = meta?.packageManager || "npm"
+
+    if (meta?.scripts && meta.scripts.length > 0) {
+      return meta.scripts.map((s) => {
+        let category: ProjectScript["category"] = "other"
+        const lower = s.name.toLowerCase()
+        if (lower.includes("dev") || lower.includes("start") || lower.includes("serve")) category = "dev"
+        else if (lower.includes("build")) category = "build"
+        else if (lower.includes("test")) category = "test"
+        else if (lower.includes("lint") || lower.includes("check")) category = "lint"
+        return {
+          name: s.name,
+          command: `${pm} run ${s.name}`,
+          category,
+        }
+      })
+    }
+
     const pkgText = await readProjectFile(`${rootPath}\\package.json`)
     const parsed = JSON.parse(pkgText)
     if (parsed.scripts && typeof parsed.scripts === "object") {
@@ -851,7 +986,7 @@ export async function detectProjectScripts(rootPath: string): Promise<ProjectScr
           else if (name.includes("build")) category = "build"
           else if (name.includes("test")) category = "test"
           else if (name.includes("lint")) category = "lint"
-          result.push({ name, command: `npm run ${name}`, category })
+          result.push({ name, command: `${pm} run ${name}`, category })
         }
       }
       return result
@@ -894,7 +1029,13 @@ export function loadWorkspaceItems(): WorkspaceItem[] {
     const raw = localStorage.getItem(STORAGE_ITEMS_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // Sanitize any corrupt tasks stuck in 'in-progress' status
+        return parsed.map((item: WorkspaceItem) => ({
+          ...item,
+          status: item.status === "in-progress" ? "todo" : item.status,
+        }))
+      }
     }
   } catch {}
   return INITIAL_DEFAULT_ITEMS
