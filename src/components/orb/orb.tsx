@@ -49,6 +49,7 @@ export function Orb({
       density,
       dotSize,
       tilt,
+      paused: paused || state === "base",
     } as OrbOptions)
     orb.current = o
     return () => {
@@ -59,9 +60,9 @@ export function Orb({
 
   useEffect(() => {
     if (!orb.current) return
-    if (paused) orb.current.pause()
+    if (paused || state === "base") orb.current.pause()
     else orb.current.play()
-  }, [paused])
+  }, [paused, state])
 
   const a11y = label ? { role: "img", "aria-label": label } : { "aria-hidden": true }
 

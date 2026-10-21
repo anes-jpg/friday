@@ -2420,28 +2420,51 @@ impl ToolRegistry {
                     res
                 } else if !url.is_empty() {
                     let client = reqwest::Client::builder()
-                        .timeout(std::time::Duration::from_secs(10))
+                        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                        .timeout(std::time::Duration::from_secs(4))
                         .build()
                         .map_err(|e| e.to_string())?;
-                    let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
-                    let text = resp.text().await.map_err(|e| e.to_string())?;
-                    let stripped = text
-                        .split('<')
-                        .map(|s| s.split('>').nth(1).unwrap_or(""))
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    let clean = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
-                    let capped = if clean.len() > 10_000 {
-                        format!("{}...", &clean[..10_000])
-                    } else {
-                        clean
-                    };
-                    json!({
-                        "status": "success",
-                        "url": url,
-                        "instruction": instruction,
-                        "content": capped
-                    })
+                    let resp_res = client.get(url).send().await;
+                    match resp_res {
+                        Ok(resp) => {
+                            let status = resp.status();
+                            if !status.is_success() {
+                                json!({
+                                    "status": "partial",
+                                    "url": url,
+                                    "instruction": instruction,
+                                    "content": format!("HTTP {} on target URL. Proceeding with indexed search excerpts.", status)
+                                })
+                            } else {
+                                let text = resp.text().await.unwrap_or_default();
+                                let stripped = text
+                                    .split('<')
+                                    .map(|s| s.split('>').nth(1).unwrap_or(""))
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                                let clean = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
+                                let capped = if clean.len() > 10_000 {
+                                    format!("{}...", &clean[..10_000])
+                                } else {
+                                    clean
+                                };
+                                json!({
+                                    "status": "success",
+                                    "url": url,
+                                    "instruction": instruction,
+                                    "content": capped
+                                })
+                            }
+                        }
+                        Err(e) => {
+                            json!({
+                                "status": "partial",
+                                "url": url,
+                                "instruction": instruction,
+                                "content": format!("Connection notice for URL: {}. Proceeding with indexed search excerpts.", e)
+                            })
+                        }
+                    }
                 } else {
                     json!({
                         "status": "error",

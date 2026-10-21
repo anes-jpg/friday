@@ -223,6 +223,7 @@ export type OrbOptions = OrbLook & {
   density?: number
   dotSize?: number
   tilt?: number
+  paused?: boolean
 }
 
 /**
@@ -232,7 +233,7 @@ export type OrbOptions = OrbLook & {
  */
 export function mountOrb(
   svg: SVGSVGElement,
-  { state: asked, variant, size = 20, speed = 1, label, shape, render = DOTS, density = 1, dotSize = 1, tilt = 20 }: OrbOptions = {},
+  { state: asked, variant, size = 20, speed = 1, label, shape, render = DOTS, density = 1, dotSize = 1, tilt = 20, paused = false }: OrbOptions = {},
 ) {
   const which: OrbState = asked && Object.hasOwn(VARIANTS, asked) ? asked : "base"
   const own = variant !== "default" && (VARIANTS[which] as readonly string[]).includes(variant ?? "")
@@ -425,7 +426,9 @@ export function mountOrb(
     }
   }
 
-  play()
+  if (!paused && state !== "base") {
+    play()
+  }
   return {
     pause,
     play,

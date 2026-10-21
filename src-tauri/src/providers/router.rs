@@ -14,6 +14,9 @@ impl AiRouter {
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(60))
             .tcp_keepalive(std::time::Duration::from_secs(30))
+            .tcp_nodelay(true)
+            .pool_max_idle_per_host(10)
+            .pool_idle_timeout(Some(std::time::Duration::from_secs(90)))
             .user_agent("Cline/1.0.0")
             .build()
             .unwrap_or_default();
@@ -180,7 +183,7 @@ impl AiRouter {
                 light_model: candidate.name.clone(),
             };
 
-            let provider = GlmProvider::new(config);
+            let provider = GlmProvider::with_client(config, self.http.clone());
             let start = Instant::now();
 
             match provider

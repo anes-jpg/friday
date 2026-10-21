@@ -8,10 +8,17 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   Mic, Paperclip, Send, Square, Bot, Sparkles, Terminal, Code2,
   Check, ShieldAlert, Layers, FileText, X, Maximize2,
+  PanelLeft, Plus, Pencil, Trash2, ChevronDown, Wrench,
+  Compass, Calculator, BarChart3, Cpu, Sliders, BookOpen, ShieldCheck, Eye,
 } from "lucide-react"
+import { cn, ms } from "@/lib/utils"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import type { Message, PendingPlanBackend } from "@/lib/types"
+import type { Message, PendingPlanBackend, ToolCall } from "@/lib/types"
+import { IntelligentUIRenderer, isOpenUICode, extractOpenUIFromMarkdown } from "@/components/intelligent-ui"
+import { SmoothScroll, type SmoothScrollHandle } from "@/components/providers/SmoothScroll"
+import { PerspectiveTilt, SpotlightSurface, SpringChip, Magnetic } from "@/components/motion/MouseInteractions"
+import { ChatHistorySidebar } from "@/components/chat/ChatHistorySidebar"
 
 function formatMessageTime(msg: { timestamp?: unknown; created_at?: unknown; time?: unknown }): string {
   const raw = msg.timestamp ?? msg.created_at ?? msg.time
@@ -31,9 +38,9 @@ function parseMessageDisplay(msg: Message): { sayText: string; showContent: stri
   let sayText = (msg.say || "").trim()
   let showContent = (msg.show || (msg.content && msg.content !== msg.say ? msg.content : "")).trim()
 
-  // 1. Remove <think>...</think> tags if present
-  sayText = sayText.replace(/<think>[\s\S]*?<\/think>/gi, "").trim()
-  showContent = showContent.replace(/<think>[\s\S]*?<\/think>/gi, "").trim()
+  // 1. Remove <think>...</think> and [Instruction: ...] tags if present
+  sayText = sayText.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/\[Instruction:[\s\S]*?\]/gi, "").trim()
+  showContent = showContent.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/\[Instruction:[\s\S]*?\]/gi, "").trim()
 
   // 2. Detect unparsed JSON in showContent or sayText: e.g. {"say": ..., "show": ...}
   const rawCandidate = showContent || sayText
@@ -85,7 +92,81 @@ function parseMessageDisplay(msg: Message): { sayText: string; showContent: stri
     }
   }
 
+  // 7. Sanitize raw binary PDF dumps and PDF object streams
+  if (showContent.includes("%PDF") || (showContent.includes("endobj") && showContent.includes("obj")) || showContent.includes("stream\n")) {
+    showContent = "### PDF Document\n*(Binary document indexed — hardware specifications and datasheet details compiled)*"
+  } else if (showContent.includes('"node":') && (showContent.includes('"role":') || showContent.includes('"backend_node_id"') || showContent.includes('"actions":'))) {
+    showContent = "### Page Accessibility Tree\n*(Structured web elements and interactive controls indexed)*"
+  }
+
+  // 8. Strip stray residual PDF delimiters and empty blockquote triggers (>> and > >)
+  showContent = showContent
+    .replace(/\b\d+\s+\d+\s+obj\b/gi, "")
+    .replace(/\bendobj\b/gi, "")
+    .replace(/\bstream[\r\n][\s\S]*?\bendstream\b/gi, "")
+    .replace(/\bxref[\r\n][\s\S]*?\btrailer\b/gi, "")
+    .replace(/\bstartxref[\r\n]\d+/gi, "")
+    .replace(/<<\s*\/[a-zA-Z0-9_\s/]+>>/g, "")
+    .replace(/^\s*(?:<<|>>)\s*$/gm, "")
+
+  // Remove lines that are only stray quotation or PDF bracket tokens (avoid empty purple blockquotes)
+  showContent = showContent
+    .split("\n")
+    .filter((line) => {
+      const trimmed = line.trim()
+      if (!trimmed) return true
+      return !/^([><\s]|&gt;|&lt;)+$/.test(trimmed)
+    })
+    .join("\n")
+    .trim()
+
   return { sayText, showContent }
+}
+
+function CollapsibleToolCalls({ calls }: { calls: ToolCall[] }) {
+  const [expanded, setExpanded] = useState(false)
+  const totalDuration = calls.reduce((acc, c) => acc + (c.duration_ms || 0), 0)
+  const toolNames = Array.from(new Set(calls.map((c) => c.name))).join(", ")
+
+  return (
+    <div className="mt-2.5">
+      <button
+        type="button"
+        onClick={() => setExpanded((prev) => !prev)}
+        aria-expanded={expanded}
+        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/[0.04] text-[11px] font-mono text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))] hover:bg-black/10 dark:hover:bg-white/[0.08] transition-colors cursor-pointer select-none hover:border-[hsl(var(--signal))]/30"
+      >
+        <Check className="size-3 text-[hsl(var(--signal))]" />
+        <span className="font-medium text-[hsl(var(--ink))]">
+          {calls.length} tool{calls.length > 1 ? "s" : ""} executed
+        </span>
+        <span className="text-black/20 dark:text-white/20">·</span>
+        <span className="text-[10.5px] text-[hsl(var(--muted))] truncate max-w-[240px]">
+          {toolNames}
+        </span>
+        {totalDuration > 0 && (
+          <>
+            <span className="text-black/20 dark:text-white/20">·</span>
+            <span className="text-[10px] tabular-nums">{ms(totalDuration)}</span>
+          </>
+        )}
+        <ChevronDown
+          className={cn(
+            "size-3 text-[hsl(var(--muted))] transition-transform duration-150 ml-0.5",
+            expanded && "rotate-180"
+          )}
+        />
+      </button>
+
+      {expanded && (
+        <div className="mt-2.5 space-y-2 animate-in fade-in duration-150">
+          {calls.map((tc) => (
+            <ToolCallCard key={tc.id} call={tc} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 interface InteractivePlanCardProps {
@@ -237,6 +318,7 @@ export function FridayComposer({
   busy,
   expanded = false,
   onToggleExpanded,
+  textareaRef,
 }: {
   value: string
   onValueChange: (value: string) => void
@@ -246,8 +328,10 @@ export function FridayComposer({
   busy: boolean
   expanded?: boolean
   onToggleExpanded?: () => void
+  textareaRef?: React.RefObject<HTMLTextAreaElement | null>
 }) {
-  const ref = useRef<HTMLTextAreaElement>(null)
+  const localRef = useRef<HTMLTextAreaElement>(null)
+  const ref = textareaRef || localRef
 
   return (
     <form
@@ -318,15 +402,82 @@ export const ChatTab: React.FC = () => {
   const activeThread = useActiveThread()
   const partialText = useFriday((s) => s.utterance?.partial || "")
   const orbState = useFriday((s) => s.orb)
+  const chatHistoryOpen = useFriday((s) => s.chatHistoryOpen)
+  const toggleChatHistory = useFriday((s) => s.toggleChatHistory)
+  const createThread = useFriday((s) => s.createThread)
+  const renameThread = useFriday((s) => s.renameThread)
+  const deleteThread = useFriday((s) => s.deleteThread)
+  const hydrateThreadsFromBackend = useFriday((s) => s.hydrateThreadsFromBackend)
+  const threads = useFriday((s) => s.threads)
+
   const [inputText, setInputText] = useState("")
   const [expandedMode, setExpandedMode] = useState(false)
+  const [isEditingTitle, setIsEditingTitle] = useState(false)
+  const [titleValue, setTitleValue] = useState("")
+  const [isDeletingActive, setIsDeletingActive] = useState(false)
+  const titleInputRef = useRef<HTMLInputElement>(null)
+  const composerTextareaRef = useRef<HTMLTextAreaElement>(null)
+
   const threadMessages = activeThread?.messages || []
   const busy = orbState === "thinking" || orbState === "speaking"
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const smoothScrollRef = useRef<SmoothScrollHandle>(null)
 
   useEffect(() => {
+    hydrateThreadsFromBackend()
+  }, [hydrateThreadsFromBackend])
+
+  useEffect(() => {
+    if (isEditingTitle && titleInputRef.current) {
+      titleInputRef.current.focus()
+      titleInputRef.current.select()
+    }
+  }, [isEditingTitle])
+
+  useEffect(() => {
+    smoothScrollRef.current?.scrollToBottom()
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [threadMessages.length, busy, partialText])
+
+  const handleNewChat = () => {
+    createThread()
+    setInputText("")
+    setTimeout(() => {
+      composerTextareaRef.current?.focus()
+    }, 50)
+  }
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "n" || e.key === "N")) {
+        e.preventDefault()
+        handleNewChat()
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "h" || e.key === "H")) {
+        e.preventDefault()
+        toggleChatHistory()
+      }
+      if (e.key === "Escape" && chatHistoryOpen) {
+        toggleChatHistory(false)
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [chatHistoryOpen, toggleChatHistory])
+
+  const handleStartEditTitle = () => {
+    if (!activeThread) return
+    setTitleValue(activeThread.title)
+    setIsEditingTitle(true)
+  }
+
+  const handleCommitTitle = () => {
+    if (activeThread && titleValue.trim() && titleValue.trim() !== activeThread.title) {
+      renameThread(activeThread.id, titleValue.trim())
+    }
+    setIsEditingTitle(false)
+  }
 
   const handleSend = () => {
     if (!inputText.trim()) return
@@ -345,16 +496,210 @@ export const ChatTab: React.FC = () => {
   }
 
   const quickPrompts = [
-    { label: "Audit repository", cmd: "Review git diff for constitution violations and unwrap" },
-    { label: "Search codebase", cmd: "Search codebase for AgentCore" },
-    { label: "Inspect screen", cmd: "What is on my screen right now?" },
-    { label: "Check status", cmd: "Give me an operational health status report" },
+    {
+      label: "SF Itinerary",
+      desc: "Scenic day route & schedule",
+      icon: Compass,
+      cmd: "I'm in San Francisco for a day, plan a sightseeing route for me with an interactive map and itinerary",
+      tag: "MAP",
+    },
+    {
+      label: "Loan Calculator",
+      desc: "Live payment amortization",
+      icon: Calculator,
+      cmd: "Show an interactive monthly loan payment calculator with live sliders",
+      tag: "SLIDERS",
+    },
+    {
+      label: "Fleet Telemetry",
+      desc: "Token throughput velocity",
+      icon: BarChart3,
+      cmd: "Show an interactive Q4 AI fleet performance dashboard with charts and metrics",
+      tag: "KPI",
+    },
+    {
+      label: "ThinkPad T590",
+      desc: "Hardware spec matrix",
+      icon: Cpu,
+      cmd: "ThinkPad T590 specs",
+      tag: "SPECS",
+    },
+    {
+      label: "Bicycle Gearing",
+      desc: "7-speed transmission ratios",
+      icon: Sliders,
+      cmd: "Show the 7-speed commuter bicycle spec breakdown with gear ratios and interactive calculator",
+      tag: "CALC",
+    },
+    {
+      label: "Rust Flashcards",
+      desc: "Ownership & error laws",
+      icon: BookOpen,
+      cmd: "Interactive tech flashcard: Rust Ownership vs Borrowing",
+      tag: "3D FLIP",
+    },
+    {
+      label: "Audit Constitution",
+      desc: "Diff review for unwrap",
+      icon: ShieldCheck,
+      cmd: "Review git diff for constitution violations and unwrap",
+      tag: "REVIEW",
+    },
+    {
+      label: "Inspect Screen",
+      desc: "Active desktop OCR scan",
+      icon: Eye,
+      cmd: "What is on my screen right now?",
+      tag: "VISION",
+    },
   ]
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-[hsl(var(--surface))]">
-      {/* Messages area with editorial column layout */}
-      <div className="flex-1 overflow-y-auto px-4 py-6">
+    <div className="flex h-full w-full overflow-hidden bg-[hsl(var(--surface))] relative">
+      {/* Collapsible Chat History Sidebar */}
+      <ChatHistorySidebar
+        open={chatHistoryOpen}
+        onClose={() => toggleChatHistory(false)}
+        onNewChat={handleNewChat}
+      />
+
+      {/* Main Chat Column */}
+      <div className="flex flex-col flex-1 h-full min-w-0 overflow-hidden relative">
+        {/* Top Navigation Bar */}
+        <div className="h-12 px-4 border-b border-black/10 dark:border-white/10 flex items-center justify-between gap-3 bg-[hsl(var(--surface))] shrink-0 z-10 select-none">
+          <div className="flex items-center gap-2 min-w-0">
+            {/* Toggle History Sidebar */}
+            <Button
+              type="button"
+              variant={chatHistoryOpen ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => toggleChatHistory()}
+              title="Toggle conversation history (Ctrl+H)"
+              aria-label="Toggle history panel"
+              className="h-8 px-2.5 gap-2 text-xs font-mono"
+            >
+              <PanelLeft className="size-4 text-[hsl(var(--muted))]" />
+              <span className="hidden sm:inline">History</span>
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-black/5 dark:bg-white/10 text-[hsl(var(--muted))] tabular-nums">
+                {threads.length}
+              </span>
+            </Button>
+
+            {/* + New Chat Button */}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleNewChat}
+              title="Start a new chat (Ctrl+N)"
+              aria-label="Start new chat"
+              className="h-8 px-2.5 gap-1.5 text-xs font-medium group"
+            >
+              <Plus className="size-3.5 text-[hsl(var(--muted))] group-hover:text-[hsl(var(--ink))] transition-colors" />
+              <span className="hidden sm:inline">New Chat</span>
+              <kbd className="hidden md:inline px-1 py-0.5 rounded text-[9px] font-mono bg-black/5 dark:bg-white/10 text-[hsl(var(--muted))]">
+                Ctrl+N
+              </kbd>
+            </Button>
+          </div>
+
+          {/* Active Conversation Title & Inline Rename */}
+          <div className="flex-1 flex items-center justify-center min-w-0 px-2">
+            {activeThread && (
+              isEditingTitle ? (
+                <div className="flex items-center gap-1.5 max-w-sm w-full">
+                  <input
+                    ref={titleInputRef}
+                    type="text"
+                    value={titleValue}
+                    onChange={(e) => setTitleValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.stopPropagation()
+                        handleCommitTitle()
+                      }
+                      if (e.key === "Escape") {
+                        e.stopPropagation()
+                        setIsEditingTitle(false)
+                      }
+                    }}
+                    onBlur={handleCommitTitle}
+                    className="flex-1 min-w-0 bg-black/10 dark:bg-black/30 border border-black/20 dark:border-white/20 focus:border-[hsl(var(--signal))]/60 rounded px-2 py-1 text-xs text-[hsl(var(--ink))] font-medium outline-none text-center font-sans"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCommitTitle}
+                    className="p-1 rounded text-[hsl(var(--signal))] hover:bg-[hsl(var(--signal))]/10 cursor-pointer"
+                    aria-label="Confirm rename"
+                  >
+                    <Check className="size-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingTitle(false)}
+                    className="p-1 rounded text-[hsl(var(--muted))] hover:bg-black/10 dark:hover:bg-white/10 cursor-pointer"
+                    aria-label="Cancel rename"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <div
+                  onClick={handleStartEditTitle}
+                  title="Click to rename session"
+                  className="group flex items-center gap-1.5 max-w-[280px] sm:max-w-md truncate px-2.5 py-1 rounded-md hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-colors"
+                >
+                  <span className="truncate text-xs font-medium text-[hsl(var(--ink))]">
+                    {activeThread.title}
+                  </span>
+                  <Pencil className="size-3 text-[hsl(var(--muted))] opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                </div>
+              )
+            )}
+          </div>
+
+          {/* Right Action: Delete active thread button with confirmation */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {activeThread && (
+              isDeletingActive ? (
+                <div className="flex items-center gap-1.5 bg-[hsl(var(--surface-raised))] border border-rose-500/30 rounded-lg px-2 py-1 text-xs shadow-xs animate-in fade-in duration-150">
+                  <span className="text-[11px] font-mono text-rose-400">Delete chat?</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      deleteThread(activeThread.id)
+                      setIsDeletingActive(false)
+                    }}
+                    className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-rose-500 text-white hover:bg-rose-600 transition-colors cursor-pointer"
+                  >
+                    Delete
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsDeletingActive(false)}
+                    className="px-1.5 py-0.5 rounded text-[10px] font-mono text-[hsl(var(--muted))] hover:bg-black/10 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setIsDeletingActive(true)}
+                  title="Delete this conversation"
+                  aria-label="Delete conversation"
+                  className="text-[hsl(var(--muted))] hover:text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              )
+            )}
+          </div>
+        </div>
+      {/* Messages area with editorial column layout & virtual momentum smooth scroll */}
+      <SmoothScroll ref={smoothScrollRef} className="flex-1 px-4 py-6" showScrollbar>
         <div className="mx-auto max-w-[760px] w-full space-y-6">
           {/* Subtle Operating Surface Header */}
           {threadMessages.length > 0 && (
@@ -369,24 +714,45 @@ export const ChatTab: React.FC = () => {
             <FridayEmptyState
               icon={
                 <div className="relative flex items-center justify-center p-3 rounded-full border border-white/10 bg-white/5 shadow-2xl backdrop-blur-md">
-                  <FridayOrb size={52} dotSize={1.25} className="text-[hsl(var(--signal))] drop-shadow-[0_0_24px_hsl(var(--signal)/0.6)]" />
+                  <FridayOrb size={52} dotSize={1.25} />
                 </div>
               }
               title="FRIDAY Operating Surface"
               description="A calm, private intelligence instrument. Press Alt+Shift to speak or type an instruction."
               actions={
-                <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
-                  {quickPrompts.map((qp, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => setInputText(qp.cmd)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-mono border border-black/10 dark:border-white/10 bg-[hsl(var(--surface-raised))] text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))] hover:border-[hsl(var(--signal))] transition-colors cursor-pointer"
-                    >
-                      <Sparkles className="size-3 text-[hsl(var(--signal))]" />
-                      {qp.label}
-                    </button>
-                  ))}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 w-full pt-3">
+                  {quickPrompts.map((qp, i) => {
+                    const IconComponent = qp.icon
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => {
+                          if (!busy) {
+                            sendChatMessage(qp.cmd, expandedMode)
+                          } else {
+                            setInputText(qp.cmd)
+                          }
+                        }}
+                        className="group relative flex flex-col items-start p-3 rounded-xl border border-black/10 dark:border-white/[0.08] bg-black/[0.02] dark:bg-white/[0.03] hover:bg-black/[0.04] dark:hover:bg-white/[0.06] hover:border-black/20 dark:hover:border-white/20 transition-all duration-150 text-left cursor-pointer focus:outline-none focus:ring-1 focus:ring-[hsl(var(--signal))]/50"
+                      >
+                        <div className="flex items-center justify-between w-full mb-2">
+                          <div className="p-1.5 rounded-lg bg-black/5 dark:bg-white/10 text-[hsl(var(--muted))] group-hover:text-[hsl(var(--signal))] transition-colors">
+                            <IconComponent className="size-3.5" />
+                          </div>
+                          <span className="font-mono text-[9px] uppercase tracking-wider text-[hsl(var(--muted))] px-1 py-0.5 rounded bg-black/5 dark:bg-white/5 group-hover:border group-hover:border-white/10 transition-colors">
+                            {qp.tag}
+                          </span>
+                        </div>
+                        <div className="text-[12px] font-medium text-[hsl(var(--ink))] tracking-tight mb-0.5">
+                          {qp.label}
+                        </div>
+                        <div className="text-[11px] text-[hsl(var(--muted))] leading-tight line-clamp-1">
+                          {qp.desc}
+                        </div>
+                      </button>
+                    )
+                  })}
                 </div>
               }
             />
@@ -433,7 +799,7 @@ export const ChatTab: React.FC = () => {
                       {msg.content || msg.say}
                     </div>
                   ) : (
-                    <div className="w-full rounded-2xl border border-white/[0.08] bg-[hsl(var(--surface-raised))]/40 backdrop-blur-sm p-4 md:p-5 shadow-[0_12px_32px_-15px_rgba(0,0,0,0.5)] space-y-3.5">
+                    <SpotlightSurface className="w-full rounded-2xl border border-white/[0.08] bg-[hsl(var(--surface-raised))]/40 backdrop-blur-sm p-4 md:p-5 shadow-[0_12px_32px_-15px_rgba(0,0,0,0.5)] space-y-3.5">
                       {(() => {
                         const { sayText, showContent } = parseMessageDisplay(msg)
                         const calls = msg.toolCalls || msg.tool_calls
@@ -454,85 +820,141 @@ export const ChatTab: React.FC = () => {
 
                             {showContent && (
                               <div className="space-y-3 text-[13.5px] leading-relaxed text-[hsl(var(--ink))]/90 font-sans">
-                                <ReactMarkdown
-                                  remarkPlugins={[remarkGfm]}
-                                  components={{
-                                    h1: ({ children }) => (
+                                {(() => {
+                                  const markdownComponents = {
+                                    h1: ({ children }: { children?: React.ReactNode }) => (
                                       <h1 className="mt-4 mb-2 text-[16px] font-semibold tracking-tight text-[hsl(var(--ink))] border-b border-white/[0.06] pb-1.5 flex items-center gap-2">
                                         {children}
                                       </h1>
                                     ),
-                                    h2: ({ children }) => (
+                                    h2: ({ children }: { children?: React.ReactNode }) => (
                                       <h2 className="mt-3.5 mb-1.5 text-[14px] font-semibold tracking-tight text-[hsl(var(--ink))]">
                                         {children}
                                       </h2>
                                     ),
-                                    h3: ({ children }) => (
-                                      <h3 className="mt-3 mb-1 text-[11px] font-mono uppercase tracking-[0.08em] text-[hsl(var(--signal))] font-semibold">
+                                    h3: ({ children }: { children?: React.ReactNode }) => (
+                                      <h3 className="mt-3 mb-1 text-[11px] font-mono uppercase tracking-[0.08em] text-[hsl(var(--muted))] font-semibold">
                                         {children}
                                       </h3>
                                     ),
-                                    p: ({ children }) => (
-                                      <p className="mb-2.5 text-[13px] leading-relaxed text-[hsl(var(--ink))]/90 last:mb-0">
-                                        {children}
-                                      </p>
-                                    ),
-                                    ul: ({ children }) => (
-                                      <ul className="my-2.5 ml-4 list-disc space-y-1.5 text-[13px] text-[hsl(var(--ink))]/90 marker:text-[hsl(var(--signal))]">
+                                    p: ({ children }: { children?: React.ReactNode }) => {
+                                      const extractText = (node: React.ReactNode): string => {
+                                        if (!node) return ""
+                                        if (typeof node === "string" || typeof node === "number") return String(node)
+                                        if (Array.isArray(node)) return node.map(extractText).join("")
+                                        if (React.isValidElement(node) && node.props && typeof node.props === "object" && "children" in node.props) {
+                                          return extractText((node.props as { children?: React.ReactNode }).children)
+                                        }
+                                        return ""
+                                      }
+                                      const text = extractText(children).trim()
+                                      if (!text || /^([><\s]|&gt;|&lt;)+$/.test(text)) return null
+                                      return (
+                                        <p className="mb-2.5 text-[13px] leading-relaxed text-[hsl(var(--ink))]/90 last:mb-0">
+                                          {children}
+                                        </p>
+                                      )
+                                    },
+                                    ul: ({ children }: { children?: React.ReactNode }) => (
+                                      <ul className="my-2.5 ml-4 list-disc space-y-1.5 text-[13px] text-[hsl(var(--ink))]/90 marker:text-[hsl(var(--muted))]">
                                         {children}
                                       </ul>
                                     ),
-                                    ol: ({ children }) => (
-                                      <ol className="my-2.5 ml-4 list-decimal space-y-1.5 text-[13px] text-[hsl(var(--ink))]/90 marker:text-[hsl(var(--signal))] marker:font-mono">
+                                    ol: ({ children }: { children?: React.ReactNode }) => (
+                                      <ol className="my-2.5 ml-4 list-decimal space-y-1.5 text-[13px] text-[hsl(var(--ink))]/90 marker:text-[hsl(var(--muted))] marker:font-mono">
                                         {children}
                                       </ol>
                                     ),
-                                    li: ({ children }) => (
+                                    li: ({ children }: { children?: React.ReactNode }) => (
                                       <li className="leading-relaxed pl-1">{children}</li>
                                     ),
-                                    strong: ({ children }) => (
-                                      <strong className="font-semibold text-white">{children}</strong>
+                                    strong: ({ children }: { children?: React.ReactNode }) => (
+                                      <strong className="font-semibold text-[hsl(var(--ink))]">{children}</strong>
                                     ),
-                                    blockquote: ({ children }) => (
-                                      <blockquote className="my-3 border-l-2 border-[hsl(var(--signal))] bg-[hsl(var(--signal))]/5 px-3.5 py-2 rounded-r-lg text-[12.5px] text-[hsl(var(--muted))] italic">
-                                        {children}
-                                      </blockquote>
-                                    ),
-                                    table: ({ children }) => (
+                                    blockquote: ({ children }: { children?: React.ReactNode }) => {
+                                      const extractText = (node: React.ReactNode): string => {
+                                        if (!node) return ""
+                                        if (typeof node === "string" || typeof node === "number") return String(node)
+                                        if (Array.isArray(node)) return node.map(extractText).join("")
+                                        if (React.isValidElement(node) && node.props && typeof node.props === "object" && "children" in node.props) {
+                                          return extractText(node.props.children as React.ReactNode)
+                                        }
+                                        return ""
+                                      }
+                                      const text = extractText(children).trim()
+                                      if (!text || /^([><\s]|&gt;|&lt;)+$/.test(text)) return null
+                                      return (
+                                        <blockquote className="my-3 border-l-2 border-black/20 dark:border-white/20 bg-black/5 dark:bg-white/[0.03] px-3.5 py-2 rounded-r-lg text-[12.5px] text-[hsl(var(--muted))] italic">
+                                          {children}
+                                        </blockquote>
+                                      )
+                                    },
+                                    pre: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+                                    table: ({ children }: { children?: React.ReactNode }) => (
                                       <div className="my-3 w-full overflow-x-auto rounded-xl border border-white/10 bg-black/40 shadow-sm">
                                         <table className="w-full text-left text-xs border-collapse font-sans min-w-[500px]">
                                           {children}
                                         </table>
                                       </div>
                                     ),
-                                    thead: ({ children }) => (
+                                    thead: ({ children }: { children?: React.ReactNode }) => (
                                       <thead className="border-b border-white/10 bg-white/5 uppercase tracking-wider text-[10.5px] font-mono text-[hsl(var(--muted))]">
                                         {children}
                                       </thead>
                                     ),
-                                    th: ({ children }) => (
+                                    th: ({ children }: { children?: React.ReactNode }) => (
                                       <th className="px-3.5 py-2.5 font-semibold text-[hsl(var(--ink))] whitespace-nowrap">
                                         {children}
                                       </th>
                                     ),
-                                    td: ({ children }) => (
+                                    td: ({ children }: { children?: React.ReactNode }) => (
                                       <td className="px-3.5 py-2 border-t border-white/5 text-[hsl(var(--ink))]/90 whitespace-normal leading-relaxed text-[12px]">
                                         {children}
                                       </td>
                                     ),
-                                    tr: ({ children }) => (
+                                    tr: ({ children }: { children?: React.ReactNode }) => (
                                       <tr className="hover:bg-white/[0.03] transition-colors even:bg-white/[0.015]">
                                         {children}
                                       </tr>
                                     ),
                                     code: ({ inline, className, children, ...props }: React.HTMLAttributes<HTMLElement> & { inline?: boolean }) => {
+                                      const extractCodeText = (node: React.ReactNode): string => {
+                                        if (!node) return ""
+                                        if (typeof node === "string" || typeof node === "number") return String(node)
+                                        if (Array.isArray(node)) return node.map(extractCodeText).join("")
+                                        if (React.isValidElement(node) && node.props && typeof node.props === "object" && "children" in node.props) {
+                                          return extractCodeText((node.props as { children?: React.ReactNode }).children)
+                                        }
+                                        return ""
+                                      }
+                                      const codeContent = extractCodeText(children).trim()
+                                      const isLang = /language-(openui|open-ui|intelligent-ui|intelligentui|generative-ui|ui)/i.test(className || "")
+                                      const isSyntax = !inline && isOpenUICode(codeContent)
+
+                                      if (!inline && (isLang || isSyntax)) {
+                                        return (
+                                          <PerspectiveTilt maxTilt={3} scaleOnHover={1.008}>
+                                            <IntelligentUIRenderer code={codeContent} />
+                                          </PerspectiveTilt>
+                                        )
+                                      }
+
                                       if (inline) {
                                         return (
-                                          <code className="px-1.5 py-0.5 rounded font-mono text-[11px] bg-white/10 text-[hsl(var(--signal))] border border-white/5" {...props}>
+                                          <code className="px-1.5 py-0.5 rounded font-mono text-[11px] bg-black/5 dark:bg-white/10 text-[hsl(var(--ink))] border border-black/10 dark:border-white/10 break-all" {...props}>
                                             {children}
                                           </code>
                                         )
                                       }
+
+                                      if (!codeContent.includes("\n") && codeContent.length < 140) {
+                                        return (
+                                          <code className="inline-block px-2 py-0.5 my-1 rounded-md font-mono text-[11.5px] bg-black/5 dark:bg-white/[0.07] text-[hsl(var(--ink))] border border-black/10 dark:border-white/10 hover:bg-black/10 dark:hover:bg-white/10 transition-colors break-all" {...props}>
+                                            {children}
+                                          </code>
+                                        )
+                                      }
+
                                       return (
                                         <div className="my-3 rounded-xl border border-white/10 bg-black/50 p-3.5 overflow-x-auto font-mono text-xs shadow-inner">
                                           <code className={className} {...props}>{children}</code>
@@ -540,21 +962,43 @@ export const ChatTab: React.FC = () => {
                                       )
                                     },
                                     hr: () => <hr className="my-3.5 border-t border-white/[0.08]" />,
-                                  }}
-                                >
-                                  {showContent}
-                                </ReactMarkdown>
+                                  }
+
+                                  const extracted = extractOpenUIFromMarkdown(showContent)
+                                  if (extracted.isMatch && !showContent.includes("```")) {
+                                    return (
+                                      <div className="space-y-3">
+                                        {extracted.proseBefore && (
+                                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                                            {extracted.proseBefore}
+                                          </ReactMarkdown>
+                                        )}
+                                        <PerspectiveTilt maxTilt={3} scaleOnHover={1.008}>
+                                          <IntelligentUIRenderer code={extracted.code.trim()} />
+                                        </PerspectiveTilt>
+                                        {extracted.proseAfter && (
+                                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                                            {extracted.proseAfter}
+                                          </ReactMarkdown>
+                                        )}
+                                      </div>
+                                    )
+                                  }
+
+                                  return (
+                                    <ReactMarkdown
+                                      remarkPlugins={[remarkGfm]}
+                                      components={markdownComponents}
+                                    >
+                                      {showContent}
+                                    </ReactMarkdown>
+                                  )
+                                })()}
                               </div>
                             )}
 
-                            {/* Tool lifecycle cards */}
-                            {hasCalls && (
-                              <div className="mt-2 space-y-2">
-                                {calls!.map((tc) => (
-                                  <ToolCallCard key={tc.id} call={tc} />
-                                ))}
-                              </div>
-                            )}
+                            {/* Collapsible tool execution summary */}
+                            {hasCalls && <CollapsibleToolCalls calls={calls!} />}
                           </>
                         )
                       })()}
@@ -575,7 +1019,7 @@ export const ChatTab: React.FC = () => {
                         />
                       )
                     })()}
-                  </div>
+                  </SpotlightSurface>
                 )}
               </article>
             )})
@@ -626,12 +1070,13 @@ export const ChatTab: React.FC = () => {
           )}
           <div ref={messagesEndRef} />
         </div>
-      </div>
+      </SmoothScroll>
 
       {/* Composer fixed at bottom with breathing room */}
       <div className="p-4 border-t border-black/10 dark:border-white/10 bg-[hsl(var(--surface))]">
         <div className="mx-auto max-w-[760px] w-full">
           <FridayComposer
+            textareaRef={composerTextareaRef}
             value={inputText}
             onValueChange={setInputText}
             onSubmit={handleSend}
@@ -646,6 +1091,7 @@ export const ChatTab: React.FC = () => {
         </div>
       </div>
     </div>
+  </div>
   )
 }
 

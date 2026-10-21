@@ -20,13 +20,26 @@ import { motion, AnimatePresence } from "motion/react"
 import { Minus, Square, X, Copy } from "lucide-react"
 import { FridayOrb } from "@/components/orb"
 import { cn } from "@/lib/utils"
+import {
+  WatermelonBentoCard,
+  WatermelonSegmentedTabs,
+  WatermelonKpiCard,
+  WatermelonCollapsibleDrawer,
+  WatermelonStatusBadge,
+  LiquidToggle,
+  MagneticSelect,
+  SloshSlider,
+  SlideConfirm,
+  ProgressTicks,
+  AnimatedTaskRow,
+  InlineMarkdownText,
+  normalizeAuditEntry,
+} from "./BenchoWatermelonPrimitives";
 
 export const Console: React.FC = () => {
-  const {
-    tab,
-    setTab,
-    connectivity,
-  } = useFridayStore()
+  const tab = useFridayStore((s) => s.tab)
+  const setTab = useFridayStore((s) => s.setTab)
+  const connectivity = useFridayStore((s) => s.connectivity)
 
   const [isMaximized, setIsMaximized] = useState(false)
 

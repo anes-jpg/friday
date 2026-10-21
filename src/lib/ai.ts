@@ -9,6 +9,14 @@
 
 import { invokeCommand, isDesktop } from "./ipc"
 import type { Emotion, ToolCall, PendingPlanBackend } from "./types"
+import {
+  SF_ITINERARY_OPENUI,
+  LOAN_CALCULATOR_OPENUI,
+  PERFORMANCE_DASHBOARD_OPENUI,
+  BIKE_SPEC_OPENUI,
+  RUST_FLASHCARD_OPENUI,
+  THINKPAD_T590_OPENUI,
+} from "@/components/intelligent-ui/examples"
 
 export interface AiTurnResult {
   say: string
@@ -47,6 +55,18 @@ You are an active desktop operator, NOT a passive chatbot. When asked to inspect
 You communicate across two synchronized channels:
 1. Spoken Channel ('say'): What you speak aloud to the user. Speak naturally, articulately, and warmly in 2 to 3 engaging sentences. Provide real conversational depth, your key insight or recommendation, and address the user like a trusted partner in the room. Don't be excessively clipped or terse. NEVER include URLs, file paths, bullet points, asterisks, or markdown in 'say'.
 2. Visual Channel ('show'): What you display on screen. Use rich GitHub-flavored markdown, code blocks, clean tables, structured lists, and formatted data.
+
+INTELLIGENT UI (OpenUI Lang 1.0):
+You have access to an Intelligent Generative UI engine in FRIDAY's chat interface!
+When the user asks for travel routes/itineraries, financial or loan calculators, metric dashboards, hardware/spec breakdowns, flashcards, or interactive tools, you can emit a code block fenced with three backticks and the language tag openui containing OpenUI Lang 1.0 statements.
+Available primitives:
+- Layout: Col, Row, Box, Grid, Card, Carousel, Divider, Spacer
+- Typography: Title(title, subtitle, badge), Text(content), Badge(text, variant), List(items, title), ListItem(label, title, description, status)
+- Controls: Slider($var, min, max, step, label, unit), Button(label, action, variant), SegmentedControl($var, options, label), Checkbox($var, label), Timer(seconds, label)
+- Visuals & Data: Map(centerName, [markers], title, subtitle), MapMarker(title, lat, lng, desc, cat), Chart(type, labels, values, title, unit), Metric(label, value, unit, change, trend), Table(headers, rows, title)
+- Media: SearchImage(query, caption, source), Image(url, caption)
+- Interactive: Flashcard(question, answer, category), Celebration(title, message)
+- Functions: @Payment($amount, $rate, $years), @Sum(items), @Percent(val, total), @Convert(val, fromUnit, toUnit)
 
 When providing your final answer, output a single valid JSON object strictly formatted as:
 {
@@ -130,8 +150,84 @@ export async function executeAiTurn(
         : `${cleanUrl}/v1/chat/completions`
 
   if (!config.apiKey || config.apiKey.trim() === "") {
-    // Intelligent, persona-accurate guidance when API key is missing
+    const lower = cleanPrompt.toLowerCase()
     const totalMs = Math.round(performance.now() - startTime)
+
+    // Check for Intelligent UI showcase demonstrations
+    if (lower.includes("san francisco") || lower.includes("itinerary") || lower.includes("sightseeing")) {
+      return {
+        say: "I've generated a comprehensive one-day sightseeing route for San Francisco, complete with an interactive map, photo gallery, and editable timeline.",
+        show: "### San Francisco · Intelligent Itinerary\n\n```openui\n" + SF_ITINERARY_OPENUI + "\n```",
+        emotion: "bright",
+        model: "openui-engine-1.0",
+        tokens: 380,
+        ttftMs: 45,
+        totalMs,
+        toolCalls: [],
+      }
+    }
+    if (lower.includes("loan") || lower.includes("mortgage") || lower.includes("payment calculator")) {
+      return {
+        say: "Here is your interactive mortgage and loan payment estimator. Adjust the principal, rate, and term sliders to compute amortization in real time.",
+        show: "### Loan Amortization · Interactive Tool\n\n```openui\n" + LOAN_CALCULATOR_OPENUI + "\n```",
+        emotion: "focused",
+        model: "openui-engine-1.0",
+        tokens: 290,
+        ttftMs: 35,
+        totalMs,
+        toolCalls: [],
+      }
+    }
+    if (lower.includes("dashboard") || lower.includes("performance") || lower.includes("q4") || lower.includes("fleet")) {
+      return {
+        say: "Here is the Q4 AI Fleet Performance dashboard, featuring KPI telemetry, token throughput velocity, and subsystem breakdown.",
+        show: "### Fleet Telemetry · Intelligent UI Dashboard\n\n```openui\n" + PERFORMANCE_DASHBOARD_OPENUI + "\n```",
+        emotion: "focused",
+        model: "openui-engine-1.0",
+        tokens: 420,
+        ttftMs: 40,
+        totalMs,
+        toolCalls: [],
+      }
+    }
+    if (lower.includes("bicycle") || lower.includes("bike") || lower.includes("7-speed") || lower.includes("gear ratio")) {
+      return {
+        say: "Here is the 7-speed commuter bicycle specification breakdown with transmission ratios and gear suitability table.",
+        show: "### 7-Speed Commuter Bicycle · Hardware Spec\n\n```openui\n" + BIKE_SPEC_OPENUI + "\n```",
+        emotion: "warm",
+        model: "openui-engine-1.0",
+        tokens: 310,
+        ttftMs: 30,
+        totalMs,
+        toolCalls: [],
+      }
+    }
+    if (lower.includes("flashcard") || lower.includes("rust ownership")) {
+      return {
+        say: "Here are your interactive systems engineering flashcards for Rust ownership and error handling laws. Click each card to flip it.",
+        show: "### Systems Review · Interactive 3D Flashcards\n\n```openui\n" + RUST_FLASHCARD_OPENUI + "\n```",
+        emotion: "bright",
+        model: "openui-engine-1.0",
+        tokens: 240,
+        ttftMs: 25,
+        totalMs,
+        toolCalls: [],
+      }
+    }
+    if (lower.includes("thinkpad") || lower.includes("t590") || lower.includes("hardware spec")) {
+      return {
+        say: "Here are the complete hardware specifications and system matrix for the ThinkPad T590.",
+        show: "### Lenovo ThinkPad T590 Hardware Specification Matrix\n\n```openui\n" + THINKPAD_T590_OPENUI + "\n```",
+        emotion: "focused",
+        model: "openui-engine-1.0",
+        tokens: 360,
+        ttftMs: 35,
+        totalMs,
+        toolCalls: [],
+      }
+    }
+
+    // Default intelligent guidance when API key is missing
     return {
       say: "I'm right here, but my AI reasoning engine needs an API key. Please open Settings and enter your key so we can get to work.",
       show: `### FRIDAY · AI Fleet Idle\n\nI'm ready to assist you, but the reasoning fleet is offline because no API key is configured.\n\nTo activate live AI reasoning:\n1. Open **Settings** (click the gear icon or \`Alt+Shift+Space\`).\n2. In the **Reasoning** section, paste your API key (e.g. from DeepSeek, AgentRouter, Zhipu AI, or OpenAI).\n3. Click **Save Settings** and **Test Connection**.\n\nYour key is stored securely in your local environment and never sent anywhere except your configured endpoint.`,

@@ -44,6 +44,13 @@ import {
   focusWindow,
   getActiveThread as ipcGetActiveThread,
   setActiveThread as ipcSetActiveThread,
+  ipcGetThreads,
+  ipcCreateThread,
+  ipcDeleteThread,
+  ipcRenameThread,
+  ipcToggleThreadPin,
+  ipcGetMessages,
+  ipcAddMessage,
 } from "./ipc"
 import {
   speakFriday,
@@ -254,6 +261,7 @@ interface State {
   theme: "dark" | "bright"
   threads: Thread[]
   activeThreadId: string | null
+  chatHistoryOpen: boolean
   contextInspectorOpen: boolean
   debugDrawerOpen: boolean
 
@@ -303,7 +311,12 @@ interface State {
   setTheme: (t: "dark" | "bright") => void
   toggleTheme: () => void
   setActiveThread: (id: string) => void
-  createThread: () => string
+  createThread: (title?: string) => string
+  deleteThread: (id: string) => void
+  renameThread: (id: string, title: string) => void
+  toggleThreadPin: (id: string) => void
+  toggleChatHistory: (open?: boolean) => void
+  hydrateThreadsFromBackend: () => Promise<void>
   toggleInspector: () => void
   toggleDebug: () => void
 
@@ -408,6 +421,7 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
   theme: (typeof window !== "undefined" && (localStorage.getItem("friday-theme") as "dark" | "bright")) || "dark",
   threads: seed.threads,
   activeThreadId: seed.threads[0]?.id ?? null,
+  chatHistoryOpen: false,
   contextInspectorOpen: true,
   debugDrawerOpen: false,
 
@@ -599,23 +613,188 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
   setActiveThread: (activeThreadId) => {
     set({ activeThreadId })
     ipcSetActiveThread(activeThreadId).catch(() => {})
+    const current = useFriday.getState().threads.find((t) => t.id === activeThreadId)
+    if (current && (!current.messages || current.messages.length === 0)) {
+      ipcGetMessages(activeThreadId)
+        .then((msgs) => {
+          if (Array.isArray(msgs) && msgs.length > 0) {
+            set((s) => ({
+              threads: s.threads.map((t) =>
+                t.id === activeThreadId
+                  ? {
+                      ...t,
+                      messages: msgs.map((m) => ({
+                        id: m.id,
+                        role: m.role as "user" | "assistant",
+                        content: m.show || m.say || "",
+                        say: m.say,
+                        show: m.show,
+                        created_at: new Date(m.created_at * 1000).toISOString(),
+                      })),
+                      message_count: msgs.length,
+                    }
+                  : t
+              ),
+            }))
+          }
+        })
+        .catch(() => {})
+    }
   },
-  createThread: () => {
+  createThread: (title?: string) => {
     const id = `t-${Date.now()}`
+    const threadTitle = title?.trim() || "New session"
     const newThread: Thread = {
       id,
-      title: "New session",
+      title: threadTitle,
       pinned: false,
       message_count: 0,
       updated_at: new Date().toISOString(),
       messages: [],
     }
-    set((s) => ({
-      threads: [newThread, ...s.threads],
-      activeThreadId: id,
-    }))
+    set((s) => {
+      const shouldClose = typeof window !== "undefined" && window.innerWidth < 768
+      return {
+        threads: [newThread, ...s.threads],
+        activeThreadId: id,
+        chatHistoryOpen: shouldClose ? false : s.chatHistoryOpen,
+      }
+    })
+    ipcCreateThread(threadTitle, id).catch(() => {})
     ipcSetActiveThread(id).catch(() => {})
     return id
+  },
+  deleteThread: (threadId: string) => {
+    set((s) => {
+      const remaining = s.threads.filter((t) => t.id !== threadId)
+      let nextActiveId = s.activeThreadId
+      if (s.activeThreadId === threadId) {
+        if (remaining.length > 0) {
+          nextActiveId = remaining[0].id
+        } else {
+          const freshId = `t-${Date.now()}`
+          const freshThread: Thread = {
+            id: freshId,
+            title: "New session",
+            pinned: false,
+            message_count: 0,
+            updated_at: new Date().toISOString(),
+            messages: [],
+          }
+          ipcCreateThread("New session", freshId).catch(() => {})
+          ipcSetActiveThread(freshId).catch(() => {})
+          return {
+            threads: [freshThread],
+            activeThreadId: freshId,
+          }
+        }
+      }
+      if (nextActiveId && nextActiveId !== s.activeThreadId) {
+        ipcSetActiveThread(nextActiveId).catch(() => {})
+      }
+      return {
+        threads: remaining,
+        activeThreadId: nextActiveId,
+      }
+    })
+    ipcDeleteThread(threadId).catch(() => {})
+  },
+  renameThread: (threadId: string, title: string) => {
+    const cleanTitle = title.trim()
+    if (!cleanTitle) return
+    const nowIso = new Date().toISOString()
+    set((s) => ({
+      threads: s.threads.map((t) =>
+        t.id === threadId ? { ...t, title: cleanTitle, updated_at: nowIso } : t
+      ),
+    }))
+    ipcRenameThread(threadId, cleanTitle).catch(() => {})
+  },
+  toggleThreadPin: (threadId: string) => {
+    set((s) => ({
+      threads: s.threads.map((t) =>
+        t.id === threadId ? { ...t, pinned: !t.pinned } : t
+      ),
+    }))
+    ipcToggleThreadPin(threadId).catch(() => {})
+  },
+  toggleChatHistory: (open?: boolean) => {
+    set((s) => {
+      const next = typeof open === "boolean" ? open : !s.chatHistoryOpen
+      if (typeof window !== "undefined") {
+        try { localStorage.setItem("friday_chat_history_open", String(next)) } catch {}
+      }
+      return { chatHistoryOpen: next }
+    })
+  },
+  hydrateThreadsFromBackend: async () => {
+    try {
+      const [backendThreads, activeId] = await Promise.all([
+        ipcGetThreads(),
+        ipcGetActiveThread().catch(() => null),
+      ])
+      if (Array.isArray(backendThreads) && backendThreads.length > 0) {
+        set((s) => {
+          const existingMap = new Map(s.threads.map((t) => [t.id, t]))
+          const merged: Thread[] = backendThreads.map((bt) => {
+            const existing = existingMap.get(bt.id)
+            const count = existing?.messages?.length ? existing.messages.length : (bt.message_count ?? 0)
+            return {
+              id: bt.id,
+              title: bt.title,
+              pinned: bt.pinned,
+              updated_at: new Date(bt.updated_at * 1000).toISOString(),
+              message_count: count,
+              messages: existing?.messages ?? [],
+            }
+          })
+          const resolvedActive =
+            activeId && merged.some((t) => t.id === activeId)
+              ? activeId
+              : s.activeThreadId && merged.some((t) => t.id === s.activeThreadId)
+              ? s.activeThreadId
+              : merged[0]?.id ?? null
+          return {
+            threads: merged,
+            activeThreadId: resolvedActive,
+          }
+        })
+
+        // Also fetch messages for active thread if empty
+        const curActive = useFriday.getState().activeThreadId
+        if (curActive) {
+          const cur = useFriday.getState().threads.find((t) => t.id === curActive)
+          if (cur && (!cur.messages || cur.messages.length === 0)) {
+            ipcGetMessages(curActive)
+              .then((msgs) => {
+                if (Array.isArray(msgs) && msgs.length > 0) {
+                  set((s) => ({
+                    threads: s.threads.map((t) =>
+                      t.id === curActive
+                        ? {
+                            ...t,
+                            messages: msgs.map((m) => ({
+                              id: m.id,
+                              role: m.role as "user" | "assistant",
+                              content: m.show || m.say || "",
+                              say: m.say,
+                              show: m.show,
+                              created_at: new Date(m.created_at * 1000).toISOString(),
+                            })),
+                            message_count: msgs.length,
+                          }
+                        : t
+                    ),
+                  }))
+                }
+              })
+              .catch(() => {})
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to hydrate threads from backend:", e)
+    }
   },
   toggleInspector: () => set((s) => ({ contextInspectorOpen: !s.contextInspectorOpen })),
   toggleDebug: () => set((s) => ({ debugDrawerOpen: !s.debugDrawerOpen })),
@@ -651,19 +830,21 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
 
   appendAudit: (e) => set((s) => ({ audit: [e, ...s.audit].slice(0, 200) })),
 
-  pushMessage: (threadId, msg) =>
+  pushMessage: (threadId, msg) => {
     set((s) => ({
       threads: s.threads.map((t) =>
         t.id === threadId
           ? {
               ...t,
               messages: [...t.messages, msg],
-              message_count: t.message_count + 1,
+              message_count: (t.message_count ?? t.messages.length) + 1,
               updated_at: new Date().toISOString(),
             }
           : t
       ),
-    })),
+    }))
+    ipcAddMessage(threadId, msg.role, msg.say, msg.show || msg.content).catch(() => {})
+  },
 
   patchLastMessage: (threadId, patch) =>
     set((s) => ({
@@ -1131,6 +1312,24 @@ export function useActiveThread(): Thread | null {
   return useFriday((s) => s.threads.find((t) => t.id === s.activeThreadId) ?? null)
 }
 
+export function formatAutoThreadTitle(prompt: string): string {
+  const singleLine = prompt.replace(/[\r\n\t]+/g, " ").trim()
+  if (!singleLine) return "New session"
+
+  const capitalized = singleLine.charAt(0).toUpperCase() + singleLine.slice(1)
+  if (capitalized.length <= 42) {
+    return capitalized
+  }
+
+  const sliceZone = capitalized.slice(0, 42)
+  const lastSpace = sliceZone.lastIndexOf(" ")
+  if (lastSpace > 16) {
+    return sliceZone.slice(0, lastSpace).trim() + "…"
+  }
+
+  return sliceZone.slice(0, 38).trim() + "…"
+}
+
 /** Dispatches a real message turn into the active thread and queries backend GLM. */
 export async function sendChatMessage(text: string, expandedMode: boolean = false) {
   const clean = text.trim()
@@ -1146,12 +1345,14 @@ export async function sendChatMessage(text: string, expandedMode: boolean = fals
   const asstMsgId = `m-${Date.now()}-a`
 
   const currentThread = store.threads.find((t) => t.id === threadId)
-  if (currentThread && currentThread.title === "New session") {
+  if (currentThread && (currentThread.title.toLowerCase() === "new session" || !currentThread.title.trim())) {
+    const autoTitle = formatAutoThreadTitle(clean)
     useFriday.setState((s) => ({
       threads: s.threads.map((t) =>
-        t.id === threadId ? { ...t, title: clean.slice(0, 36) } : t
+        t.id === threadId ? { ...t, title: autoTitle } : t
       ),
     }))
+    ipcRenameThread(threadId, autoTitle).catch(() => {})
   }
 
   // 1. Add User Message
@@ -1172,11 +1373,7 @@ export async function sendChatMessage(text: string, expandedMode: boolean = fals
       content: m.content,
     }))
 
-    const promptPayload = expandedMode
-      ? `${clean}\n\n[Instruction: Expanded Mode is ON. Provide a comprehensive, in-depth breakdown with detailed comparisons, tables, and thorough options.]`
-      : `${clean}\n\n[Instruction: Concise Mode. Keep your visual and spoken answer concise, direct, and human. Give the key recommendation and summary without spitting out huge multi-page walls of text or endless tables.]`
-
-    const aiRes = await executeAiTurn(promptPayload, recentMessages, expandedMode ? "expanded" : "command")
+    const aiRes = await executeAiTurn(clean, recentMessages, expandedMode ? "expanded" : "command")
 
     store.pushMessage(threadId, {
       id: asstMsgId,

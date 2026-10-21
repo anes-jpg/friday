@@ -170,10 +170,10 @@ export interface Message {
 export interface Thread {
   id: string
   title: string
-  updated_at: string
+  updated_at?: string
   updatedAt?: string
-  pinned: boolean
-  message_count: number
+  pinned?: boolean
+  message_count?: number
   messageCount?: number
   messages: Message[]
 }

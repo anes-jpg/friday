@@ -6,9 +6,14 @@ import { isAudioActive } from "@/lib/kokoro";
 
 import { Palette } from "@/surfaces/palette/Palette";
 import { Console } from "@/surfaces/console/Console";
-import { OnboardingModal } from "@/surfaces/onboarding/OnboardingModal";
-import { LandingShowcase } from "@/surfaces/landing/LandingShowcase";
 import { surfaceLabel } from "@/lib/ipc";
+
+const OnboardingModal = React.lazy(() =>
+  import("@/surfaces/onboarding/OnboardingModal").then((m) => ({ default: m.OnboardingModal }))
+);
+const LandingShowcase = React.lazy(() =>
+  import("@/surfaces/landing/LandingShowcase").then((m) => ({ default: m.LandingShowcase }))
+);
 
 const getTauriWindowLabel = (): string => {
   if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
@@ -353,28 +358,34 @@ export const App: React.FC = () => {
     <div className="relative w-full h-full overflow-hidden font-sans bg-[hsl(var(--canvas))]">
       <Console />
       <Palette />
-      <OnboardingModal
-        isOpen={showOnboarding}
-        onClose={() => {
-          setShowOnboarding(false);
-          try {
-            localStorage.setItem("friday_onboarded_v1_0", "true");
-            localStorage.setItem("friday_onboarded", "true");
-          } catch {
-            // ignore
-          }
-        }}
-      />
-      <LandingShowcase
-        isOpen={showShowcase}
-        onClose={() => setShowShowcase(false)}
-        onLaunchBar={() => {
-          setShowShowcase(false);
-        }}
-        onLaunchConsole={() => {
-          setShowShowcase(false);
-        }}
-      />
+      <React.Suspense fallback={null}>
+        {showOnboarding && (
+          <OnboardingModal
+            isOpen={showOnboarding}
+            onClose={() => {
+              setShowOnboarding(false);
+              try {
+                localStorage.setItem("friday_onboarded_v1_0", "true");
+                localStorage.setItem("friday_onboarded", "true");
+              } catch {
+                // ignore
+              }
+            }}
+          />
+        )}
+        {showShowcase && (
+          <LandingShowcase
+            isOpen={showShowcase}
+            onClose={() => setShowShowcase(false)}
+            onLaunchBar={() => {
+              setShowShowcase(false);
+            }}
+            onLaunchConsole={() => {
+              setShowShowcase(false);
+            }}
+          />
+        )}
+      </React.Suspense>
     </div>
   );
 };

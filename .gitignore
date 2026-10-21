@@ -37,3 +37,10 @@ vendor/
 *.wav
 *.mp4
 *.zip
+.idea/
+.gradle/
+android-client/.gradle/
+android-client/.kotlin/
+android-client/build/
+android-client/app/build/
+android-client/local.properties

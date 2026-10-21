@@ -13,7 +13,8 @@ export const AudioSpectrumVisualizer: React.FC<AudioSpectrumVisualizerProps> = (
   barCount = 24,
   height = 20,
 }) => {
-  const { orbState, level } = useFridayStore()
+  const orbState = useFridayStore((s) => s.orbState)
+  const level = useFridayStore((s) => s.level)
   const safeRms = typeof level === "number" && !isNaN(level) ? Math.min(1, Math.max(0, level)) : 0
   const isIdle = orbState === "idle" || !orbState
   const isListening = orbState === "listening"

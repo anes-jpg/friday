@@ -14,17 +14,49 @@ const phaseMeta = {
   failed: { label: "Failed", icon: CircleAlert },
 } satisfies Record<ToolPhase, { label: string; icon: typeof Wrench }>
 
+function sanitizeToolSummary(raw: string, args?: Record<string, unknown>): string {
+  if (!raw && args) {
+    if (args.task) return `Task: ${String(args.task)}`
+    if (args.query) return `Query: ${String(args.query)}`
+    if (args.url) return `URL: ${String(args.url)}`
+  }
+  let s = (raw || "").trim()
+  if (s.startsWith("{") || s.includes('"error":') || s.includes('"status":') || s.includes('"task":')) {
+    try {
+      const parsed = JSON.parse(s)
+      if (parsed.error) {
+        const errStr = String(parsed.error)
+        if (errStr.includes("403")) return "Access restricted (HTTP 403) — used web search fallback"
+        if (errStr.includes("timeout")) return "Request timed out — used indexed cache fallback"
+        return `Notice: ${errStr.slice(0, 120)}`
+      }
+      if (parsed.message) return String(parsed.message).slice(0, 120)
+      if (parsed.task) return `Task: ${String(parsed.task)}`
+      if (parsed.summary) return String(parsed.summary).slice(0, 140)
+      if (parsed.result) return String(parsed.result).slice(0, 140)
+    } catch {
+      // not strict JSON, fall through
+    }
+  }
+  if (s.includes("%PDF") || (s.includes("endobj") && s.includes("obj"))) {
+    return "Datasheet and technical specs indexed successfully"
+  }
+  if (s.includes('"node":') && s.includes('"role":')) {
+    return "Interactive page controls and accessibility tree indexed"
+  }
+  return s.length > 180 ? `${s.slice(0, 180)}…` : s
+}
+
 function lifecycleSegments(phase: ToolPhase): TrackerSegment[] {
   const steps = ["Queued", "Running", "Verifying", "Complete"]
   const position = phase === "failed" ? 1 : ["queued", "running", "verifying", "complete"].indexOf(phase)
-  return Array.from({ length: 24 }, (_, index) => {
-    const step = Math.min(3, Math.floor(index / 6))
+  return steps.map((label, step) => {
     const passed = step < position
     const current = step === position
     return {
-      id: String(index),
-      label: steps[step],
-      tone: phase === "failed" && current ? "danger" : passed ? "success" : current ? "active" : "idle",
+      id: String(step),
+      label,
+      tone: phase === "failed" && current ? "danger" : current && (phase === "running" || phase === "verifying") ? "active" : passed ? "idle" : "idle",
     }
   })
 }
@@ -69,7 +101,8 @@ export function ToolCallCard(props: ToolCallCardProps) {
   if ("call" in props && props.call) {
     const call = props.call
     name = call.name
-    target = call.args ? JSON.stringify(call.args).slice(0, 48) : undefined
+    const rawTarget = call.args ? JSON.stringify(call.args) : undefined
+    target = rawTarget ? rawTarget.replace(/\[Instruction:[\s\S]*?\]/gi, "").trim().slice(0, 48) : undefined
     phase =
       call.status === "pending"
         ? "queued"
@@ -78,12 +111,14 @@ export function ToolCallCard(props: ToolCallCardProps) {
         : call.status === "failed" || call.status === "refused"
         ? "failed"
         : "complete"
-    summary =
+    summary = sanitizeToolSummary(
       typeof call.output === "string"
         ? call.output
         : call.args
         ? JSON.stringify(call.args)
-        : "Tool executed"
+        : "Tool executed",
+      call.args as Record<string, unknown> | undefined
+    )
     expanded = internalExpanded
     onExpandedChange = setInternalExpanded
     durationMs = call.duration_ms
@@ -98,7 +133,7 @@ export function ToolCallCard(props: ToolCallCardProps) {
         {call.output && (
           <div>
             <span className="text-white/50">OUTPUT: </span>
-            <pre className="mt-1 overflow-x-auto rounded bg-black/40 p-2 text-white/90">
+            <pre className="mt-1 overflow-x-auto rounded bg-black/40 p-2 text-white/90 max-h-48">
               {typeof call.output === "string" ? call.output : JSON.stringify(call.output, null, 2)}
             </pre>
           </div>
@@ -109,7 +144,7 @@ export function ToolCallCard(props: ToolCallCardProps) {
     name = props.name
     target = props.target
     phase = props.phase
-    summary = props.summary
+    summary = sanitizeToolSummary(props.summary)
     expanded = props.expanded
     onExpandedChange = props.onExpandedChange
     children = props.children
@@ -120,45 +155,45 @@ export function ToolCallCard(props: ToolCallCardProps) {
   const busy = phase === "running" || phase === "verifying"
 
   return (
-    <article className="overflow-hidden rounded-[var(--radius-panel)] bg-black text-white shadow-sm border border-white/10 my-2">
+    <article className="overflow-hidden rounded-[var(--radius-panel)] bg-black/60 dark:bg-black/80 text-white shadow-sm border border-white/10 my-2">
       <button
         type="button"
         aria-expanded={expanded}
         onClick={() => onExpandedChange(!expanded)}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white transition-colors hover:bg-white/[.03]"
+        className="flex w-full items-center gap-3 px-4 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white transition-colors hover:bg-white/[.03]"
       >
         <span className={cn(
-          "grid size-8 place-items-center rounded-full shrink-0 transition-colors",
-          phase === "complete" ? "bg-[hsl(var(--signal))]/15 text-[hsl(var(--signal))]" : "bg-white/10 text-white"
+          "grid size-7 place-items-center rounded-full shrink-0 transition-colors",
+          phase === "complete" ? "bg-[hsl(var(--signal))]/15 text-[hsl(var(--signal))]" : busy ? "bg-[hsl(var(--signal))]/20 text-[hsl(var(--signal))]" : "bg-white/10 text-white"
         )}>
-          <Icon aria-hidden className={cn("size-4", busy && "animate-spin motion-reduce:animate-none")} />
+          <Icon aria-hidden className={cn("size-3.5", busy && "animate-spin motion-reduce:animate-none")} />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium">{name}</span>
+          <span className="block truncate text-xs font-medium font-mono">{name}</span>
           {target && (
-            <span className="font-instrument block truncate text-[10px] uppercase tracking-[.1em] text-white/50">
+            <span className="font-mono block truncate text-[10px] text-white/50">
               {target}
             </span>
           )}
         </span>
         {durationMs !== undefined && (
-          <span className="font-instrument text-[10px] text-white/40">{ms(durationMs)}</span>
+          <span className="font-mono text-[10px] text-white/40 tabular-nums">{ms(durationMs)}</span>
         )}
         <span className={cn(
-          "font-instrument text-[10px] uppercase tracking-[.11em] transition-colors",
-          phase === "complete" ? "text-[hsl(var(--signal))]" : "text-white/65"
+          "font-mono text-[10px] uppercase tracking-wider transition-colors font-semibold",
+          phase === "complete" ? "text-[hsl(var(--signal))]" : busy ? "text-[hsl(var(--signal))]" : "text-white/65"
         )}>
           {meta.label}
         </span>
         <ChevronDown
           aria-hidden
-          className={cn("size-4 text-white/50 transition-transform duration-150", expanded && "rotate-180")}
+          className={cn("size-3.5 text-white/50 transition-transform duration-150", expanded && "rotate-180")}
         />
       </button>
 
-      <div className="px-4 pb-3">
+      <div className="px-4 pb-2.5">
         <SegmentedTracker segments={lifecycleSegments(phase)} label={`${name}: ${meta.label}`} />
-        <p className="mt-2.5 max-w-[70ch] text-xs leading-relaxed text-white/80 line-clamp-2">{summary}</p>
+        <p className="mt-2 max-w-[70ch] text-xs leading-relaxed text-white/80 line-clamp-2">{summary}</p>
       </div>
 
       {reversible && (

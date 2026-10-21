@@ -8,8 +8,14 @@ import { Button } from "@/components/ui/button"
 import {
   Server, Volume2, Shield, DollarSign, CheckCircle2, AlertCircle, RefreshCw,
   Radio, Play, Square, Settings2, Sliders, Eye, EyeOff,
+  Smartphone, Copy, ExternalLink, Download,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import {
+  WatermelonBentoCard,
+  MagneticSelect,
+  SloshSlider,
+} from "./BenchoWatermelonPrimitives"
 
 export const SettingsTab: React.FC = () => {
   const {
@@ -24,7 +30,7 @@ export const SettingsTab: React.FC = () => {
     toggleWakeWord,
   } = useFridayStore()
 
-  const [activeSection, setActiveSection] = useState<"models" | "voice" | "audio" | "vault">("models")
+  const [activeSection, setActiveSection] = useState<"models" | "voice" | "audio" | "vault" | "remote">("models")
   const [apiKey, setApiKey] = useState("")
   const [storedKeyLength, setStoredKeyLength] = useState<number | null>(null)
   const [showKey, setShowKey] = useState(false)
@@ -181,6 +187,7 @@ export const SettingsTab: React.FC = () => {
     { id: "voice", label: "Voice & Piper TTS", icon: Volume2 },
     { id: "audio", label: "Audio & Wake Word", icon: Radio },
     { id: "vault", label: "Security & Spend", icon: Shield },
+    { id: "remote", label: "Mobile Access", icon: Smartphone },
   ] as const
 
   return (
@@ -259,7 +266,7 @@ export const SettingsTab: React.FC = () => {
           {/* Section 1: Model & Routing */}
           {activeSection === "models" && (
             <section className="space-y-4">
-              <div className="p-4 rounded-[var(--radius-panel)] border border-black/10 dark:border-white/10 bg-[hsl(var(--surface-raised))] space-y-4">
+              <WatermelonBentoCard className="p-6 space-y-4">
                 <h3 className="font-semibold text-sm text-[hsl(var(--ink))] flex items-center gap-2">
                   <Server className="size-4 text-[hsl(var(--signal))]" />
                   AI Reasoning Engine & Providers
@@ -270,32 +277,38 @@ export const SettingsTab: React.FC = () => {
                   <span className="font-instrument text-[10px] text-[hsl(var(--muted))] uppercase tracking-wider block mb-1.5">
                     Provider Presets
                   </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {[
-                      { label: "DeepSeek Official", url: "https://api.deepseek.com/v1", heavy: "deepseek-chat", light: "deepseek-chat" },
-                      { label: "AgentRouter", url: "https://agentrouter.org/v1", heavy: "deepseek-v4-flash", light: "deepseek-v4-flash" },
-                      { label: "OpenAI", url: "https://api.openai.com/v1", heavy: "gpt-4o", light: "gpt-4o-mini" },
-                      { label: "Ollama Local", url: "http://localhost:11434/v1", heavy: "llama3", light: "llama3" },
-                    ].map((p) => (
-                      <button
-                        type="button"
-                        key={p.label}
-                        onClick={() => {
-                          setBaseUrl(p.url)
-                          setHeavyModel(p.heavy)
-                          setLightModel(p.light)
-                        }}
-                        className={cn(
-                          "px-2.5 py-1 rounded-[var(--radius-control)] border font-instrument text-[10px] transition-colors cursor-pointer",
-                          baseUrl.includes(new URL(p.url).hostname)
-                            ? "border-[hsl(var(--signal))] bg-[hsl(var(--signal))]/10 text-[hsl(var(--signal))] font-semibold"
-                            : "border-black/10 dark:border-white/10 bg-[hsl(var(--surface))] text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))]"
-                        )}
-                      >
-                        {p.label}
-                      </button>
-                    ))}
-                  </div>
+                  <MagneticSelect
+                    options={[
+                      { value: "DeepSeek Official", label: "DeepSeek Official" },
+                      { value: "AgentRouter", label: "AgentRouter" },
+                      { value: "OpenAI", label: "OpenAI" },
+                      { value: "Ollama Local", label: "Ollama Local" },
+                    ]}
+                    value={
+                      baseUrl.includes("deepseek.com")
+                        ? "DeepSeek Official"
+                        : baseUrl.includes("openai.com")
+                        ? "OpenAI"
+                        : baseUrl.includes("localhost:11434")
+                        ? "Ollama Local"
+                        : "AgentRouter"
+                    }
+                    onChange={(preset) => {
+                      const presetsMap: Record<string, { url: string; heavy: string; light: string }> = {
+                        "DeepSeek Official": { url: "https://api.deepseek.com/v1", heavy: "deepseek-chat", light: "deepseek-chat" },
+                        "AgentRouter": { url: "https://agentrouter.org/v1", heavy: "deepseek-v4-flash", light: "deepseek-v4-flash" },
+                        "OpenAI": { url: "https://api.openai.com/v1", heavy: "gpt-4o", light: "gpt-4o-mini" },
+                        "Ollama Local": { url: "http://localhost:11434/v1", heavy: "llama3", light: "llama3" },
+                      }
+                      const p = presetsMap[preset]
+                      if (p) {
+                        setBaseUrl(p.url)
+                        setHeavyModel(p.heavy)
+                        setLightModel(p.light)
+                      }
+                    }}
+                    accent="violet"
+                  />
                 </div>
 
                 <div className="space-y-3 font-instrument text-xs">
@@ -404,7 +417,7 @@ export const SettingsTab: React.FC = () => {
                     <span>{testResult.message}</span>
                   </div>
                 )}
-              </div>
+              </WatermelonBentoCard>
             </section>
           )}
 
@@ -526,23 +539,19 @@ export const SettingsTab: React.FC = () => {
                   </button>
                 </div>
 
-                <div className="space-y-2 pt-2 border-t border-black/10 dark:border-white/10 font-instrument text-xs">
-                  <div className="flex items-center justify-between text-[11px] text-[hsl(var(--muted))]">
-                    <span>DETECTION SENSITIVITY</span>
-                    <span className="text-[hsl(var(--ink))]">{(wakeWord.sensitivity * 100).toFixed(0)}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.2"
-                    max="0.95"
-                    step="0.05"
-                    value={wakeWord.sensitivity}
-                    onChange={(e) => {
-                      const val = parseFloat(e.target.value)
-                      setWakeWord({ sensitivity: val })
-                      invokeCommand("set_wake_word_sensitivity", { sensitivity: val }).catch(() => {})
+                <div className="pt-2 border-t border-black/10 dark:border-white/10 font-instrument text-xs space-y-2">
+                  <SloshSlider
+                    label="Detection Sensitivity"
+                    value={Math.round(wakeWord.sensitivity * 100)}
+                    min={20}
+                    max={95}
+                    step={5}
+                    unit="%"
+                    onChange={(val) => {
+                      const decimalVal = +(val / 100).toFixed(2)
+                      setWakeWord({ sensitivity: decimalVal })
+                      invokeCommand("set_wake_word_sensitivity", { sensitivity: decimalVal }).catch(() => {})
                     }}
-                    className="w-full accent-[hsl(var(--signal))] cursor-pointer"
                   />
                   <span className="text-[10px] text-[hsl(var(--muted))] block">
                     Higher sensitivity catches whispers; lower avoids noise triggers.
@@ -577,6 +586,63 @@ export const SettingsTab: React.FC = () => {
                   <div className="p-3 rounded-[var(--radius-control)] bg-black/5 dark:bg-white/5 text-[hsl(var(--muted))] space-y-1">
                     <p>Current spend today: <strong className="text-[hsl(var(--ink))]">${(glmSettings.currentSpendUsd || 0).toFixed(2)}</strong></p>
                     <p className="text-[10px]">When cap is reached, non-local models pause automatically.</p>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* Section 5: Mobile Access & Gateway */}
+          {activeSection === "remote" && (
+            <section className="space-y-4">
+              <div className="p-4 rounded-[var(--radius-panel)] border border-black/10 dark:border-white/10 bg-[hsl(var(--surface-raised))] space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-semibold text-sm text-[hsl(var(--ink))] flex items-center gap-2">
+                      <Smartphone className="size-4 text-[hsl(var(--signal))]" />
+                      FRIDAY Mobile Access Gateway
+                    </h3>
+                    <p className="font-instrument text-[11px] text-[hsl(var(--muted))] mt-0.5">
+                      Operate FRIDAY remotely from your Android phone via LAN or Tunnel on port 18420.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-3 font-instrument text-xs">
+                  <div className="p-3 rounded-[var(--radius-control)] bg-black/5 dark:bg-white/5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-[hsl(var(--muted))] uppercase">6-Digit Pairing PIN</span>
+                      <span className="font-mono font-bold text-sm text-[hsl(var(--signal))]">749201</span>
+                    </div>
+                    <p className="text-[11px] text-[hsl(var(--muted))]">
+                      Enter this PIN on your Android device during initial setup to establish secure pairing.
+                    </p>
+                  </div>
+
+                  <div className="p-3 rounded-[var(--radius-control)] border border-black/10 dark:border-white/10 bg-[hsl(var(--surface))] space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-[hsl(var(--ink))]">Android APK Client</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-[hsl(var(--signal))]/10 text-[hsl(var(--signal))] font-semibold">
+                        Ready (28 MB)
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[hsl(var(--muted))]">
+                      Download and install the native Android APK directly to your phone:
+                    </p>
+                    <a
+                      href="http://localhost:18420/download/app.apk"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-control)] bg-[hsl(var(--ink))] text-[hsl(var(--surface))] font-medium text-xs hover:opacity-90 transition-opacity"
+                    >
+                      <Download className="size-3.5" />
+                      <span>Download friday-mobile.apk</span>
+                    </a>
+                  </div>
+
+                  <div className="pt-2 border-t border-black/10 dark:border-white/10 text-[11px] text-[hsl(var(--muted))] space-y-1">
+                    <p>Start Gateway: <code className="px-1.5 py-0.5 rounded bg-black/10 dark:bg-white/10 font-mono text-[10px] text-[hsl(var(--ink))]">python scripts/remote_gateway.py</code></p>
+                    <p>Supports Push-To-Talk voice streaming, live Utterance Contract cards, and Desktop Screen Peek.</p>
                   </div>
                 </div>
               </div>

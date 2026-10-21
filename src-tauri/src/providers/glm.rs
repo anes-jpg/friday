@@ -132,10 +132,17 @@ impl GlmProvider {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(60))
             .tcp_keepalive(Duration::from_secs(30))
+            .tcp_nodelay(true)
+            .pool_max_idle_per_host(10)
+            .pool_idle_timeout(Some(Duration::from_secs(90)))
             .user_agent("Cline/1.0.0")
             .build()
             .unwrap_or_default();
 
+        Self { config, http }
+    }
+
+    pub fn with_client(config: GlmConfig, http: reqwest::Client) -> Self {
         Self { config, http }
     }
 

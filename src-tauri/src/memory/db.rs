@@ -8,6 +8,10 @@ pub struct DbThread {
     pub title: String,
     pub created_at: i64,
     pub updated_at: i64,
+    #[serde(default)]
+    pub pinned: bool,
+    #[serde(default)]
+    pub message_count: i64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -71,6 +75,15 @@ pub struct Database {
 impl Database {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let conn = Connection::open(path)?;
+        let _ = conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA cache_size = -64000;
+             PRAGMA mmap_size = 268435456;
+             PRAGMA busy_timeout = 5000;
+             PRAGMA foreign_keys = ON;",
+        );
         let db = Self { conn };
         db.init_schema()?;
         db.seed_defaults_if_empty()?;
@@ -79,6 +92,11 @@ impl Database {
 
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
+        let _ = conn.execute_batch(
+            "PRAGMA synchronous = NORMAL;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA foreign_keys = ON;",
+        );
         let db = Self { conn };
         db.init_schema()?;
         db.seed_defaults_if_empty()?;
@@ -109,7 +127,8 @@ impl Database {
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
+                updated_at INTEGER NOT NULL,
+                pinned INTEGER DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS messages (
@@ -189,10 +208,19 @@ impl Database {
             );
 
             CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id);
+            CREATE INDEX IF NOT EXISTS idx_messages_thread_time ON messages(thread_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
             CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_log(created_at);
             CREATE INDEX IF NOT EXISTS idx_models_active ON ai_models(is_active);
+            CREATE INDEX IF NOT EXISTS idx_facts_created ON facts(created_at);
+            CREATE INDEX IF NOT EXISTS idx_facts_confidence ON facts(confidence);
+            CREATE INDEX IF NOT EXISTS idx_automations_enabled ON automations(enabled);
+            CREATE INDEX IF NOT EXISTS idx_skills_enabled ON skills(enabled);
             "#,
         )?;
+        let _ = self
+            .conn
+            .execute("ALTER TABLE threads ADD COLUMN pinned INTEGER DEFAULT 0", []);
         Ok(())
     }
 
@@ -502,14 +530,22 @@ impl Database {
     // --- Thread Operations ---
     pub fn get_threads(&self) -> Result<Vec<DbThread>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, created_at, updated_at FROM threads ORDER BY updated_at DESC",
+            r#"SELECT t.id, t.title, t.created_at, t.updated_at, t.pinned, COUNT(m.id) as msg_count
+               FROM threads t
+               LEFT JOIN messages m ON t.id = m.thread_id
+               GROUP BY t.id
+               ORDER BY t.pinned DESC, t.updated_at DESC"#,
         )?;
         let rows = stmt.query_map([], |row| {
+            let pinned_int: i64 = row.get(4).unwrap_or(0);
+            let msg_count: i64 = row.get(5).unwrap_or(0);
             Ok(DbThread {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 created_at: row.get(2)?,
                 updated_at: row.get(3)?,
+                pinned: pinned_int != 0,
+                message_count: msg_count,
             })
         })?;
 
@@ -522,16 +558,77 @@ impl Database {
 
     pub fn insert_thread(&self, thread: &DbThread) -> Result<()> {
         self.conn.execute(
-            "INSERT OR REPLACE INTO threads (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
-            params![thread.id, thread.title, thread.created_at, thread.updated_at],
+            "INSERT OR REPLACE INTO threads (id, title, created_at, updated_at, pinned) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                thread.id,
+                thread.title,
+                thread.created_at,
+                thread.updated_at,
+                if thread.pinned { 1 } else { 0 }
+            ],
         )?;
         Ok(())
     }
 
+    pub fn rename_thread(&self, id: &str, title: &str) -> Result<bool> {
+        let now_sec = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let count = self.conn.execute(
+            "UPDATE threads SET title = ?1, updated_at = ?2 WHERE id = ?3",
+            params![title, now_sec, id],
+        )?;
+        Ok(count > 0)
+    }
+
+    pub fn toggle_thread_pin(&self, id: &str) -> Result<bool> {
+        let count = self.conn.execute(
+            "UPDATE threads SET pinned = CASE WHEN pinned = 1 THEN 0 ELSE 1 END WHERE id = ?1",
+            params![id],
+        )?;
+        if count == 0 {
+            return Ok(false);
+        }
+        let new_state: i64 = self.conn.query_row(
+            "SELECT pinned FROM threads WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        )?;
+        Ok(new_state != 0)
+    }
+
     pub fn delete_thread(&self, id: &str) -> Result<bool> {
-        let count = self
-            .conn
-            .execute("DELETE FROM threads WHERE id = ?1", params![id])?;
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM messages WHERE thread_id = ?1", params![id])?;
+        let count = tx.execute("DELETE FROM threads WHERE id = ?1", params![id])?;
+        if count > 0 {
+            let active: Option<String> = tx
+                .query_row(
+                    "SELECT value FROM settings WHERE key = 'active_thread_id'",
+                    [],
+                    |r| r.get(0),
+                )
+                .ok();
+            if active.as_deref() == Some(id) {
+                let latest: Option<String> = tx
+                    .query_row(
+                        "SELECT id FROM threads ORDER BY pinned DESC, updated_at DESC LIMIT 1",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .ok();
+                if let Some(next_id) = latest {
+                    let _ = tx.execute(
+                        "UPDATE settings SET value = ?1 WHERE key = 'active_thread_id'",
+                        params![next_id],
+                    );
+                } else {
+                    let _ = tx.execute("DELETE FROM settings WHERE key = 'active_thread_id'", []);
+                }
+            }
+        }
+        tx.commit()?;
         Ok(count > 0)
     }
 
@@ -541,7 +638,7 @@ impl Database {
             .unwrap_or_default()
             .as_secs() as i64;
         self.conn.execute(
-            "INSERT OR IGNORE INTO threads (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT OR IGNORE INTO threads (id, title, created_at, updated_at, pinned) VALUES (?1, ?2, ?3, ?4, 0)",
             params![thread_id, title, now_sec, now_sec],
         )?;
         Ok(())
@@ -949,5 +1046,77 @@ mod tests {
         assert_eq!(db.get_active_thread_id().unwrap(), "session-42");
         let threads = db.get_threads().unwrap();
         assert!(threads.iter().any(|t| t.id == "session-42"));
+    }
+
+    #[test]
+    fn test_thread_lifecycle_rename_pin_delete() {
+        let db = Database::open_in_memory().unwrap();
+
+        // 1. Create thread
+        let thread = DbThread {
+            id: "thread-test-1".to_string(),
+            title: "Original Title".to_string(),
+            created_at: 1000,
+            updated_at: 1000,
+            pinned: false,
+            message_count: 0,
+        };
+        db.insert_thread(&thread).unwrap();
+
+        // Verify inserted
+        let threads = db.get_threads().unwrap();
+        let found = threads.iter().find(|t| t.id == "thread-test-1").unwrap();
+        assert_eq!(found.title, "Original Title");
+        assert!(!found.pinned);
+        assert_eq!(found.message_count, 0);
+
+        // 2. Rename thread
+        assert!(db.rename_thread("thread-test-1", "Renamed Session").unwrap());
+        let threads = db.get_threads().unwrap();
+        let found = threads.iter().find(|t| t.id == "thread-test-1").unwrap();
+        assert_eq!(found.title, "Renamed Session");
+
+        // 3. Toggle pin
+        assert!(db.toggle_thread_pin("thread-test-1").unwrap());
+        let threads = db.get_threads().unwrap();
+        let found = threads.iter().find(|t| t.id == "thread-test-1").unwrap();
+        assert!(found.pinned);
+
+        // 4. Pin unpin ordering
+        let thread2 = DbThread {
+            id: "thread-test-2".to_string(),
+            title: "Second Thread".to_string(),
+            created_at: 2000,
+            updated_at: 2000,
+            pinned: false,
+            message_count: 0,
+        };
+        db.insert_thread(&thread2).unwrap();
+        let threads = db.get_threads().unwrap();
+        // Pinned thread should be first even if thread2 has higher updated_at
+        assert_eq!(threads[0].id, "thread-test-1");
+
+        // 5. Add a message to thread-test-1
+        let msg = DbMessage {
+            id: "msg-1".to_string(),
+            thread_id: "thread-test-1".to_string(),
+            role: "user".to_string(),
+            say: Some("Hello Friday".to_string()),
+            show: None,
+            latency_ms: None,
+            created_at: 1050,
+        };
+        db.insert_message(&msg).unwrap();
+        assert_eq!(db.get_messages_for_thread("thread-test-1").unwrap().len(), 1);
+        let threads_after_msg = db.get_threads().unwrap();
+        let found_after_msg = threads_after_msg.iter().find(|t| t.id == "thread-test-1").unwrap();
+        assert_eq!(found_after_msg.message_count, 1);
+
+        // 6. Delete thread with cascading message deletion
+        assert!(db.delete_thread("thread-test-1").unwrap());
+        let remaining_threads = db.get_threads().unwrap();
+        assert!(!remaining_threads.iter().any(|t| t.id == "thread-test-1"));
+        let remaining_messages = db.get_messages_for_thread("thread-test-1").unwrap();
+        assert!(remaining_messages.is_empty());
     }
 }

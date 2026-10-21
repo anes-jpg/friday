@@ -1,17 +1,24 @@
 import React, { useState } from "react"
 import { useFridayStore } from "@/lib/store"
 import { Button } from "@/components/ui/button"
-import { ScrollText, Download, Filter, Shield, AlertTriangle, ShieldAlert, CheckCircle2 } from "lucide-react"
+import { ScrollText, Download, Filter, Shield, AlertTriangle, ShieldAlert } from "lucide-react"
 import { cn } from "@/lib/utils"
+import {
+  WatermelonBentoCard,
+  WatermelonStatusBadge,
+  MagneticSelect,
+  normalizeAuditEntry,
+  formatAuditTimestamp,
+} from "./BenchoWatermelonPrimitives"
 
 export const AuditTab: React.FC = () => {
   const { audit } = useFridayStore()
-  const [filterTier, setFilterTier] = useState<string>("all")
+  const [filterTier, setFilterTier] = useState<string>("ALL")
   const [selectedAuditId, setSelectedAuditId] = useState<string | null>(null)
 
   const filteredLogs = audit.filter((log) => {
-    if (filterTier === "all") return true
-    return log.tier === filterTier
+    if (filterTier.toLowerCase() === "all") return true
+    return (log.tier || "").toLowerCase() === filterTier.toLowerCase()
   })
 
   const selectedLog = audit.find((l) => l.id === selectedAuditId) || null
@@ -36,9 +43,9 @@ export const AuditTab: React.FC = () => {
             <h2 className="text-lg font-semibold tracking-tight text-[hsl(var(--ink))]">
               Security Audit Log
             </h2>
-            <span className="font-instrument text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--signal))]/30 bg-[hsl(var(--signal))]/10 text-[hsl(var(--signal))] uppercase">
-              SQLCIPHER · APPEND-ONLY
-            </span>
+            <WatermelonStatusBadge tone="violet">
+              SQLCIPHER • APPEND-ONLY
+            </WatermelonStatusBadge>
           </div>
           <p className="font-instrument text-[11px] text-[hsl(var(--muted))] mt-1">
             Cryptographic ledger of tool invocations, confirmations, and security decisions.
@@ -55,32 +62,25 @@ export const AuditTab: React.FC = () => {
         </Button>
       </div>
 
-      {/* Sticky Filter Bar */}
-      <div className="flex items-center gap-2 mb-4 shrink-0 font-instrument text-xs">
-        <Filter className="size-3.5 text-[hsl(var(--muted))]" />
-        <span className="text-[hsl(var(--muted))]">Filter:</span>
-        {(["all", "green", "amber", "red"] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setFilterTier(t)}
-            className={cn(
-              "px-2.5 py-1 rounded-[var(--radius-control)] border transition-all cursor-pointer uppercase text-[10px]",
-              filterTier === t
-                ? "bg-[hsl(var(--ink))] text-[hsl(var(--surface))] border-[hsl(var(--ink))]"
-                : "bg-[hsl(var(--surface-raised))] border-black/10 dark:border-white/10 text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))]"
-            )}
-          >
-            {t}
-          </button>
-        ))}
+      {/* Sticky Filter Bar with Bencho MagneticSelect */}
+      <div className="flex items-center gap-3 mb-4 shrink-0 font-instrument text-xs">
+        <div className="flex items-center gap-1.5 text-[hsl(var(--muted))]">
+          <Filter className="size-3.5" />
+          <span>Filter:</span>
+        </div>
+        <MagneticSelect
+          options={["ALL", "GREEN", "AMBER", "RED"]}
+          value={filterTier}
+          onChange={setFilterTier}
+          accent="white"
+        />
       </div>
 
       {/* Main Table / Detail Split */}
       <div className="flex-1 flex gap-4 min-h-0 overflow-hidden">
-        {/* Table / Timeline Hybrid */}
-        <div className="flex-1 rounded-[var(--radius-panel)] border border-black/10 dark:border-white/10 bg-[hsl(var(--surface-raised))] overflow-hidden flex flex-col min-h-0">
-          <div className="grid grid-cols-12 px-4 py-2.5 border-b border-black/10 dark:border-white/10 font-instrument text-[10px] uppercase tracking-[.11em] text-[hsl(var(--muted))] shrink-0">
+        {/* Table / Timeline Hybrid in WatermelonBentoCard */}
+        <WatermelonBentoCard className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          <div className="grid grid-cols-12 px-4 py-2.5 border-b border-black/10 dark:border-white/10 font-instrument text-[10px] uppercase tracking-[.11em] text-[hsl(var(--muted))] shrink-0 bg-zinc-950/40">
             <span className="col-span-2">Time</span>
             <span className="col-span-3">Action / Tool</span>
             <span className="col-span-2">Risk Tier</span>
@@ -94,48 +94,51 @@ export const AuditTab: React.FC = () => {
                 No audit logs found for the selected filter.
               </div>
             ) : (
-              filteredLogs.map((log) => {
-                const isSelected = selectedAuditId === log.id
+              filteredLogs.map((entry, idx) => {
+                const row = normalizeAuditEntry(entry as any, idx)
+                const isSelected = selectedAuditId === row.id
                 return (
                   <div
-                    key={log.id}
-                    onClick={() => setSelectedAuditId(log.id)}
+                    key={row.id}
+                    onClick={() => setSelectedAuditId(row.id)}
                     className={cn(
                       "grid grid-cols-12 items-center px-4 py-3 cursor-pointer transition-colors",
                       isSelected
-                        ? "bg-[hsl(var(--signal))]/5"
+                        ? "bg-[hsl(var(--signal))]/10"
                         : "hover:bg-black/[0.02] dark:hover:bg-white/[0.02]"
                     )}
                   >
-                    <span className="col-span-2 text-[hsl(var(--muted))]">
-                      {new Date(log.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                    <span className="col-span-2 text-[hsl(var(--muted))] tabular-telemetry">
+                      {row.formattedTime}
                     </span>
                     <span className="col-span-3 font-semibold text-[hsl(var(--ink))] truncate pr-2">
-                      {log.toolName}
+                      {row.toolName}
                     </span>
                     <span className="col-span-2 flex items-center gap-1.5">
-                      {log.tier === "green" ? (
+                      {row.tier === "Green" ? (
                         <Shield className="size-3 text-[hsl(var(--success))]" />
-                      ) : log.tier === "amber" ? (
+                      ) : row.tier === "Amber" ? (
                         <AlertTriangle className="size-3 text-[hsl(var(--warning))]" />
                       ) : (
                         <ShieldAlert className="size-3 text-[hsl(var(--danger))]" />
                       )}
-                      <span className="capitalize">{log.tier}</span>
+                      <span className="capitalize">{row.tier}</span>
                     </span>
                     <span className="col-span-3 text-[hsl(var(--muted))] truncate font-mono text-[11px]">
-                      {log.argsHash}
+                      {row.argsHash}
                     </span>
                     <span className="col-span-2 text-right">
-                      <span className={cn(
-                        "px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase",
-                        log.decision === "escalated"
-                          ? "bg-[hsl(var(--signal))]/10 text-[hsl(var(--signal))]"
-                          : (log.decision as string) === "confirmed"
-                          ? "bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))]"
-                          : "bg-black/5 dark:bg-white/10 text-[hsl(var(--muted))]"
-                      )}>
-                        {log.decision}
+                      <span
+                        className={cn(
+                          "px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tabular-telemetry",
+                          row.decision.includes("ESCALAT")
+                            ? "bg-[hsl(var(--signal))]/10 text-[hsl(var(--signal))]"
+                            : row.decision.includes("CONFIRM")
+                            ? "bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))]"
+                            : "bg-black/5 dark:bg-white/10 text-[hsl(var(--muted))]"
+                        )}
+                      >
+                        {row.decision}
                       </span>
                     </span>
                   </div>
@@ -143,16 +146,16 @@ export const AuditTab: React.FC = () => {
               })
             )}
           </div>
-        </div>
+        </WatermelonBentoCard>
 
         {/* Selected Receipt Detail Inspector */}
         {selectedLog && (
-          <div className="w-[320px] shrink-0 rounded-[var(--radius-panel)] border border-black/10 dark:border-white/10 bg-[hsl(var(--surface-raised))] p-4 font-instrument text-xs flex flex-col min-h-0 overflow-y-auto space-y-3">
+          <WatermelonBentoCard className="w-[320px] shrink-0 p-4 font-instrument text-xs flex flex-col min-h-0 overflow-y-auto space-y-3">
             <div className="flex items-center justify-between border-b border-black/10 dark:border-white/10 pb-2">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--signal))]">
                 Receipt #{selectedLog.id.slice(0, 8)}
               </span>
-              <span className="text-[hsl(var(--muted))]">{selectedLog.durationMs}ms</span>
+              <span className="text-[hsl(var(--muted))] tabular-telemetry">{selectedLog.durationMs}ms</span>
             </div>
 
             <div>
@@ -165,8 +168,8 @@ export const AuditTab: React.FC = () => {
               <div className="flex items-center gap-2 mt-0.5">
                 <span className={cn(
                   "px-2 py-0.5 rounded text-[10px] font-semibold uppercase",
-                  selectedLog.tier === "green" ? "bg-[hsl(var(--success))]/10 text-[hsl(var(--success))]" :
-                  selectedLog.tier === "amber" ? "bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))]" :
+                  (selectedLog.tier || "").toLowerCase() === "green" ? "bg-[hsl(var(--success))]/10 text-[hsl(var(--success))]" :
+                  (selectedLog.tier || "").toLowerCase() === "amber" ? "bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))]" :
                   "bg-[hsl(var(--danger))]/10 text-[hsl(var(--danger))]"
                 )}>
                   {selectedLog.tier} tier
@@ -177,15 +180,15 @@ export const AuditTab: React.FC = () => {
 
             <div>
               <span className="text-[10px] text-[hsl(var(--muted))] block">PAYLOAD HASH</span>
-              <pre className="mt-1 p-2 rounded bg-[hsl(var(--surface))] border border-black/10 dark:border-white/10 text-[10px] text-[hsl(var(--ink))] overflow-x-auto">
+              <pre className="mt-1 p-2 rounded bg-zinc-950/60 border border-black/10 dark:border-white/10 text-[10px] text-[hsl(var(--ink))] overflow-x-auto">
                 {selectedLog.argsHash}
               </pre>
             </div>
 
             <div className="pt-2 border-t border-black/10 dark:border-white/10 text-[10px] text-[hsl(var(--muted))]">
-              Auditable timestamp: {new Date(selectedLog.timestamp).toISOString()}
+              Auditable timestamp: {formatAuditTimestamp(selectedLog.timestamp)}
             </div>
-          </div>
+          </WatermelonBentoCard>
         )}
       </div>
     </div>

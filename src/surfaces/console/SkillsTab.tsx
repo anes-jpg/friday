@@ -6,6 +6,7 @@ import { Sparkles, FolderOpen, ChevronDown, ChevronRight, ShieldCheck } from "lu
 import { invokeCommand, isDesktop } from "@/lib/ipc"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { WatermelonBentoCard, LiquidToggle } from "./BenchoWatermelonPrimitives"
 
 export const SkillsTab: React.FC = () => {
   const { skills, toggleSkill } = useFridayStore()
@@ -62,7 +63,7 @@ export const SkillsTab: React.FC = () => {
       </div>
 
       {/* List Rows with Capability, Origin, and Permissions */}
-      <div className="rounded-[var(--radius-panel)] border border-black/10 dark:border-white/10 bg-[hsl(var(--surface-raised))] divide-y divide-black/5 dark:divide-white/5 overflow-hidden">
+      <WatermelonBentoCard className="p-0 overflow-hidden divide-y divide-black/5 dark:divide-white/5">
         {skills.map((skill) => {
           const isExpanded = expandedSkillId === skill.id
           return (
@@ -105,22 +106,11 @@ export const SkillsTab: React.FC = () => {
                   )}>
                     {skill.enabled ? "ENABLED" : "DISABLED"}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => toggleSkill(skill.id)}
-                    aria-label={`Toggle ${skill.name}`}
-                    className={cn(
-                      "w-10 h-5 flex items-center rounded-full p-0.5 transition-colors cursor-pointer",
-                      skill.enabled ? "bg-[hsl(var(--signal))]" : "bg-black/20 dark:bg-white/20"
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        "size-4 rounded-full bg-white transition-transform",
-                        skill.enabled ? "translate-x-5" : "translate-x-0"
-                      )}
-                    />
-                  </button>
+                  <LiquidToggle
+                    checked={skill.enabled}
+                    onChange={() => toggleSkill(skill.id)}
+                    activeColor="#8b5cf6"
+                  />
                 </div>
               </div>
 
@@ -145,7 +135,7 @@ export const SkillsTab: React.FC = () => {
             </div>
           )
         })}
-      </div>
+      </WatermelonBentoCard>
     </div>
   )
 }

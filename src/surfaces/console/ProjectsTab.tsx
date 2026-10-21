@@ -40,6 +40,12 @@ import {
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import {
+  WatermelonBentoCard,
+  WatermelonSegmentedTabs,
+  InlineMarkdownText,
+  AnimatedTaskRow,
+} from "./BenchoWatermelonPrimitives"
+import {
   CreateNewDisclosure,
   HugeiconsIcon,
   Folder01Icon,
@@ -776,7 +782,7 @@ export const ProjectsTab: React.FC = () => {
       {/* ======================================================== */}
       {/* 3. Primary Engine Directive Hero Card (Dynamic)         */}
       {/* ======================================================== */}
-      <div className="rounded-2xl border border-white/15 bg-[#18191B] p-5 mb-6 shadow-[0_20px_40px_-15px_rgba(0,0,0,0.6)]">
+      <WatermelonBentoCard className="p-6 mb-6">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Sparkles className="size-4 text-[hsl(var(--signal))]" />
@@ -803,7 +809,7 @@ export const ProjectsTab: React.FC = () => {
               {activeProject.name}
             </h3>
             <p className="text-xs text-white/70 mt-1.5 leading-relaxed max-w-3xl">
-              {liveMeta?.description || activeProject.directive}
+              <InlineMarkdownText text={liveMeta?.description || activeProject.directive} />
             </p>
 
             {/* Precision Progress Bar */}
@@ -974,37 +980,23 @@ export const ProjectsTab: React.FC = () => {
             ))}
           </div>
         )}
-      </div>
+      </WatermelonBentoCard>
 
       {/* ======================================================== */}
       {/* 4. Sub-View Segmented Switcher                           */}
       {/* ======================================================== */}
-      <div className="flex items-center gap-2 mb-5 pb-3 border-b border-white/[0.08]">
-        {[
-          { id: "roadmap", label: "📋 Roadmap & Tasks", count: projectTasks.length },
-          { id: "code", label: "💻 Code Studio & Files" },
-          { id: "terminal", label: "⚡ Terminal & Scripts" },
-          { id: "git", label: "🔀 Git & Diff Review" },
-          { id: "settings", label: "⚙️ Project Settings" },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveSubView(tab.id as ProjectTabSubView)}
-            className={cn(
-              "px-3.5 py-1.5 rounded-xl font-mono text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5",
-              activeSubView === tab.id
-                ? "bg-white/15 text-white border border-white/20 shadow-sm"
-                : "text-white/50 hover:text-white/80 hover:bg-white/5"
-            )}
-          >
-            <span>{tab.label}</span>
-            {tab.count !== undefined && (
-              <span className="text-[10px] px-1.5 py-0.2 rounded bg-white/10 text-white/70">
-                {tab.count}
-              </span>
-            )}
-          </button>
-        ))}
+      <div className="mb-5 pb-3 border-b border-white/[0.08]">
+        <WatermelonSegmentedTabs<ProjectTabSubView>
+          tabs={[
+            { id: "roadmap", label: "📋 Roadmap & Tasks", badge: projectTasks.length },
+            { id: "code", label: "💻 Code Studio & Files" },
+            { id: "terminal", label: "⚡ Terminal & Scripts" },
+            { id: "git", label: "🔀 Git & Diff Review" },
+            { id: "settings", label: "⚙️ Project Settings" },
+          ]}
+          activeTab={activeSubView}
+          onChange={(tab) => setActiveSubView(tab as ProjectTabSubView)}
+        />
       </div>
 
       {/* ======================================================== */}
@@ -1251,7 +1243,7 @@ export const ProjectsTab: React.FC = () => {
                                 item.status === "done" && "line-through text-white/50"
                               )}
                             >
-                              {item.title}
+                              <InlineMarkdownText text={item.title} />
                             </span>
                             {item.tag && (
                               <span className="font-mono text-[9px] px-1.5 py-0.2 rounded border border-white/10 bg-white/5 text-white/60">
@@ -1266,7 +1258,7 @@ export const ProjectsTab: React.FC = () => {
                           </div>
                           {item.description && (
                             <p className="text-[11px] text-white/50 mt-0.5 leading-relaxed">
-                              {item.description}
+                              <InlineMarkdownText text={item.description} />
                             </p>
                           )}
                         </div>

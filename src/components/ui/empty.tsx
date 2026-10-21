@@ -126,7 +126,7 @@ export function FridayEmptyState({
         <EmptyTitle>{title}</EmptyTitle>
         <EmptyDescription>{description}</EmptyDescription>
       </EmptyHeader>
-      {actions && <EmptyContent className="relative z-10">{actions}</EmptyContent>}
+      {actions && <EmptyContent className="relative z-10 max-w-3xl w-full">{actions}</EmptyContent>}
     </Empty>
   )
 }

@@ -33,8 +33,8 @@ export const PillSidebar: React.FC<PillSidebarProps> = ({
       <div className="w-14 py-4 bg-black/95 border border-white/20 rounded-full flex flex-col items-center justify-between shadow-[0_20px_50px_rgba(0,0,0,0.8)] backdrop-blur-2xl max-h-[calc(100vh-120px)] overflow-y-auto no-scrollbar gap-3">
         {/* Top App Logo Mark */}
         <div className="flex flex-col items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-white text-black flex items-center justify-center font-bold text-base shadow-[0_0_15px_rgba(255,255,255,0.4)] shrink-0">
-            F
+          <div className="w-9 h-9 rounded-xl overflow-hidden flex items-center justify-center shadow-[0_0_15px_rgba(142,131,190,0.35)] shrink-0">
+            <img src="/friday-logo.svg" alt="FRIDAY" className="w-full h-full object-cover" />
           </div>
 
           <div className="h-[1px] w-6 bg-white/20 shrink-0" />

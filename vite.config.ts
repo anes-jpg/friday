@@ -25,6 +25,20 @@ export default defineConfig({
       ignored: ["**/src-tauri/**", "**/resources/**", "**/*.zip", "**/*.tar.gz", "**/target/**"],
     },
   },
+  build: {
+    target: "esnext",
+    chunkSizeWarningLimit: 800,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "vendor-react": ["react", "react-dom"],
+          "vendor-motion": ["motion"],
+          "vendor-icons": ["lucide-react", "@remixicon/react"],
+          "vendor-markdown": ["react-markdown", "remark-gfm"],
+        },
+      },
+    },
+  },
   test: {
     include: ["src/**/*.{test,spec}.{ts,tsx}", "tests/**/*.{test,spec}.{ts,tsx}"],
     exclude: [

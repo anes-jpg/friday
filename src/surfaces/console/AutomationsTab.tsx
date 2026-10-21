@@ -1,12 +1,17 @@
 import React, { useState, useMemo } from "react"
 import { useFridayStore } from "@/lib/store"
 import { Button } from "@/components/ui/button"
-import { MetricInstrument } from "@/components/tremor/KpiCard"
 import { Clock, Play, Plus, X, TimerReset, Calendar, ListFilter, LayoutGrid } from "lucide-react"
 import { invokeCommand, isDesktop } from "@/lib/ipc"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { SubscriptionCalendar, type SubscriptionDay } from "@/components/schedule/SubscriptionCalendar"
+import {
+  WatermelonKpiCard,
+  WatermelonSegmentedTabs,
+  WatermelonStatusBadge,
+  LiquidToggle,
+} from "./BenchoWatermelonPrimitives"
 
 export const AutomationsTab: React.FC = () => {
   const { automations, toggleAutomation, addAutomation, runAutomationNow } = useFridayStore()
@@ -160,9 +165,9 @@ export const AutomationsTab: React.FC = () => {
             <h2 className="text-lg font-semibold tracking-tight text-[hsl(var(--ink))]">
               Task Schedule & Automations
             </h2>
-            <span className="font-instrument text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--signal))]/30 bg-[hsl(var(--signal))]/10 text-[hsl(var(--signal))] uppercase">
+            <WatermelonStatusBadge tone="violet">
               RUST WORKER
-            </span>
+            </WatermelonStatusBadge>
           </div>
           <p className="font-instrument text-[11px] text-[hsl(var(--muted))] mt-1">
             Cron schedules, automated triggers, and background tasks running in native worker loop.
@@ -171,50 +176,15 @@ export const AutomationsTab: React.FC = () => {
 
         <div className="flex items-center gap-2">
           {/* View Mode Switcher */}
-          <div className="flex items-center rounded-lg border border-black/10 dark:border-white/10 p-0.5 bg-black/5 dark:bg-white/5">
-            <button
-              type="button"
-              onClick={() => setViewMode("split")}
-              className={cn(
-                "flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer",
-                viewMode === "split"
-                  ? "bg-[hsl(var(--surface-raised))] text-[hsl(var(--ink))] shadow-xs"
-                  : "text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))]"
-              )}
-              title="Split View"
-            >
-              <LayoutGrid className="size-3.5" />
-              <span className="hidden sm:inline">Split</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("calendar")}
-              className={cn(
-                "flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer",
-                viewMode === "calendar"
-                  ? "bg-[hsl(var(--surface-raised))] text-[hsl(var(--ink))] shadow-xs"
-                  : "text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))]"
-              )}
-              title="Calendar View"
-            >
-              <Calendar className="size-3.5" />
-              <span className="hidden sm:inline">Calendar</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("list")}
-              className={cn(
-                "flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer",
-                viewMode === "list"
-                  ? "bg-[hsl(var(--surface-raised))] text-[hsl(var(--ink))] shadow-xs"
-                  : "text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))]"
-              )}
-              title="Task List View"
-            >
-              <ListFilter className="size-3.5" />
-              <span className="hidden sm:inline">Jobs</span>
-            </button>
-          </div>
+          <WatermelonSegmentedTabs<"split" | "calendar" | "list">
+            tabs={[
+              { id: "split", label: "Split", icon: <LayoutGrid className="size-3.5" /> },
+              { id: "calendar", label: "Calendar", icon: <Calendar className="size-3.5" /> },
+              { id: "list", label: "Jobs", icon: <ListFilter className="size-3.5" /> },
+            ]}
+            activeTab={viewMode}
+            onChange={setViewMode}
+          />
 
           <Button
             onClick={() => setIsModalOpen(true)}
@@ -256,20 +226,23 @@ export const AutomationsTab: React.FC = () => {
         <div className="space-y-6">
           {/* KPI Instruments */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <MetricInstrument
+            <WatermelonKpiCard
               label="Active Jobs"
-              value={String(activeCount)}
-              detail={<span className="text-[hsl(var(--signal))] font-instrument">{automations.length} total</span>}
+              value={activeCount}
+              badgeText={`${automations.length} total`}
+              badgeTone="violet"
             />
-            <MetricInstrument
+            <WatermelonKpiCard
               label="Executed (24h)"
               value="142"
-              detail={<span className="text-[hsl(var(--success))] font-instrument">99.6% pass</span>}
+              badgeText="99.6% pass"
+              badgeTone="emerald"
             />
-            <MetricInstrument
+            <WatermelonKpiCard
               label="Failure Rate"
               value="0.4%"
-              detail={<span className="text-[hsl(var(--muted))] font-instrument">within budget</span>}
+              badgeText="within budget"
+              badgeTone="zinc"
             />
           </div>
 
@@ -323,19 +296,12 @@ export const AutomationsTab: React.FC = () => {
                     >
                       <Play className={cn("size-3.5 fill-current", triggeringId === auto.id && "animate-spin text-[hsl(var(--signal))]")} />
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => toggleAutomation(auto.id)}
-                      aria-label={auto.enabled ? "Disable automation" : "Enable automation"}
-                      className={cn(
-                        "px-2.5 py-1 rounded-[var(--radius-control)] font-instrument text-[10px] font-semibold transition-colors cursor-pointer border",
-                        auto.enabled
-                          ? "bg-[hsl(var(--signal))]/10 border-[hsl(var(--signal))]/30 text-[hsl(var(--signal))]"
-                          : "bg-black/5 dark:bg-white/5 border-black/10 dark:border-white/10 text-[hsl(var(--muted))]"
-                      )}
-                    >
-                      {auto.enabled ? "ACTIVE" : "PAUSED"}
-                    </button>
+                    <LiquidToggle
+                      checked={auto.enabled}
+                      onChange={() => toggleAutomation(auto.id)}
+                      size="sm"
+                      activeColor="#8b5cf6"
+                    />
                   </div>
                 </div>
               ))}
@@ -348,20 +314,23 @@ export const AutomationsTab: React.FC = () => {
           <div className="xl:col-span-7 2xl:col-span-8 flex flex-col gap-6">
             {/* KPI Instruments */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <MetricInstrument
+              <WatermelonKpiCard
                 label="Active Jobs"
-                value={String(activeCount)}
-                detail={<span className="text-[hsl(var(--signal))] font-instrument">{automations.length} total</span>}
+                value={activeCount}
+                badgeText={`${automations.length} total`}
+                badgeTone="violet"
               />
-              <MetricInstrument
+              <WatermelonKpiCard
                 label="Executed (24h)"
                 value="142"
-                detail={<span className="text-[hsl(var(--success))] font-instrument">99.6% pass</span>}
+                badgeText="99.6% pass"
+                badgeTone="emerald"
               />
-              <MetricInstrument
+              <WatermelonKpiCard
                 label="Failure Rate"
                 value="0.4%"
-                detail={<span className="text-[hsl(var(--muted))] font-instrument">within budget</span>}
+                badgeText="within budget"
+                badgeTone="zinc"
               />
             </div>
 
@@ -415,19 +384,12 @@ export const AutomationsTab: React.FC = () => {
                       >
                         <Play className={cn("size-3.5 fill-current", triggeringId === auto.id && "animate-spin text-[hsl(var(--signal))]")} />
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => toggleAutomation(auto.id)}
-                        aria-label={auto.enabled ? "Disable automation" : "Enable automation"}
-                        className={cn(
-                          "px-2.5 py-1 rounded-[var(--radius-control)] font-instrument text-[10px] font-semibold transition-colors cursor-pointer border",
-                          auto.enabled
-                            ? "bg-[hsl(var(--signal))]/10 border-[hsl(var(--signal))]/30 text-[hsl(var(--signal))]"
-                            : "bg-black/5 dark:bg-white/5 border-black/10 dark:border-white/10 text-[hsl(var(--muted))]"
-                        )}
-                      >
-                        {auto.enabled ? "ACTIVE" : "PAUSED"}
-                      </button>
+                      <LiquidToggle
+                        checked={auto.enabled}
+                        onChange={() => toggleAutomation(auto.id)}
+                        size="sm"
+                        activeColor="#8b5cf6"
+                      />
                     </div>
                   </div>
                 ))}

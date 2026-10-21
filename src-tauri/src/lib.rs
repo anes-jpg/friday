@@ -225,6 +225,101 @@ fn get_active_thread(state: State<'_, AppState>) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn create_thread(
+    id: Option<String>,
+    title: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<DbThread, String> {
+    let now_sec = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let thread_id = id.unwrap_or_else(|| format!("t-{}", now_ms));
+    let thread_title = title.unwrap_or_else(|| "New session".to_string());
+    let thread = DbThread {
+        id: thread_id.clone(),
+        title: thread_title,
+        created_at: now_sec,
+        updated_at: now_sec,
+        pinned: false,
+        message_count: 0,
+    };
+    let db = state.agent.db.lock().map_err(|e| e.to_string())?;
+    db.insert_thread(&thread).map_err(|e| e.to_string())?;
+    db.set_active_thread_id(&thread_id).map_err(|e| e.to_string())?;
+    Ok(thread)
+}
+
+#[tauri::command]
+fn add_message(
+    thread_id: String,
+    role: String,
+    say: Option<String>,
+    show: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<DbMessage, String> {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let msg = DbMessage {
+        id: format!("msg-{}", now_ms),
+        thread_id: thread_id.clone(),
+        role,
+        say,
+        show,
+        latency_ms: None,
+        created_at: (now_ms / 1000) as i64,
+    };
+    let db = state.agent.db.lock().map_err(|e| e.to_string())?;
+    db.ensure_thread_exists(&thread_id, "Session")
+        .map_err(|e| e.to_string())?;
+    db.insert_message(&msg).map_err(|e| e.to_string())?;
+    Ok(msg)
+}
+
+#[tauri::command]
+fn delete_thread(thread_id: String, state: State<'_, AppState>) -> Result<bool, String> {
+    state
+        .agent
+        .db
+        .lock()
+        .map_err(|e| e.to_string())?
+        .delete_thread(&thread_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn rename_thread(
+    thread_id: String,
+    title: String,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    state
+        .agent
+        .db
+        .lock()
+        .map_err(|e| e.to_string())?
+        .rename_thread(&thread_id, &title)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn toggle_thread_pin(thread_id: String, state: State<'_, AppState>) -> Result<bool, String> {
+    state
+        .agent
+        .db
+        .lock()
+        .map_err(|e| e.to_string())?
+        .toggle_thread_pin(&thread_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn set_active_thread(thread_id: String, state: State<'_, AppState>) -> Result<bool, String> {
     let db = state.agent.db.lock().map_err(|e| e.to_string())?;
     db.ensure_thread_exists(&thread_id, "Session")
@@ -985,33 +1080,50 @@ async fn process_voice_utterance(
 }
 
 #[tauri::command]
-fn search_code(
+async fn search_code(
     query: String,
     max_results: Option<usize>,
     literal: Option<bool>,
 ) -> Result<Vec<crate::agent::beast::Hit>, String> {
-    let searcher = crate::agent::beast::BeastSearcher::new(".");
-    Ok(searcher.search(&query, max_results.unwrap_or(20), literal.unwrap_or(false)))
+    tokio::task::spawn_blocking(move || {
+        let searcher = crate::agent::beast::BeastSearcher::new(".");
+        searcher.search(&query, max_results.unwrap_or(20), literal.unwrap_or(false))
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn find_symbols(
+async fn find_symbols(
     query: String,
     max_results: Option<usize>,
 ) -> Result<Vec<crate::agent::beast::SymbolHit>, String> {
-    let searcher = crate::agent::beast::BeastSearcher::new(".");
-    Ok(searcher.find_symbols(&query, max_results.unwrap_or(30)))
+    tokio::task::spawn_blocking(move || {
+        let searcher = crate::agent::beast::BeastSearcher::new(".");
+        searcher.find_symbols(&query, max_results.unwrap_or(30))
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn rrf_search(
+async fn rrf_search(
     query: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::agent::beast::Hit>, String> {
-    let searcher = crate::agent::beast::BeastSearcher::new(".");
-    let code_hits = searcher.search(&query, 20, false);
-    let symbol_hits: Vec<crate::agent::beast::Hit> = searcher
-        .find_symbols(&query, 20)
+    if query.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let q = query.clone();
+    let (code_hits, symbol_hits_raw) = tokio::task::spawn_blocking(move || {
+        let searcher = crate::agent::beast::BeastSearcher::new(".");
+        searcher.search_code_and_symbols(&q, 20, 20)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let symbol_hits: Vec<crate::agent::beast::Hit> = symbol_hits_raw
         .into_iter()
         .map(|s| crate::agent::beast::Hit {
             file: s.file,
@@ -1922,6 +2034,11 @@ pub fn run() {
             delete_fact,
             get_audit_log,
             get_threads,
+            create_thread,
+            add_message,
+            delete_thread,
+            rename_thread,
+            toggle_thread_pin,
             get_active_thread,
             set_active_thread,
             get_messages,
@@ -2061,6 +2178,9 @@ pub fn run() {
             }
 
             if let Some(main_win) = app.get_webview_window("main") {
+                if let Some(icon) = app.default_window_icon() {
+                    let _ = main_win.set_icon(icon.clone());
+                }
                 let app_handle = app.handle().clone();
                 main_win.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { .. } = event {

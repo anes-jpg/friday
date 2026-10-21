@@ -71,11 +71,57 @@ export async function invokeCommand<T>(cmd: string, args?: Record<string, unknow
       { hwnd: 1003, title: "Terminal — powershell", process_name: "WindowsTerminal.exe", pid: 3290, is_active: false },
     ] as unknown as T
   }
-  if (cmd === "focus_window" || cmd === "set_window_state" || cmd === "set_active_thread") {
+  if (
+    cmd === "focus_window" ||
+    cmd === "set_window_state" ||
+    cmd === "set_active_thread" ||
+    cmd === "delete_thread" ||
+    cmd === "rename_thread" ||
+    cmd === "toggle_thread_pin"
+  ) {
     return true as unknown as T
   }
   if (cmd === "get_active_thread") {
     return "t-1" as unknown as T
+  }
+  if (cmd === "get_threads") {
+    return [
+      {
+        id: "t-1",
+        title: "Quarterly numbers pull",
+        created_at: Math.floor((Date.now() - 4 * 60_000) / 1000),
+        updated_at: Math.floor((Date.now() - 4 * 60_000) / 1000),
+        pinned: true,
+      },
+    ] as unknown as T
+  }
+  if (cmd === "create_thread") {
+    const title = (args?.title as string) || "New session"
+    const id = (args?.id as string) || `t-${Date.now()}`
+    const nowSec = Math.floor(Date.now() / 1000)
+    return {
+      id,
+      title,
+      created_at: nowSec,
+      updated_at: nowSec,
+      pinned: false,
+      message_count: 0,
+    } as unknown as T
+  }
+  if (cmd === "get_messages") {
+    return [] as unknown as T
+  }
+  if (cmd === "add_message") {
+    const nowMs = Date.now()
+    return {
+      id: `msg-${nowMs}`,
+      thread_id: (args?.threadId as string) || (args?.thread_id as string) || "t-1",
+      role: (args?.role as string) || "user",
+      say: (args?.say as string) || undefined,
+      show: (args?.show as string) || undefined,
+      latency_ms: undefined,
+      created_at: Math.floor(nowMs / 1000),
+    } as unknown as T
   }
   if (cmd === "search_code" || cmd === "rrf_search") {
     return [
@@ -400,3 +446,43 @@ export const getActiveThread = () =>
 
 export const setActiveThread = (threadId: string) =>
   invokeCommand<boolean>("set_active_thread", { threadId })
+
+export interface BackendThread {
+  id: string
+  title: string
+  created_at: number
+  updated_at: number
+  pinned: boolean
+  message_count?: number
+}
+
+export interface BackendMessage {
+  id: string
+  thread_id: string
+  role: string
+  say?: string
+  show?: string
+  latency_ms?: number
+  created_at: number
+}
+
+export const ipcGetThreads = () =>
+  invokeCommand<BackendThread[]>("get_threads")
+
+export const ipcCreateThread = (title?: string, id?: string) =>
+  invokeCommand<BackendThread>("create_thread", { title, id })
+
+export const ipcDeleteThread = (threadId: string) =>
+  invokeCommand<boolean>("delete_thread", { threadId })
+
+export const ipcRenameThread = (threadId: string, title: string) =>
+  invokeCommand<boolean>("rename_thread", { threadId, title })
+
+export const ipcToggleThreadPin = (threadId: string) =>
+  invokeCommand<boolean>("toggle_thread_pin", { threadId })
+
+export const ipcGetMessages = (threadId: string) =>
+  invokeCommand<BackendMessage[]>("get_messages", { threadId })
+
+export const ipcAddMessage = (threadId: string, role: string, say?: string, show?: string) =>
+  invokeCommand<BackendMessage>("add_message", { threadId, role, say, show })

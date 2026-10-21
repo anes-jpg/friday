@@ -11,6 +11,10 @@ import {
   RefreshCw,
   AlertCircle,
 } from "lucide-react";
+import {
+  WatermelonSegmentedTabs,
+  WatermelonBentoCard,
+} from "./BenchoWatermelonPrimitives";
 
 type DelphiSubtool = "json" | "regex" | "crypto" | "diff";
 
@@ -140,54 +144,23 @@ export const DelphiTab: React.FC = () => {
         </div>
 
         {/* Compact Utility Selector */}
-        <div className="flex items-center gap-1.5 rounded-[var(--radius-control)] border border-[hsl(var(--line))] bg-[hsl(var(--surface-raised))] p-1">
-          <Button
-            variant={activeTool === "json" ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => setActiveTool("json")}
-            className={`text-xs h-8 px-3 gap-1.5 font-instrument ${
-              activeTool === "json" ? "bg-[hsl(var(--ink))] text-[hsl(var(--surface))]" : "text-[hsl(var(--muted))]"
-            }`}
-          >
-            <FileCode className="w-3.5 h-3.5" /> JSON
-          </Button>
-          <Button
-            variant={activeTool === "regex" ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => setActiveTool("regex")}
-            className={`text-xs h-8 px-3 gap-1.5 font-instrument ${
-              activeTool === "regex" ? "bg-[hsl(var(--ink))] text-[hsl(var(--surface))]" : "text-[hsl(var(--muted))]"
-            }`}
-          >
-            <Regex className="w-3.5 h-3.5" /> Regex
-          </Button>
-          <Button
-            variant={activeTool === "crypto" ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => setActiveTool("crypto")}
-            className={`text-xs h-8 px-3 gap-1.5 font-instrument ${
-              activeTool === "crypto" ? "bg-[hsl(var(--ink))] text-[hsl(var(--surface))]" : "text-[hsl(var(--muted))]"
-            }`}
-          >
-            <KeyRound className="w-3.5 h-3.5" /> JWT & UUID
-          </Button>
-          <Button
-            variant={activeTool === "diff" ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => setActiveTool("diff")}
-            className={`text-xs h-8 px-3 gap-1.5 font-instrument ${
-              activeTool === "diff" ? "bg-[hsl(var(--ink))] text-[hsl(var(--surface))]" : "text-[hsl(var(--muted))]"
-            }`}
-          >
-            <FileDiff className="w-3.5 h-3.5" /> Diff
-          </Button>
-        </div>
+        <WatermelonSegmentedTabs<DelphiSubtool>
+          tabs={[
+            { id: "json", label: "JSON", icon: <FileCode className="w-3.5 h-3.5" /> },
+            { id: "regex", label: "Regex", icon: <Regex className="w-3.5 h-3.5" /> },
+            { id: "crypto", label: "JWT & UUID", icon: <KeyRound className="w-3.5 h-3.5" /> },
+            { id: "diff", label: "Diff", icon: <FileDiff className="w-3.5 h-3.5" /> },
+          ]}
+          activeTab={activeTool}
+          onChange={setActiveTool}
+          variant="light"
+        />
       </div>
 
       {/* SUBTOOL 1: JSON STUDIO (40/60 Split) */}
       {activeTool === "json" && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 min-h-0">
-          <div className="lg:col-span-5 flex flex-col rounded-[var(--radius-panel)] border border-[hsl(var(--line))] bg-[hsl(var(--surface-raised))] p-4">
+          <WatermelonBentoCard className="lg:col-span-5 flex flex-col p-4">
             <div className="flex items-center justify-between mb-2">
               <span className="font-instrument text-xs text-[hsl(var(--muted))] uppercase tracking-wider">
                 JSON Input
@@ -228,9 +201,9 @@ export const DelphiTab: React.FC = () => {
                 <span>{jsonError}</span>
               </div>
             )}
-          </div>
+          </WatermelonBentoCard>
 
-          <div className="lg:col-span-7 flex flex-col rounded-[var(--radius-panel)] border border-[hsl(var(--line))] bg-[hsl(var(--surface-raised))] p-4">
+          <WatermelonBentoCard className="lg:col-span-7 flex flex-col p-4">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <span className="font-instrument text-xs text-[hsl(var(--muted))] uppercase tracking-wider">
@@ -264,7 +237,7 @@ export const DelphiTab: React.FC = () => {
             <pre className="flex-1 overflow-auto bg-black text-white p-3.5 rounded-[var(--radius-control)] font-mono text-xs whitespace-pre leading-relaxed select-text">
               {formattedJson}
             </pre>
-          </div>
+          </WatermelonBentoCard>
         </div>
       )}
 

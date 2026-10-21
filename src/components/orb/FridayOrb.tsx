@@ -69,6 +69,7 @@ export function FridayOrb({
   if (explicitState) {
     targetState = explicitState
     targetVariant = explicitVariant
+    isIdle = targetState === "base"
   } else {
     switch (storeOrb) {
       case "listening":
@@ -104,7 +105,7 @@ export function FridayOrb({
     speed,
     dotSize,
     density,
-    paused,
+    paused: paused || isIdle,
     render: render ?? (halftoneMode ? halftone : undefined),
     shape,
     label: label ?? `FRIDAY agent state: ${targetState}`,

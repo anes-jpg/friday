@@ -9,6 +9,7 @@ pub struct PhraseBank {
     is_speaking: Arc<AtomicBool>,
     output_rms: Arc<Mutex<f32>>,
     active_sink: Arc<Mutex<Option<rodio::Sink>>>,
+    phrase_cache: Arc<Mutex<std::collections::HashMap<String, Vec<f32>>>>,
 }
 
 impl Default for PhraseBank {
@@ -38,6 +39,7 @@ impl PhraseBank {
             is_speaking: Arc::new(AtomicBool::new(false)),
             output_rms: Arc::new(Mutex::new(0.0)),
             active_sink: Arc::new(Mutex::new(None)),
+            phrase_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
     }
 
@@ -121,6 +123,12 @@ impl PhraseBank {
             .to_lowercase()
             .replace(' ', "_");
 
+        if let Ok(cache) = self.phrase_cache.lock() {
+            if let Some(samples) = cache.get(&slug) {
+                return Some(samples.clone());
+            }
+        }
+
         let candidates = [
             format!("assets/phrasebank/{}.wav", slug),
             format!("../assets/phrasebank/{}.wav", slug),
@@ -145,6 +153,9 @@ impl PhraseBank {
                         }
                     };
                     if !samples.is_empty() {
+                        if let Ok(mut cache) = self.phrase_cache.lock() {
+                            cache.insert(slug, samples.clone());
+                        }
                         return Some(samples);
                     }
                 }
