@@ -130,14 +130,13 @@ with open("friday_train.jsonl", "w", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
 print("✅ Generated 1,200 training dialogue turns in friday_train.jsonl\n")
 
-# 4. Load SmolLM2-1.7B-Instruct in 4-bit NF4 Quantization
+# 4. Load SmolLM2-1.7B-Instruct in 4-bit NF4 Quantization (Strict Float16 for Tesla T4)
 print("🧠 Loading SmolLM2-1.7B-Instruct in 4-bit NF4 on T4 GPU...")
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
 MODEL_ID = "HuggingFaceTB/SmolLM2-1.7B-Instruct"
 
-# Critical for Tesla T4 GPU: compute dtype must be float16
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_quant_type="nf4",
@@ -151,6 +150,7 @@ tokenizer.pad_token = tokenizer.eos_token
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_ID,
     quantization_config=bnb_config,
+    torch_dtype=torch.float16,
     device_map="auto",
     trust_remote_code=True
 )
@@ -165,6 +165,11 @@ peft_config = LoraConfig(
     target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
 )
 model = get_peft_model(model, peft_config)
+
+for p in model.parameters():
+    if p.requires_grad and p.dtype == torch.bfloat16:
+        p.data = p.data.to(torch.float32)
+
 print("✅ LoRA adapter attached:")
 model.print_trainable_parameters()
 print("")
@@ -173,6 +178,11 @@ print("")
 print("⚡ Training FRIDAY-1B-Operator adapter...")
 from datasets import load_dataset
 from trl import SFTTrainer
+
+# Guardrail: cast any lingering bfloat16 adapter parameters to float32
+for p in model.parameters():
+    if p.requires_grad and p.dtype == torch.bfloat16:
+        p.data = p.data.to(torch.float32)
 
 raw_dataset = load_dataset("json", data_files={"train": "friday_train.jsonl"})
 
@@ -205,6 +215,7 @@ args_dict = dict(
     logging_steps=25,
     save_strategy="no",
     fp16=True,
+    bf16=False,
     dataset_text_field="text",
     max_seq_length=1024,
     optim="paged_adamw_8bit",
