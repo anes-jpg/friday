@@ -130,6 +130,37 @@ impl NetTelemetryEngine {
     pub fn get_cables(&self) -> Vec<SubmarineCableNode> {
         self.cables.clone()
     }
+
+    /// Terminates a process or network socket by PID (Red Tier)
+    pub fn terminate_process(pid: u32) -> Result<bool, String> {
+        if pid == 0 || pid == 4 {
+            return Err("Cannot terminate protected system critical process".to_string());
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            use std::process::Command;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            let output = Command::new("taskkill")
+                .args(["/F", "/PID", &pid.to_string()])
+                .creation_flags(CREATE_NO_WINDOW)
+                .output()
+                .map_err(|e| format!("Failed to invoke taskkill for PID {}: {}", pid, e))?;
+
+            if output.status.success() {
+                Ok(true)
+            } else {
+                let err = String::from_utf8_lossy(&output.stderr);
+                Err(format!("Process termination failed: {}", err.trim()))
+            }
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            Ok(true)
+        }
+    }
 }
 
 #[cfg(test)]

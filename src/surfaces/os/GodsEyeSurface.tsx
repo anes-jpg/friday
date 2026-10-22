@@ -10,6 +10,9 @@
 import React, { useState, useEffect, useMemo } from "react"
 import { FridayMapCanvas, type MapMarkerData, type MapRouteData } from "@/components/map/FridayMapCanvas"
 import { GodsEyeLayerBar, type GodsEyeLayerId } from "./GodsEyeLayerBar"
+import { EntityDossierDrawer, type DossierEntity } from "./EntityDossierDrawer"
+import { MapTimelineScrubber } from "@/components/map/MapTimelineScrubber"
+import { CameraPiPCard } from "./CameraPiPCard"
 import {
   ipcGetNetworkTelemetry,
   ipcGetOrbitalTelemetry,
@@ -17,7 +20,7 @@ import {
   ipcGetGeospatialTelemetry,
   ipcGetHardwareVitals,
 } from "@/lib/telemetry"
-import { Shield, Eye, Layers, Compass } from "lucide-react"
+import { Shield, Eye, Layers, Compass, Video } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export interface GodsEyeSurfaceProps {
@@ -41,6 +44,9 @@ export const GodsEyeSurface: React.FC<GodsEyeSurfaceProps> = ({
   const [seismic, setSeismic] = useState<any[]>([])
   const [lanDevices, setLanDevices] = useState<any[]>([])
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null)
+  const [selectedEntity, setSelectedEntity] = useState<DossierEntity | null>(null)
+  const [showPiP, setShowPiP] = useState(false)
+  const [timelinePlaying, setTimelinePlaying] = useState(false)
 
   // Fetch telemetry from native Rust tools
   useEffect(() => {
@@ -218,12 +224,14 @@ export const GodsEyeSurface: React.FC<GodsEyeSurfaceProps> = ({
         routes={routes}
         onMarkerClick={(m) => {
           setSelectedMarkerId(m.id)
-          onSelectEntity?.({
-            type: "telemetry",
+          const entityData: DossierEntity = {
+            type: m.id.startsWith("sock-") ? "socket" : "telemetry",
             id: m.id,
             name: m.title,
             details: { ...m },
-          })
+          }
+          setSelectedEntity(entityData)
+          onSelectEntity?.(entityData)
         }}
         height="100%"
       />
@@ -237,17 +245,56 @@ export const GodsEyeSurface: React.FC<GodsEyeSurfaceProps> = ({
         />
       </div>
 
-      {/* Bottom Telemetry Ledger Pill */}
-      <div className="absolute bottom-3 right-3 z-20 flex items-center gap-2 px-3 py-1.5 rounded-[var(--radius-panel)] border border-white/10 bg-[#090A0C]/90 backdrop-blur-md shadow-xl text-[11px] font-mono text-[hsl(var(--muted))] tabular-nums">
-        <span className="flex items-center gap-1.5 text-[hsl(var(--ink))]">
-          <Eye className="size-3.5 text-[hsl(var(--signal))] animate-pulse" />
-          <span>GOD'S EYE TELEMETRY</span>
-        </span>
-        <span className="text-white/20">|</span>
-        <span>{markers.length} Entities</span>
-        <span className="text-white/20">|</span>
-        <span>{routes.length} Active Arcs</span>
+      {/* Bottom Floating Timeline Scrubber */}
+      <div className="absolute bottom-3 left-3 z-20">
+        <MapTimelineScrubber
+          mode="telemetry"
+          isPlaying={timelinePlaying}
+          onTogglePlay={() => setTimelinePlaying(!timelinePlaying)}
+        />
       </div>
+
+      {/* Bottom Telemetry Ledger Pill & PiP Switcher */}
+      <div className="absolute bottom-3 right-3 z-20 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setShowPiP(!showPiP)}
+          className={cn(
+            "flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-panel)] border text-[11px] font-mono transition-colors cursor-pointer backdrop-blur-md shadow-xl",
+            showPiP
+              ? "bg-[hsl(var(--signal))]/20 border-[hsl(var(--signal))]/50 text-white"
+              : "bg-[#090A0C]/90 border-white/10 text-[hsl(var(--muted))] hover:text-white"
+          )}
+        >
+          <Video className="size-3.5 text-[hsl(var(--signal))]" />
+          <span>OPTICAL PiP</span>
+        </button>
+
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-[var(--radius-panel)] border border-white/10 bg-[#090A0C]/90 backdrop-blur-md shadow-xl text-[11px] font-mono text-[hsl(var(--muted))] tabular-nums">
+          <span className="flex items-center gap-1.5 text-[hsl(var(--ink))]">
+            <Eye className="size-3.5 text-[hsl(var(--signal))] animate-pulse" />
+            <span>GOD'S EYE</span>
+          </span>
+          <span className="text-white/20">|</span>
+          <span>{markers.length} Entities</span>
+          <span className="text-white/20">|</span>
+          <span>{routes.length} Arcs</span>
+        </div>
+      </div>
+
+      {/* Draggable Optical PiP Card */}
+      {showPiP && (
+        <CameraPiPCard onClose={() => setShowPiP(false)} />
+      )}
+
+      {/* Right Inspection Dossier Drawer */}
+      <EntityDossierDrawer
+        entity={selectedEntity}
+        onClose={() => {
+          setSelectedEntity(null)
+          setSelectedMarkerId(null)
+        }}
+      />
     </div>
   )
 }

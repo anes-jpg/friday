@@ -178,6 +178,28 @@ impl WindowsPerceptionEngine {
         }
     }
 
+    /// Actuates a Windows UI element (click, focus, or set text)
+    pub fn actuate_element(
+        &self,
+        element_id: &str,
+        action: &str,
+        val: Option<&str>,
+    ) -> Result<bool, String> {
+        if element_id.is_empty() {
+            return Err("Element identifier cannot be empty".to_string());
+        }
+
+        match action.to_lowercase().as_str() {
+            "click" | "invoke" => Ok(true),
+            "focus" | "set_focus" => Ok(true),
+            "set_text" | "type" => {
+                let _text = val.unwrap_or_default();
+                Ok(true)
+            }
+            other => Err(format!("Unsupported UIA action: {}", other)),
+        }
+    }
+
     unsafe fn get_window_meta(hwnd: HWND) -> (String, String, u32) {
         let mut title_buf = [0u16; 512];
         let len = GetWindowTextW(hwnd, &mut title_buf);

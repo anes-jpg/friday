@@ -694,6 +694,16 @@ fn inspect_focused_app(
     state.perception.inspect_focused_app()
 }
 
+#[tauri::command]
+fn actuate_uia_element(
+    element_id: String,
+    action: String,
+    val: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    state.perception.actuate_element(&element_id, &action, val.as_deref())
+}
+
 // ── Overwatch Mode Commands ──────────────────────────────────────────────────
 
 #[tauri::command]
@@ -782,6 +792,12 @@ fn get_network_telemetry() -> Result<crate::tools::net_telemetry::NetworkSocketA
         arcs: engine.get_socket_arcs(),
         cables: engine.get_cables(),
     })
+}
+
+#[tauri::command]
+fn terminate_process_socket(pid: u32, process_name: String) -> Result<bool, String> {
+    tracing::info!("Terminating process socket PID: {} ({})", pid, process_name);
+    crate::tools::net_telemetry::NetTelemetryEngine::terminate_process(pid)
 }
 
 #[tauri::command]
@@ -2276,6 +2292,7 @@ pub fn run() {
             configure_piper,
             inspect_cursor_element,
             inspect_focused_app,
+            actuate_uia_element,
             get_overwatch_interjections,
             dismiss_overwatch_interjection,
             inspect_clipboard_for_overwatch,
@@ -2285,6 +2302,7 @@ pub fn run() {
             search_episodic_timeline,
             record_episodic_event,
             get_network_telemetry,
+            terminate_process_socket,
             get_orbital_telemetry,
             get_maritime_telemetry,
             get_geospatial_telemetry,
