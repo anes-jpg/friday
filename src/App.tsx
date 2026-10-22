@@ -6,6 +6,7 @@ import { isAudioActive } from "@/lib/kokoro";
 
 import { Palette } from "@/surfaces/palette/Palette";
 import { Console } from "@/surfaces/console/Console";
+import { FridayOSShell } from "@/surfaces/os/FridayOSShell";
 import { surfaceLabel } from "@/lib/ipc";
 
 const OnboardingModal = React.lazy(() =>
@@ -356,7 +357,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="relative w-full h-full overflow-hidden font-sans bg-[hsl(var(--canvas))]">
-      <Console />
+      <FridayOSShell />
       <Palette />
       <React.Suspense fallback={null}>
         {showOnboarding && (

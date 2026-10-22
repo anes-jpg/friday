@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react"
 import { useFridayStore, speakWithNativeVoice, stopNativeVoice } from "@/lib/store"
 import { PIPER_VOICES, KOKORO_VOICES } from "@/lib/kokoro"
+import { ipcGetPiperStatus, ipcConfigurePiper, type PiperProsodyStyle } from "@/lib/piper"
 import type { VoiceProfile } from "@/lib/voice"
 import { invokeCommand } from "@/lib/ipc"
 import { Input } from "@/components/ui/input"
@@ -43,6 +44,8 @@ export const SettingsTab: React.FC = () => {
     kokoroEndpoint && !kokoroEndpoint.includes("localhost") ? kokoroEndpoint : "http://127.0.0.1:8880/v1"
   )
   const [kokoroOnline, setKokoroOnline] = useState<boolean | null>(null)
+  const [piperEngineReady, setPiperEngineReady] = useState(false)
+  const [piperStyle, setPiperStyle] = useState<PiperProsodyStyle>("calm")
   const [auditioning, setAuditioning] = useState(false)
   const [saved, setSaved] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -50,6 +53,11 @@ export const SettingsTab: React.FC = () => {
   const [keyringStored, setKeyringStored] = useState(true)
 
   const checkKokoroStatus = async () => {
+    try {
+      const piperStatus = await ipcGetPiperStatus()
+      setPiperEngineReady(piperStatus.ready)
+      setPiperStyle(piperStatus.active_style)
+    } catch {}
     try {
       const ok = await invokeCommand<boolean>("get_piper_status").catch(() => invokeCommand<boolean>("get_kokoro_status"))
       if (typeof ok === "boolean") {
@@ -62,6 +70,15 @@ export const SettingsTab: React.FC = () => {
       setKokoroOnline(resp.ok)
     } catch {
       setKokoroOnline(false)
+    }
+  }
+
+  const handleSetProsody = async (style: PiperProsodyStyle) => {
+    setPiperStyle(style)
+    try {
+      await ipcConfigurePiper({ style })
+    } catch (e) {
+      console.warn("Error updating Piper prosody:", e)
     }
   }
 
@@ -486,6 +503,42 @@ export const SettingsTab: React.FC = () => {
                       )
                     })}
                   </div>
+                </div>
+
+                <div>
+                  <span className="font-instrument text-[10px] text-[hsl(var(--muted))] uppercase tracking-wider block mb-2">
+                    Dynamic Companion Prosody (Kerry Condon Persona)
+                  </span>
+                  <div className="grid grid-cols-4 gap-2">
+                    {(
+                      [
+                        { id: "calm", label: "Calm", desc: "Composed operator" },
+                        { id: "tactical", label: "Tactical", desc: "Amber/Red alerts" },
+                        { id: "whisper", label: "Whisper", desc: "Overwatch mode" },
+                        { id: "witty", label: "Witty", desc: "Conversational rapport" },
+                      ] as const
+                    ).map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => handleSetProsody(p.id)}
+                        className={cn(
+                          "p-2.5 rounded-[var(--radius-control)] border text-left cursor-pointer transition-all",
+                          piperStyle === p.id
+                            ? "border-[hsl(var(--signal))] bg-[hsl(var(--signal))]/10 text-[hsl(var(--ink))] shadow-xs"
+                            : "border-black/10 dark:border-white/10 bg-[hsl(var(--surface))] text-[hsl(var(--muted))] hover:border-black/20"
+                        )}
+                      >
+                        <span className="font-semibold text-xs block text-[hsl(var(--ink))]">{p.label}</span>
+                        <span className="text-[10px] text-[hsl(var(--muted))] block mt-0.5">{p.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {piperEngineReady && (
+                    <span className="font-instrument text-[10px] text-[hsl(var(--success))] block mt-2">
+                      ● Native In-Process Piper TTS Active (&lt;55ms TTFA)
+                    </span>
+                  )}
                 </div>
 
                 <div>

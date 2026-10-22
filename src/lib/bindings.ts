@@ -110,3 +110,68 @@ export interface GlmSettings {
   dailySpendCapUsd: number;
   currentSpendUsd: number;
 }
+
+export interface UiCursorElement {
+  name: string;
+  control_type: string;
+  value?: string;
+  window_title: string;
+  process_name: string;
+  pid: number;
+  x: number;
+  y: number;
+  bounds: [number, number, number, number];
+}
+
+export interface FocusedAppSnapshot {
+  window_title: string;
+  process_name: string;
+  pid: number;
+  bounds: [number, number, number, number];
+  cursor_pos: [number, number];
+  element_name?: string;
+}
+
+export interface OverwatchInterjection {
+  id: string;
+  category: "PanicStacktrace" | "BuildFailure" | "ThermalSpike" | "SocketAnomaly" | "TaskRecommendation";
+  title: string;
+  summary: string;
+  suggestion: string;
+  code_snippet?: string;
+  timestamp: number;
+  dismissed: boolean;
+}
+
+export type LegionRole = "Scout" | "Architect" | "Sentinel" | "Operator";
+export type LegionTaskStatus = "Pending" | "Running" | "Completed" | "Failed";
+
+export interface LegionSubagentNode {
+  id: string;
+  role: LegionRole;
+  status: LegionTaskStatus;
+  task: string;
+  output?: string;
+  latency_ms: number;
+  dependencies: string[];
+}
+
+export interface LegionSwarmPlan {
+  id: string;
+  goal: string;
+  nodes: LegionSubagentNode[];
+  start_time: number;
+  total_duration_ms: number;
+  completed: boolean;
+}
+
+export interface DbEpisodicEvent {
+  id: string;
+  app_name: string;
+  window_title: string;
+  file_path?: string;
+  git_branch?: string;
+  summary: string;
+  created_at: number;
+  duration_secs: number;
+}

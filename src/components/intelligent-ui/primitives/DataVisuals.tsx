@@ -19,6 +19,7 @@ import {
   ExternalLink,
 } from "lucide-react"
 import type { MapMarkerItem } from "../types"
+import { FridayMapCanvas } from "@/components/map/FridayMapCanvas"
 
 // Coordinate projection math (Web Mercator / EPSG:3857)
 function lon2tile(lon: number, zoom: number): number {
@@ -267,6 +268,35 @@ export const MapViewPrimitive: React.FC<{
       </div>
 
       {/* Interactive Map Viewport (Pannable & Zoomable) */}
+      {mapMode === "vector" ? (
+        <FridayMapCanvas
+          center={[centerCoord.lng, centerCoord.lat]}
+          zoom={zoom}
+          markers={filteredMarkers.map((m) => ({
+            id: m.id,
+            lat: m.lat,
+            lng: m.lng,
+            title: m.title,
+            subtitle: m.description,
+            badge: m.category,
+            active: m.id === selectedId,
+          }))}
+          routes={
+            markers.length > 1
+              ? [
+                  {
+                    id: "route",
+                    coordinates: markers.map((m) => [m.lng, m.lat]),
+                    color: "#9333ea",
+                    width: 3,
+                  },
+                ]
+              : []
+          }
+          onMarkerClick={(m) => setSelectedId(m.id)}
+          height={320}
+        />
+      ) : (
       <div
         ref={containerRef}
         onMouseDown={handleMouseDown}
@@ -278,7 +308,7 @@ export const MapViewPrimitive: React.FC<{
         }`}
       >
         {/* Real Raster Tiles Layer (CartoDB Dark Matter / OpenStreetMap) */}
-        {mapMode !== "vector" && !hasTileError && (
+        {!hasTileError && (
           <div className="absolute inset-0 pointer-events-none">
             {tiles.map((t) => (
               <img
@@ -301,7 +331,7 @@ export const MapViewPrimitive: React.FC<{
         )}
 
         {/* Ambient Topography Vector & Grid (Aesthetic background & Offline Fallback) */}
-        {(mapMode === "vector" || hasTileError) && (
+        {hasTileError && (
           <svg className="absolute inset-0 w-full h-full pointer-events-none" preserveAspectRatio="none">
             <defs>
               <pattern id="mapGrid" width="30" height="30" patternUnits="userSpaceOnUse">
@@ -455,6 +485,7 @@ export const MapViewPrimitive: React.FC<{
           © CartoDB · OpenStreetMap contributors
         </div>
       </div>
+      )}
 
       {/* Selected Marker Details Drawer */}
       {selectedMarker && (

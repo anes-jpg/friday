@@ -18,6 +18,8 @@ import {
   KOKORO_VOICES,
   type KokoroVoiceProfile,
 } from "./kokoro"
+import { ipcPiperSpeak, ipcPiperStop } from "./piper"
+import { isDesktop } from "./ipc"
 import {
   matchPhraseBank,
   playPhraseInstant,
@@ -309,6 +311,7 @@ export function normalizeForSpeech(raw: string): string {
 export function stopFridayVoice() {
   bargeInRequested = true
   stopKokoroAudio()
+  ipcPiperStop().catch(() => {})
   if (cancelDelayTimer !== null) {
     clearTimeout(cancelDelayTimer)
     cancelDelayTimer = null
@@ -390,6 +393,21 @@ export async function speakFriday(rawText: string, options: SpeakOptions = {}): 
     })
     if (played) {
       return
+    }
+  }
+
+  // 1.5 In-Process Piper TTS Fast Path (Blueprint §3 — <55ms TTFA into Rodio, zero HTTP networking)
+  if (isDesktop && !bargeInRequested) {
+    try {
+      options.onStart?.()
+      const piperStyle = options.emotion === "bright" ? "witty" : options.emotion === "calm-concerned" ? "whisper" : "calm"
+      const res = await ipcPiperSpeak(clean, piperStyle, options.pace || 1.0, options.onLevel)
+      if (res.sample_count > 0 && !bargeInRequested) {
+        options.onEnd?.()
+        return
+      }
+    } catch {
+      // Fall through gracefully to sentence-pipelined audio or web speech
     }
   }
 

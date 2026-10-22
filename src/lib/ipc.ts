@@ -108,6 +108,80 @@ export async function invokeCommand<T>(cmd: string, args?: Record<string, unknow
       message_count: 0,
     } as unknown as T
   }
+  if (cmd === "inspect_cursor_element") {
+    return {
+      name: "Visual Studio Code Editor",
+      control_type: "Edit",
+      window_title: "friday — src/lib/store.ts",
+      process_name: "Code.exe",
+      pid: 1420,
+      x: 840,
+      y: 420,
+      bounds: [240, 60, 1400, 960],
+    } as unknown as T
+  }
+  if (cmd === "inspect_focused_app") {
+    return {
+      window_title: "friday — Visual Studio Code",
+      process_name: "Code.exe",
+      pid: 1420,
+      bounds: [0, 0, 1920, 1080],
+      cursor_pos: [840, 420],
+      element_name: "Editor Pane",
+    } as unknown as T
+  }
+  if (cmd === "get_overwatch_interjections") {
+    return [] as unknown as T
+  }
+  if (cmd === "dismiss_overwatch_interjection") {
+    return true as unknown as T
+  }
+  if (cmd === "inspect_clipboard_for_overwatch") {
+    return null as unknown as T
+  }
+  if (cmd === "dispatch_legion_swarm") {
+    const goal = (args?.directive as string) || "Swarm Directive"
+    return {
+      id: `legion-${Date.now()}`,
+      goal,
+      nodes: [
+        { id: "node-scout", role: "Scout", status: "Completed", task: "External intelligence survey", output: "0 hazards detected", latency_ms: 45, dependencies: [] },
+        { id: "node-architect", role: "Architect", status: "Completed", task: "Module dependency graph synthesis", output: "AST mapped", latency_ms: 60, dependencies: ["node-scout"] },
+        { id: "node-sentinel", role: "Sentinel", status: "Completed", task: "Constitutional law verification", output: "0 unwraps, strict One-Signal", latency_ms: 30, dependencies: ["node-architect"] },
+        { id: "node-operator", role: "Operator", status: "Completed", task: "Desktop actuation staging", output: "Ready", latency_ms: 50, dependencies: ["node-sentinel"] },
+      ],
+      start_time: Date.now() - 185,
+      total_duration_ms: 185,
+      completed: true,
+    } as unknown as T
+  }
+  if (cmd === "get_legion_status") {
+    return null as unknown as T
+  }
+  if (cmd === "get_episodic_timeline" || cmd === "search_episodic_timeline") {
+    return [
+      {
+        id: "ep-1",
+        app_name: "Code.exe",
+        window_title: "friday — src/lib/store.ts",
+        file_path: "src/lib/store.ts",
+        git_branch: "master",
+        summary: "Overhauled voice state and MapLibre cartography",
+        created_at: Math.floor(Date.now() / 1000) - 300,
+        duration_secs: 300,
+      },
+    ] as unknown as T
+  }
+  if (cmd === "record_episodic_event") {
+    return {
+      id: `ep-${Date.now()}`,
+      app_name: (args?.appName as string) || "System",
+      window_title: (args?.windowTitle as string) || "Desktop",
+      created_at: Math.floor(Date.now() / 1000),
+      duration_secs: 0,
+      summary: (args?.summary as string) || "Active work",
+    } as unknown as T
+  }
   if (cmd === "get_messages") {
     return [] as unknown as T
   }
@@ -486,3 +560,49 @@ export const ipcGetMessages = (threadId: string) =>
 
 export const ipcAddMessage = (threadId: string, role: string, say?: string, show?: string) =>
   invokeCommand<BackendMessage>("add_message", { threadId, role, say, show })
+
+// ── Phase 2: UIA Perception, Overwatch, Legion Swarm & Episodic Recall ─────
+
+import type {
+  UiCursorElement,
+  FocusedAppSnapshot,
+  OverwatchInterjection,
+  LegionSwarmPlan,
+  DbEpisodicEvent,
+} from "./bindings"
+
+export const ipcInspectCursorElement = () =>
+  invokeCommand<UiCursorElement>("inspect_cursor_element")
+
+export const ipcInspectFocusedApp = () =>
+  invokeCommand<FocusedAppSnapshot>("inspect_focused_app")
+
+export const ipcGetOverwatchInterjections = () =>
+  invokeCommand<OverwatchInterjection[]>("get_overwatch_interjections")
+
+export const ipcDismissOverwatchInterjection = (id: string) =>
+  invokeCommand<boolean>("dismiss_overwatch_interjection", { id })
+
+export const ipcInspectClipboardForOverwatch = (text: string) =>
+  invokeCommand<OverwatchInterjection | null>("inspect_clipboard_for_overwatch", { text })
+
+export const ipcDispatchLegionSwarm = (directive: string) =>
+  invokeCommand<LegionSwarmPlan>("dispatch_legion_swarm", { directive })
+
+export const ipcGetLegionStatus = () =>
+  invokeCommand<LegionSwarmPlan | null>("get_legion_status")
+
+export const ipcGetEpisodicTimeline = (limit = 50, sinceTs?: number) =>
+  invokeCommand<DbEpisodicEvent[]>("get_episodic_timeline", { limit, sinceTs })
+
+export const ipcSearchEpisodicTimeline = (query: string) =>
+  invokeCommand<DbEpisodicEvent[]>("search_episodic_timeline", { query })
+
+export const ipcRecordEpisodicEvent = (data: {
+  appName: string
+  windowTitle: string
+  filePath?: string
+  gitBranch?: string
+  summary?: string
+}) =>
+  invokeCommand<DbEpisodicEvent | null>("record_episodic_event", data)

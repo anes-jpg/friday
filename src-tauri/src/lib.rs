@@ -26,6 +26,11 @@ pub struct AppState {
     pub audio_capture: Arc<AudioCaptureManager>,
     pub scheduler: Arc<SchedulerManager>,
     pub skills: Arc<SkillRegistry>,
+    pub piper: Arc<tokio::sync::Mutex<crate::voice::piper::PiperEngine>>,
+    pub perception: Arc<crate::agent::perception::WindowsPerceptionEngine>,
+    pub overwatch: Arc<crate::agent::overwatch::OverwatchManager>,
+    pub legion: Arc<crate::agent::legion::IronLegionSwarm>,
+    pub episodic: Arc<crate::memory::episodic::EpisodicContextEngine>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -622,6 +627,207 @@ async fn get_piper_status() -> Result<bool, String> {
 #[tauri::command]
 async fn get_kokoro_status() -> Result<bool, String> {
     get_piper_status().await
+}
+
+#[tauri::command]
+async fn piper_speak(
+    text: String,
+    style: Option<String>,
+    speed: Option<f32>,
+    state: State<'_, AppState>,
+) -> Result<crate::voice::piper::PiperSpeakResult, String> {
+    let mut engine = state.piper.lock().await;
+    let prosody = style.as_deref().map(crate::voice::piper::PiperProsodyStyle::parse);
+    engine.speak(&text, prosody, speed)
+}
+
+#[tauri::command]
+async fn piper_stop(state: State<'_, AppState>) -> Result<(), String> {
+    let mut engine = state.piper.lock().await;
+    engine.stop();
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_piper_engine_status(
+    state: State<'_, AppState>,
+) -> Result<crate::voice::piper::PiperEngineStatus, String> {
+    let engine = state.piper.lock().await;
+    Ok(engine.get_status())
+}
+
+#[tauri::command]
+async fn configure_piper(
+    model_path: Option<String>,
+    tokens_path: Option<String>,
+    data_dir: Option<String>,
+    style: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::voice::piper::PiperEngineStatus, String> {
+    let mut engine = state.piper.lock().await;
+    if let Some(s) = style {
+        engine.set_style(crate::voice::piper::PiperProsodyStyle::parse(&s));
+    }
+    if model_path.is_some() || tokens_path.is_some() || data_dir.is_some() {
+        engine.discover_and_load(
+            model_path.as_deref(),
+            tokens_path.as_deref(),
+            data_dir.as_deref(),
+        );
+    }
+    Ok(engine.get_status())
+}
+
+// ── UIA Perception Commands ───────────────────────────────────────────────────
+
+#[tauri::command]
+fn inspect_cursor_element(
+    state: State<'_, AppState>,
+) -> Result<crate::agent::perception::UiCursorElement, String> {
+    state.perception.element_under_cursor()
+}
+
+#[tauri::command]
+fn inspect_focused_app(
+    state: State<'_, AppState>,
+) -> Result<crate::agent::perception::FocusedAppSnapshot, String> {
+    state.perception.inspect_focused_app()
+}
+
+// ── Overwatch Mode Commands ──────────────────────────────────────────────────
+
+#[tauri::command]
+fn get_overwatch_interjections(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::agent::overwatch::OverwatchInterjection>, String> {
+    Ok(state.overwatch.get_active_interjections())
+}
+
+#[tauri::command]
+fn dismiss_overwatch_interjection(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    Ok(state.overwatch.dismiss(&id))
+}
+
+#[tauri::command]
+fn inspect_clipboard_for_overwatch(
+    text: String,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::agent::overwatch::OverwatchInterjection>, String> {
+    Ok(state.overwatch.inspect_clipboard_text(&text))
+}
+
+// ── Iron Legion Protocol Commands ────────────────────────────────────────────
+
+#[tauri::command]
+async fn dispatch_legion_swarm(
+    directive: String,
+    state: State<'_, AppState>,
+) -> Result<crate::agent::legion::LegionSwarmPlan, String> {
+    state.legion.dispatch_directive(&directive).await
+}
+
+#[tauri::command]
+fn get_legion_status(
+    state: State<'_, AppState>,
+) -> Result<Option<crate::agent::legion::LegionSwarmPlan>, String> {
+    Ok(state.legion.get_active_plan())
+}
+
+// ── Episodic Timeline Recall Commands ────────────────────────────────────────
+
+#[tauri::command]
+fn get_episodic_timeline(
+    limit: Option<usize>,
+    since_ts: Option<i64>,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::memory::db::DbEpisodicEvent>, String> {
+    state.episodic.get_timeline(limit.unwrap_or(50), since_ts)
+}
+
+#[tauri::command]
+fn search_episodic_timeline(
+    query: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::memory::db::DbEpisodicEvent>, String> {
+    state.episodic.search(&query)
+}
+
+#[tauri::command]
+fn record_episodic_event(
+    app_name: String,
+    window_title: String,
+    file_path: Option<String>,
+    git_branch: Option<String>,
+    summary: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::memory::db::DbEpisodicEvent>, String> {
+    state.episodic.record_context_shift(
+        &app_name,
+        &window_title,
+        file_path.as_deref(),
+        git_branch.as_deref(),
+        summary.as_deref(),
+    )
+}
+
+// ── God's Eye 9-Layer Telemetry & Fullscreen OS Commands ─────────────────────
+
+#[tauri::command]
+fn get_network_telemetry() -> Result<crate::tools::net_telemetry::NetworkSocketArcResponse, String> {
+    let engine = crate::tools::net_telemetry::NetTelemetryEngine::new();
+    Ok(crate::tools::net_telemetry::NetworkSocketArcResponse {
+        arcs: engine.get_socket_arcs(),
+        cables: engine.get_cables(),
+    })
+}
+
+#[tauri::command]
+fn get_orbital_telemetry() -> Result<Vec<crate::tools::orbital_maritime::SatelliteTrack>, String> {
+    let engine = crate::tools::orbital_maritime::OrbitalMaritimeEngine::new();
+    Ok(engine.get_satellites())
+}
+
+#[tauri::command]
+fn get_maritime_telemetry() -> Result<Vec<crate::tools::orbital_maritime::MaritimeVessel>, String> {
+    let engine = crate::tools::orbital_maritime::OrbitalMaritimeEngine::new();
+    Ok(engine.get_vessels())
+}
+
+#[tauri::command]
+fn get_geospatial_telemetry() -> Result<crate::tools::geospatial::GeospatialResponse, String> {
+    let engine = crate::tools::geospatial::GeospatialTelemetryEngine::new();
+    Ok(crate::tools::geospatial::GeospatialResponse {
+        flights: engine.get_flights(),
+        seismic: engine.get_seismic_events(),
+        weather: engine.get_weather(),
+    })
+}
+
+#[tauri::command]
+fn get_hardware_vitals() -> Result<crate::tools::hardware::SystemHardwareTelemetry, String> {
+    let engine = crate::tools::hardware::HardwareTelemetryEngine::new();
+    Ok(engine.get_telemetry())
+}
+
+#[tauri::command]
+fn toggle_os_fullscreen(window: tauri::Window, exclusive: Option<bool>) -> Result<bool, String> {
+    let is_fullscreen = window.is_fullscreen().map_err(|e| e.to_string())?;
+    let target = !is_fullscreen;
+    if target {
+        #[cfg(target_os = "windows")]
+        if exclusive.unwrap_or(false) {
+            let _ = window_vibrancy::clear_mica(&window);
+        }
+        window.set_fullscreen(true).map_err(|e| e.to_string())?;
+    } else {
+        window.set_fullscreen(false).map_err(|e| e.to_string())?;
+        #[cfg(target_os = "windows")]
+        let _ = window_vibrancy::apply_mica(&window, None);
+    }
+    Ok(target)
 }
 
 #[tauri::command]
@@ -1950,7 +2156,12 @@ pub fn run() {
     let scheduler = Arc::new(SchedulerManager::new(db.clone(), agent.tools.clone()));
     scheduler.start();
 
-    let skills = Arc::new(SkillRegistry::new(db));
+    let skills = Arc::new(SkillRegistry::new(db.clone()));
+    let piper = Arc::new(tokio::sync::Mutex::new(crate::voice::piper::PiperEngine::new()));
+    let perception = Arc::new(crate::agent::perception::WindowsPerceptionEngine::new());
+    let overwatch = Arc::new(crate::agent::overwatch::OverwatchManager::new());
+    let legion = Arc::new(crate::agent::legion::IronLegionSwarm::new());
+    let episodic = Arc::new(crate::memory::episodic::EpisodicContextEngine::new(db));
     spawn_kokoro_service_if_needed();
 
     tauri::Builder::default()
@@ -1960,6 +2171,11 @@ pub fn run() {
             audio_capture,
             scheduler,
             skills,
+            piper,
+            perception,
+            overwatch,
+            legion,
+            episodic,
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
@@ -2054,6 +2270,26 @@ pub fn run() {
             test_glm_connection,
             get_kokoro_status,
             get_piper_status,
+            piper_speak,
+            piper_stop,
+            get_piper_engine_status,
+            configure_piper,
+            inspect_cursor_element,
+            inspect_focused_app,
+            get_overwatch_interjections,
+            dismiss_overwatch_interjection,
+            inspect_clipboard_for_overwatch,
+            dispatch_legion_swarm,
+            get_legion_status,
+            get_episodic_timeline,
+            search_episodic_timeline,
+            record_episodic_event,
+            get_network_telemetry,
+            get_orbital_telemetry,
+            get_maritime_telemetry,
+            get_geospatial_telemetry,
+            get_hardware_vitals,
+            toggle_os_fullscreen,
             get_ai_models,
             set_active_model,
             update_ai_model,

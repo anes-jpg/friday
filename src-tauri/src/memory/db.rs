@@ -35,6 +35,18 @@ pub struct DbFact {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DbEpisodicEvent {
+    pub id: String,
+    pub app_name: String,
+    pub window_title: String,
+    pub file_path: Option<String>,
+    pub git_branch: Option<String>,
+    pub summary: String,
+    pub created_at: i64,
+    pub duration_secs: i64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DbAuditEntry {
     pub id: String,
     pub tool_name: String,
@@ -207,6 +219,17 @@ impl Database {
                 updated_at INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS episodic_timeline (
+                id TEXT PRIMARY KEY,
+                app_name TEXT NOT NULL,
+                window_title TEXT NOT NULL,
+                file_path TEXT,
+                git_branch TEXT,
+                summary TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                duration_secs INTEGER NOT NULL DEFAULT 0
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id);
             CREATE INDEX IF NOT EXISTS idx_messages_thread_time ON messages(thread_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
@@ -216,6 +239,7 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_facts_confidence ON facts(confidence);
             CREATE INDEX IF NOT EXISTS idx_automations_enabled ON automations(enabled);
             CREATE INDEX IF NOT EXISTS idx_skills_enabled ON skills(enabled);
+            CREATE INDEX IF NOT EXISTS idx_episodic_created ON episodic_timeline(created_at);
             "#,
         )?;
         let _ = self
@@ -1002,6 +1026,111 @@ impl Database {
         };
         self.insert_fact(&fact)?;
         Ok(())
+    }
+
+    pub fn insert_episodic_event(&self, event: &DbEpisodicEvent) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO episodic_timeline (id, app_name, window_title, file_path, git_branch, summary, created_at, duration_secs)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                event.id,
+                event.app_name,
+                event.window_title,
+                event.file_path,
+                event.git_branch,
+                event.summary,
+                event.created_at,
+                event.duration_secs,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_episodic_timeline(
+        &self,
+        limit: usize,
+        since_ts: Option<i64>,
+    ) -> Result<Vec<DbEpisodicEvent>> {
+        if let Some(since) = since_ts {
+            let mut stmt = self.conn.prepare(
+                "SELECT id, app_name, window_title, file_path, git_branch, summary, created_at, duration_secs
+                 FROM episodic_timeline
+                 WHERE created_at >= ?1
+                 ORDER BY created_at DESC
+                 LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(params![since, limit as i64], |row| {
+                Ok(DbEpisodicEvent {
+                    id: row.get(0)?,
+                    app_name: row.get(1)?,
+                    window_title: row.get(2)?,
+                    file_path: row.get(3)?,
+                    git_branch: row.get(4)?,
+                    summary: row.get(5)?,
+                    created_at: row.get(6)?,
+                    duration_secs: row.get(7)?,
+                })
+            })?;
+            let mut events = Vec::new();
+            for r in rows {
+                events.push(r?);
+            }
+            Ok(events)
+        } else {
+            let mut stmt = self.conn.prepare(
+                "SELECT id, app_name, window_title, file_path, git_branch, summary, created_at, duration_secs
+                 FROM episodic_timeline
+                 ORDER BY created_at DESC
+                 LIMIT ?1",
+            )?;
+            let rows = stmt.query_map(params![limit as i64], |row| {
+                Ok(DbEpisodicEvent {
+                    id: row.get(0)?,
+                    app_name: row.get(1)?,
+                    window_title: row.get(2)?,
+                    file_path: row.get(3)?,
+                    git_branch: row.get(4)?,
+                    summary: row.get(5)?,
+                    created_at: row.get(6)?,
+                    duration_secs: row.get(7)?,
+                })
+            })?;
+            let mut events = Vec::new();
+            for r in rows {
+                events.push(r?);
+            }
+            Ok(events)
+        }
+    }
+
+    pub fn search_episodic_timeline(&self, query: &str) -> Result<Vec<DbEpisodicEvent>> {
+        let pattern = format!("%{}%", query);
+        let mut stmt = self.conn.prepare(
+            "SELECT id, app_name, window_title, file_path, git_branch, summary, created_at, duration_secs
+             FROM episodic_timeline
+             WHERE app_name LIKE ?1 OR window_title LIKE ?1 OR summary LIKE ?1 OR file_path LIKE ?1
+             ORDER BY created_at DESC
+             LIMIT 50",
+        )?;
+
+        let rows = stmt.query_map(params![pattern], |row| {
+            Ok(DbEpisodicEvent {
+                id: row.get(0)?,
+                app_name: row.get(1)?,
+                window_title: row.get(2)?,
+                file_path: row.get(3)?,
+                git_branch: row.get(4)?,
+                summary: row.get(5)?,
+                created_at: row.get(6)?,
+                duration_secs: row.get(7)?,
+            })
+        })?;
+
+        let mut events = Vec::new();
+        for r in rows {
+            events.push(r?);
+        }
+        Ok(events)
     }
 }
 
