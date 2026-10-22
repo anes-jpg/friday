@@ -17,7 +17,7 @@ import { ProjectsTab } from "./ProjectsTab"
 import { AudioSpectrumVisualizer } from "@/components/telemetry/AudioSpectrumVisualizer"
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow"
 import { motion, AnimatePresence } from "motion/react"
-import { Minus, Square, X, Copy } from "lucide-react"
+import { Minus, Square, X, Copy, Maximize2 } from "lucide-react"
 import { FridayOrb } from "@/components/orb"
 import { cn } from "@/lib/utils"
 import {
@@ -83,6 +83,21 @@ export const Console: React.FC = () => {
     })
   }
 
+  const handleEnterFullscreenHud = () => {
+    window.dispatchEvent(new CustomEvent("friday:trigger-hud-boot"))
+  }
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "F11") {
+        e.preventDefault()
+        handleEnterFullscreenHud()
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [])
+
   const handleHeaderMouseDown = (e: React.MouseEvent<HTMLElement>) => {
     if (e.button === 0 && !(e.target as HTMLElement).closest("button, a, input, select, textarea")) {
       invokeCommand("app_start_dragging").catch(() => {
@@ -133,6 +148,16 @@ export const Console: React.FC = () => {
 
             {/* Window Controls */}
             <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleEnterFullscreenHud}
+                aria-label="Enter Fullscreen Spatial HUD (F11)"
+                title="Enter Fullscreen Spatial HUD (F11)"
+                className="flex items-center gap-1.5 px-2.5 py-1 mr-1 text-[10px] font-mono font-medium rounded-[var(--radius-control)] border border-[hsl(var(--signal))]/30 bg-[hsl(var(--signal))]/10 text-[hsl(var(--signal))] hover:bg-[hsl(var(--signal))]/20 transition-all cursor-pointer shadow-xs"
+              >
+                <Maximize2 className="size-3" />
+                <span className="hidden sm:inline">HUD Mode</span>
+              </button>
               <button
                 type="button"
                 onClick={handleMinimize}

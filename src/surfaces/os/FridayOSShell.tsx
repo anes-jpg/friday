@@ -32,9 +32,13 @@ import { cn } from "@/lib/utils"
 
 export type OSSurfaceMode = "console" | "godseye" | "legion" | "history"
 
-export const FridayOSShell: React.FC = () => {
-  const [activeMode, setActiveMode] = useState<OSSurfaceMode>("console")
-  const [isFullscreen, setIsFullscreen] = useState(false)
+export interface FridayOSShellProps {
+  onExitFullscreen?: () => void
+}
+
+export const FridayOSShell: React.FC<FridayOSShellProps> = ({ onExitFullscreen }) => {
+  const [activeMode, setActiveMode] = useState<OSSurfaceMode>("godseye")
+  const [isFullscreen, setIsFullscreen] = useState(true)
   const [overwatchEnabled, setOverwatchEnabled] = useState(true)
   const [overwatchItems, setOverwatchItems] = useState<OverwatchToastItem[]>([])
   const [legionPlan, setLegionPlan] = useState<LegionSwarmPlan | null>(null)
@@ -48,15 +52,19 @@ export const FridayOSShell: React.FC = () => {
     try {
       const next = await ipcToggleOsFullscreen()
       setIsFullscreen(next)
+      if (!next && onExitFullscreen) {
+        onExitFullscreen()
+      }
     } catch (e) {
       console.warn("Fullscreen toggle error:", e)
+      if (onExitFullscreen) onExitFullscreen()
     }
   }
 
   // Keyboard shortcut listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "F11" || (e.altKey && e.key === "Enter")) {
+      if (e.key === "Escape" || e.key === "F11" || (e.altKey && e.key === "Enter")) {
         e.preventDefault()
         handleToggleFullscreen()
       } else if (e.ctrlKey && e.key === "1") {

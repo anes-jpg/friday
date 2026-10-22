@@ -7,6 +7,8 @@ import { isAudioActive } from "@/lib/kokoro";
 import { Palette } from "@/surfaces/palette/Palette";
 import { Console } from "@/surfaces/console/Console";
 import { FridayOSShell } from "@/surfaces/os/FridayOSShell";
+import { HudBootSequence } from "@/components/hud/HudBootSequence";
+import { ipcToggleOsFullscreen } from "@/lib/telemetry";
 import { surfaceLabel } from "@/lib/ipc";
 
 const OnboardingModal = React.lazy(() =>
@@ -56,10 +58,13 @@ export const App: React.FC = () => {
     inputMode,
     setInputMode,
     wakeWord,
+    spatialHudActive,
+    setSpatialHudActive,
   } = useFridayStore();
 
   const [windowLabel, setWindowLabel] = useState<string>(() => getTauriWindowLabel());
   const [showShowcase, setShowShowcase] = useState<boolean>(false);
+  const [isBootingHud, setIsBootingHud] = useState<boolean>(false);
   const [showOnboarding, setShowOnboarding] = useState<boolean>(() => {
     try {
       return localStorage.getItem("friday_onboarded_v1_0") !== "true";
@@ -68,6 +73,34 @@ export const App: React.FC = () => {
     }
   });
   const isHoldingPttRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const handleTriggerHudBoot = async () => {
+      setIsBootingHud(true);
+      try {
+        await ipcToggleOsFullscreen(true);
+      } catch (e) {
+        console.warn("Fullscreen toggle error:", e);
+      }
+    };
+
+    window.addEventListener("friday:trigger-hud-boot", handleTriggerHudBoot);
+    return () => window.removeEventListener("friday:trigger-hud-boot", handleTriggerHudBoot);
+  }, []);
+
+  const handleBootComplete = () => {
+    setIsBootingHud(false);
+    setSpatialHudActive(true);
+  };
+
+  const handleExitHud = async () => {
+    try {
+      await ipcToggleOsFullscreen(false);
+    } catch (e) {
+      console.warn("Exit fullscreen error:", e);
+    }
+    setSpatialHudActive(false);
+  };
 
   useEffect(() => {
     const handleOpenOnboarding = () => setShowOnboarding(true);
@@ -357,7 +390,19 @@ export const App: React.FC = () => {
 
   return (
     <div className="relative w-full h-full overflow-hidden font-sans bg-[hsl(var(--canvas))]">
-      <FridayOSShell />
+      {spatialHudActive ? (
+        <FridayOSShell onExitFullscreen={handleExitHud} />
+      ) : (
+        <Console />
+      )}
+
+      {isBootingHud && (
+        <HudBootSequence
+          onComplete={handleBootComplete}
+          onSkip={handleBootComplete}
+        />
+      )}
+
       <Palette />
       <React.Suspense fallback={null}>
         {showOnboarding && (

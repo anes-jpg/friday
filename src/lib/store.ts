@@ -262,6 +262,8 @@ interface State {
   threads: Thread[]
   activeThreadId: string | null
   chatHistoryOpen: boolean
+  spatialHudActive: boolean
+  setSpatialHudActive: (active: boolean) => void
   contextInspectorOpen: boolean
   debugDrawerOpen: boolean
 
@@ -422,6 +424,7 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
   threads: seed.threads,
   activeThreadId: seed.threads[0]?.id ?? null,
   chatHistoryOpen: false,
+  spatialHudActive: false,
   contextInspectorOpen: true,
   debugDrawerOpen: false,
 
@@ -727,6 +730,7 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
       return { chatHistoryOpen: next }
     })
   },
+  setSpatialHudActive: (active: boolean) => set({ spatialHudActive: active }),
   hydrateThreadsFromBackend: async () => {
     try {
       const [backendThreads, activeId] = await Promise.all([
