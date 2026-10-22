@@ -38,6 +38,7 @@ print(f"✅ T4 GPU Verified: {gpu_name} ({gpu_vram:.1f} GB VRAM available)\n")
 
 # 2. Clean Dependency Installation (Zero pip conflict errors)
 print("📦 Installing lightweight fine-tuning stack and llama.cpp...")
+os.system("pip uninstall -y torchao > /dev/null 2>&1")
 os.system("pip install -q --no-warn-conflicts bitsandbytes peft trl datasets gguf 2> /dev/null")
 
 if not os.path.exists("llama.cpp"):
@@ -172,7 +173,7 @@ peft_config = LoraConfig(
     lora_dropout=0.05,
     bias="none",
     task_type="CAUSAL_LM",
-    target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+    target_modules="all-linear",
 )
 model = get_peft_model(model, peft_config)
 
@@ -261,12 +262,16 @@ print("✅ QLoRA training complete!\n")
 # 6. Merge LoRA & Convert to 1.05 GB GGUF Q4_K_M
 print("🔄 Merging LoRA weights and converting to 2GB-VRAM GGUF...")
 
-# Bypass Colab's outdated torchao conflict
-try:
-    import peft.import_utils
-    peft.import_utils.is_torchao_available = lambda: False
-except Exception:
-    pass
+# 1. Cleanly remove Colab's outdated torchao package
+os.system("pip uninstall -y torchao > /dev/null 2>&1")
+for mod_name in list(sys.modules.keys()):
+    if "torchao" in mod_name:
+        del sys.modules[mod_name]
+
+# 2. Universal patch: force all peft modules to ignore torchao
+for mod_name, mod in list(sys.modules.items()):
+    if mod_name.startswith("peft") and hasattr(mod, "is_torchao_available"):
+        setattr(mod, "is_torchao_available", lambda: False)
 
 from peft import AutoPeftModelForCausalLM
 
@@ -289,12 +294,20 @@ except Exception as e:
     print(f"Falling back to direct PEFT merge: {e}")
     from transformers import AutoModelForCausalLM
     from peft import PeftModel
-    base = AutoModelForCausalLM.from_pretrained(
-        "HuggingFaceTB/SmolLM2-1.7B-Instruct",
-        device_map="cpu",
-        dtype=torch.float16,
-        low_cpu_mem_usage=True
-    )
+    try:
+        base = AutoModelForCausalLM.from_pretrained(
+            "HuggingFaceTB/SmolLM2-1.7B-Instruct",
+            device_map="cpu",
+            dtype=torch.float16,
+            low_cpu_mem_usage=True
+        )
+    except TypeError:
+        base = AutoModelForCausalLM.from_pretrained(
+            "HuggingFaceTB/SmolLM2-1.7B-Instruct",
+            device_map="cpu",
+            torch_dtype=torch.float16,
+            low_cpu_mem_usage=True
+        )
     peft_m = PeftModel.from_pretrained(base, "friday_1b_adapter")
     merged = peft_m.merge_and_unload()
 
