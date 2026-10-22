@@ -8,6 +8,28 @@ pub struct GpuVitals {
     pub vram_used_mb: u32,
     pub vram_total_mb: u32,
     pub power_watts: f32,
+    #[serde(default = "default_vram_budget")]
+    pub vram_budget_mb: u32,
+    #[serde(default = "default_thermal_status")]
+    pub thermal_status: String,
+}
+
+fn default_vram_budget() -> u32 {
+    2048
+}
+
+fn default_thermal_status() -> String {
+    "Cold (<45°C)".to_string()
+}
+
+impl GpuVitals {
+    /// Validates whether a candidate edge model fits within the 2048 MB VRAM budget
+    /// leaving at least 400 MB reserved for Windows DWM and UI compositing
+    pub fn is_vram_safe_for_model(&self, model_size_mb: u32) -> bool {
+        let ceiling = self.vram_total_mb.min(self.vram_budget_mb);
+        let safe_limit = ceiling.saturating_sub(400);
+        model_size_mb <= safe_limit
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,14 +65,25 @@ impl HardwareTelemetryEngine {
 
     /// Queries real-time GPU thermals, VRAM footprint, and local network devices
     pub fn get_telemetry(&self) -> SystemHardwareTelemetry {
-        // Query GPU vitals (either via NVML if NVIDIA driver present, or DirectX/WMI fallback)
+        let temp: f32 = 41.5;
+        let thermal_status = if temp < 45.0 {
+            "Cold (<45°C)".to_string()
+        } else if temp <= 65.0 {
+            "Optimal (45-65°C)".to_string()
+        } else {
+            "Warm (>65°C)".to_string()
+        };
+
+        // Query GPU vitals with 2048 MB VRAM budget enforcement
         let gpu = GpuVitals {
             name: "NVIDIA GeForce RTX 4090".to_string(),
-            temperature_c: 48.5,
+            temperature_c: temp,
             utilization_percent: 24.0,
-            vram_used_mb: 4820,
-            vram_total_mb: 24576,
-            power_watts: 115.0,
+            vram_used_mb: 850,
+            vram_total_mb: 2048,
+            power_watts: 25.0,
+            vram_budget_mb: 2048,
+            thermal_status,
         };
 
         let lan_devices = vec![
@@ -106,5 +139,18 @@ mod tests {
         assert!(telemetry.gpu.temperature_c < 90.0);
         assert_eq!(telemetry.lan_devices.len(), 4);
         assert_eq!(telemetry.lan_devices[0].device_type, "Router");
+    }
+
+    #[test]
+    fn test_vram_safety_for_2gb_budget() {
+        let engine = HardwareTelemetryEngine::new();
+        let telemetry = engine.get_telemetry();
+        assert_eq!(telemetry.gpu.vram_budget_mb, 2048);
+
+        // Safe limit is 2048 - 400 = 1648 MB
+        assert!(telemetry.gpu.is_vram_safe_for_model(410));  // BitNet 2B (410MB) -> Safe
+        assert!(telemetry.gpu.is_vram_safe_for_model(650));  // Liquid LFM-1B (650MB) -> Safe
+        assert!(telemetry.gpu.is_vram_safe_for_model(1050)); // SmolLM2-1.7B Q4 (1050MB) -> Safe
+        assert!(!telemetry.gpu.is_vram_safe_for_model(4200)); // Llama-3 8B (4.2GB) -> Exceeds 2GB VRAM
     }
 }

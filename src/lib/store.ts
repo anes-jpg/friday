@@ -984,7 +984,7 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
 
   /* AI Models & Modular Router */
   aiModels: seed.initialAiModels,
-  activeModelId: seed.initialAiModels.find((m) => m.is_active)?.id || "glm-5.3",
+  activeModelId: seed.initialAiModels.find((m) => m.is_active)?.id || "friday-1b-operator",
   testingModelId: null,
 
   loadAiModels: async () => {

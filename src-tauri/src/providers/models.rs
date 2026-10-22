@@ -201,9 +201,114 @@ fn build_synthetic_tracker(
         .collect()
 }
 
-/// Default fleet seed matching user's Agent Router dashboard
+/// Default fleet seed matching user's Agent Router dashboard and 2026 Edge SLMs for 2GB VRAM
 pub fn get_default_models_fleet() -> Vec<AiModel> {
     vec![
+        AiModel {
+            id: "smollm2-1.7b".to_string(),
+            name: "SmolLM2-1.7B-Instruct (4-bit · 1.05GB VRAM)".to_string(),
+            provider: "local_edge".to_string(),
+            base_url: "http://127.0.0.1:11434/v1".to_string(),
+            api_key: None,
+            capabilities: vec![
+                "chat".to_string(),
+                "local_edge".to_string(),
+                "vram_sub_2gb".to_string(),
+                "tool_calling".to_string(),
+                "responses".to_string(),
+            ],
+            status: ModelStatus::Normal,
+            priority: 0,
+            is_active: false,
+            telemetry: ModelTelemetry {
+                availability_pct: 100.0,
+                ttft_p90_ms: 85,
+                avg_latency_ms: 280,
+                tracker_history: build_synthetic_tracker(
+                    "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG",
+                    280,
+                ),
+            },
+        },
+        AiModel {
+            id: "bitnet-b1.58-2b".to_string(),
+            name: "BitNet b1.58 2B (1-Bit Ternary · 410MB VRAM · Cold)".to_string(),
+            provider: "local_edge".to_string(),
+            base_url: "http://127.0.0.1:11434/v1".to_string(),
+            api_key: None,
+            capabilities: vec![
+                "chat".to_string(),
+                "local_edge".to_string(),
+                "vram_sub_2gb".to_string(),
+                "cold_thermal".to_string(),
+                "responses".to_string(),
+            ],
+            status: ModelStatus::Normal,
+            priority: 1,
+            is_active: false,
+            telemetry: ModelTelemetry {
+                availability_pct: 100.0,
+                ttft_p90_ms: 45,
+                avg_latency_ms: 175,
+                tracker_history: build_synthetic_tracker(
+                    "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG",
+                    175,
+                ),
+            },
+        },
+        AiModel {
+            id: "lfm-1b".to_string(),
+            name: "Liquid LFM-1B (Non-Transformer LNN · 650MB VRAM)".to_string(),
+            provider: "local_edge".to_string(),
+            base_url: "http://127.0.0.1:11434/v1".to_string(),
+            api_key: None,
+            capabilities: vec![
+                "chat".to_string(),
+                "local_edge".to_string(),
+                "vram_sub_2gb".to_string(),
+                "zero_kv_blowout".to_string(),
+                "responses".to_string(),
+            ],
+            status: ModelStatus::Normal,
+            priority: 2,
+            is_active: false,
+            telemetry: ModelTelemetry {
+                availability_pct: 100.0,
+                ttft_p90_ms: 40,
+                avg_latency_ms: 190,
+                tracker_history: build_synthetic_tracker(
+                    "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG",
+                    190,
+                ),
+            },
+        },
+        AiModel {
+            id: "friday-1b-operator".to_string(),
+            name: "FRIDAY-1B-Operator (Fine-Tuned GGUF · 1.05GB VRAM)".to_string(),
+            provider: "local_edge".to_string(),
+            base_url: "http://127.0.0.1:11434/v1".to_string(),
+            api_key: None,
+            capabilities: vec![
+                "chat".to_string(),
+                "local_edge".to_string(),
+                "vram_sub_2gb".to_string(),
+                "friday_native".to_string(),
+                "tool_calling".to_string(),
+                "responses".to_string(),
+            ],
+            status: ModelStatus::Normal,
+            priority: 3,
+            is_active: false,
+            telemetry: ModelTelemetry {
+                availability_pct: 100.0,
+                ttft_p90_ms: 60,
+                avg_latency_ms: 210,
+                tracker_history: build_synthetic_tracker(
+                    "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG",
+                    210,
+                ),
+            },
+        },
         AiModel {
             id: "gpt-6-astra".to_string(),
             name: "gpt-6-astra".to_string(),
@@ -212,7 +317,7 @@ pub fn get_default_models_fleet() -> Vec<AiModel> {
             api_key: None,
             capabilities: vec!["chat".to_string(), "responses".to_string()],
             status: ModelStatus::Normal,
-            priority: 0,
+            priority: 4,
             is_active: true,
             telemetry: ModelTelemetry {
                 availability_pct: 98.45,

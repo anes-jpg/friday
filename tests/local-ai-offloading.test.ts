@@ -35,4 +35,19 @@ describe("Local AI Offloading Stack (Deterministic Action Engine & Semantic Rout
     expect(res.toolCalls.length).toBe(1)
     expect(res.toolCalls[0].name).toBe("git.branch")
   })
+
+  it("seeds 2026 Edge SLMs optimized for 2GB VRAM GeForce MX250", async () => {
+    const { seed } = await import("../src/lib/seed")
+    const edgeModels = seed.initialAiModels.filter((m) => m.provider === "local_edge")
+
+    expect(edgeModels.length).toBeGreaterThanOrEqual(4)
+    expect(edgeModels.some((m) => m.id === "friday-1b-operator")).toBe(true)
+    expect(edgeModels.some((m) => m.id === "smollm2-1.7b")).toBe(true)
+    expect(edgeModels.some((m) => m.id === "bitnet-b1.58-2b")).toBe(true)
+    expect(edgeModels.some((m) => m.id === "lfm-1b")).toBe(true)
+
+    const fridayModel = edgeModels.find((m) => m.id === "friday-1b-operator")
+    expect(fridayModel?.is_active).toBe(true)
+    expect(fridayModel?.capabilities).toContain("vram_sub_2gb")
+  })
 })

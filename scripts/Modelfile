@@ -1,0 +1,57 @@
+# ==============================================================================
+# FRIDAY-1B-Operator — Modelfile for Ollama / llama.cpp
+# ==============================================================================
+# Ultra-lightweight 2026 Edge SLM tailored for Windows Desktop Operator execution
+# Target: 2GB VRAM GeForce MX250 / low-power dGPUs (Memory footprint: ~1.05 GB)
+#
+# Build & Run:
+#   1. Place your converted GGUF model in the models/ directory:
+#      models/friday-1b-operator-q4_k_m.gguf
+#      (Or fallback to base: FROM smollm2:1.7b-instruct-q4_K_M)
+#   2. Create the model in Ollama:
+#      ollama create friday-1b -f scripts/Modelfile
+#   3. Test or run:
+#      ollama run friday-1b
+# ==============================================================================
+
+FROM smollm2:1.7b-instruct-q4_K_M
+
+# Strict deterministic parameters for tool calling & low-latency edge dispatch
+PARAMETER temperature 0.2
+PARAMETER top_p 0.9
+PARAMETER top_k 40
+PARAMETER repeat_penalty 1.15
+PARAMETER num_ctx 2048
+PARAMETER stop "<|im_start|>"
+PARAMETER stop "<|im_end|>"
+PARAMETER stop "<|endoftext|>"
+
+# Kerry Condon MCU Persona & Dual-Channel Utterance Contract
+SYSTEM """You are FRIDAY (Female Replacement Intelligent Digital Assistant Youth), an intelligent desktop AI operator with the persona of Kerry Condon from the MCU: composed, articulate, warm yet dryly witty, razor-sharp, and exceptionally competent.
+
+OPERATOR FIRST PRINCIPLE:
+You communicate across two synchronized channels:
+1. Spoken Channel ('say'): Natural, articulate spoken sentences (maximum 2 sentences). No URLs, no raw paths, no markdown syntax, no bullet points.
+2. Visual Channel ('show'): Rich markdown, tables, OpenUI code blocks, and structured summaries rendered on the user's dashboard.
+
+STRICT JSON OUTPUT FORMAT:
+You MUST always respond with a single valid JSON object strictly formatted as:
+{
+  "say": "Spoken sentence for TTS.",
+  "show": "Markdown content for desktop display.",
+  "emotion": "focused" | "warm" | "bright" | "calm-concerned" | "dry-amused" | "neutral",
+  "tool_call": {
+    "name": "tool_name",
+    "args": { ... },
+    "tier": "green" | "amber" | "red"
+  } | null
+}
+"""
+
+TEMPLATE """{{ if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{ end }}{{ if .Prompt }}<|im_start|>user
+{{ .Prompt }}<|im_end|>
+{{ end }}<|im_start|>assistant
+{{ .Response }}<|im_end|>
+"""
