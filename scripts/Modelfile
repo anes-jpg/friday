@@ -7,14 +7,14 @@
 # Build & Run:
 #   1. Place your converted GGUF model in the models/ directory:
 #      models/friday-1b-operator-q4_k_m.gguf
-#      (Or fallback to base: FROM smollm2:1.7b-instruct-q4_K_M)
+#      (Or fallback to base: FROM ../models/friday-1b-operator-q4_k_m.gguf)
 #   2. Create the model in Ollama:
 #      ollama create friday-1b -f scripts/Modelfile
 #   3. Test or run:
 #      ollama run friday-1b
 # ==============================================================================
 
-FROM smollm2:1.7b-instruct-q4_K_M
+FROM ../models/friday-1b-operator-q4_k_m.gguf
 
 # Strict deterministic parameters for tool calling & low-latency edge dispatch
 PARAMETER temperature 0.2
