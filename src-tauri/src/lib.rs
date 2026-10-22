@@ -2378,6 +2378,9 @@ pub fn run() {
             {
                 if let Some(main_window) = app.get_webview_window("main") {
                     let _ = window_vibrancy::apply_mica(&main_window, None);
+                    let _ = main_window.show();
+                    let _ = main_window.unminimize();
+                    let _ = main_window.set_focus();
                 }
             }
 

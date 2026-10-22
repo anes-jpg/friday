@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
+    CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
 };
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, UIA_ButtonControlTypeId, UIA_CONTROLTYPE_ID,
@@ -35,27 +35,23 @@ pub struct FocusedAppSnapshot {
     pub element_name: Option<String>,
 }
 
-pub struct WindowsPerceptionEngine {
-    uia: Option<IUIAutomation>,
-}
+#[derive(Default)]
+pub struct WindowsPerceptionEngine;
 
-impl Default for WindowsPerceptionEngine {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-// SAFETY: IUIAutomation is a thread-safe COM interface in MTA
+// SAFETY: WindowsPerceptionEngine holds no raw pointers across threads
 unsafe impl Send for WindowsPerceptionEngine {}
 unsafe impl Sync for WindowsPerceptionEngine {}
 
 impl WindowsPerceptionEngine {
     pub fn new() -> Self {
+        Self
+    }
+
+    /// Thread-safe on-demand UIA COM accessor (avoids breaking Tao main thread STA OleInitialize)
+    fn get_uia() -> Option<IUIAutomation> {
         unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-            let uia: Option<IUIAutomation> =
-                CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok();
-            Self { uia }
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()
         }
     }
 
@@ -70,8 +66,8 @@ impl WindowsPerceptionEngine {
             let hwnd = WindowFromPoint(pt);
             let (window_title, process_name, pid) = Self::get_window_meta(hwnd);
 
-            // If UIA COM interface is available, query accessibility tree node
-            if let Some(ref uia) = self.uia {
+            // If UIA COM interface is available on this thread, query accessibility tree node
+            if let Some(uia) = Self::get_uia() {
                 if let Ok(elem) = uia.ElementFromPoint(pt) {
                     let name = match elem.CurrentName() {
                         Ok(bstr) => bstr.to_string(),
