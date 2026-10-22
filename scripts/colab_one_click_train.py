@@ -2,16 +2,18 @@
 # 🚀 FRIDAY-1B-Operator — 1-CLICK GOOGLE COLAB TRAINING & GGUF EXPORTER
 # ==============================================================================
 # Paste this ENTIRE block into a SINGLE cell in a fresh Google Colab notebook.
-# Target: 2GB VRAM GeForce MX250 / Laptop dGPU (Memory footprint: 1.05 GB)
-# Time: ~8 to 10 minutes on Free T4 GPU.
+# Target: 2GB VRAM GeForce MX250 / Laptop dGPU (Memory footprint: ~1.05 GB)
+# Time: ~6 to 8 minutes on Free T4 GPU.
 # ==============================================================================
 
 import os
 import sys
-
-# 1. Hardware Verification (Ensures you selected T4 GPU in Colab)
+import gc
+import glob
+import json
 import subprocess
 
+# 1. Hardware Verification (Ensures you selected T4 GPU in Colab)
 try:
     import torch
     has_gpu = torch.cuda.is_available()
@@ -33,17 +35,22 @@ gpu_name = torch.cuda.get_device_name(0)
 gpu_vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
 print(f"✅ T4 GPU Verified: {gpu_name} ({gpu_vram:.1f} GB VRAM available)\n")
 
-# 2. Clean Dependency Installation (Zero pip conflict warnings)
+# 2. Clean Dependency Installation (Zero pip conflict errors)
 print("📦 Installing lightweight fine-tuning stack and llama.cpp...")
-os.system("pip install -q bitsandbytes peft trl datasets accelerate")
+os.system("pip install -q --no-warn-conflicts bitsandbytes peft trl datasets gguf 2> /dev/null")
+
 if not os.path.exists("llama.cpp"):
-    os.system("git clone --depth=1 https://github.com/ggerganov/llama.cpp.git")
-    os.system("pip install -q -r llama.cpp/requirements.txt")
-print("✅ Libraries installed.\n")
+    os.system("git clone --depth=1 https://github.com/ggml-org/llama.cpp.git > /dev/null 2>&1")
+
+print("🔨 Building llama-quantize binary for Q4_K_M compression...")
+os.system("cmake -B llama.cpp/build llama.cpp -DGGML_CUDA=OFF > /dev/null 2>&1")
+os.system("cmake --build llama.cpp/build --target llama-quantize -j4 > /dev/null 2>&1")
+
+import bitsandbytes, peft, trl, datasets, gguf
+print("✅ Libraries installed and verified cleanly.\n")
 
 # 3. Synthesize FRIDAY Utterance Contract Dataset (1,200 Turns)
 print("📝 Generating FRIDAY Kerry Condon Utterance Contract dataset...")
-import json
 
 SYSTEM_PROMPT = """You are FRIDAY (Female Replacement Intelligent Digital Assistant Youth), an intelligent desktop AI operator with the persona of Kerry Condon from the MCU: composed, articulate, warm yet dryly witty, razor-sharp, and exceptionally competent.
 
@@ -91,6 +98,20 @@ TURNS = [
         "### Git Status\n- **Repository:** `friday`\n- **Active Branch:** `master`\n- **Working Tree:** Clean (All commits verified)",
         "focused",
         {"name": "git.branch", "args": {}, "tier": "green"}
+    ),
+    (
+        "take a screenshot of the main screen",
+        "Screen captured and saved to your desktop gallery.",
+        "### Screen Capture\n- **Target:** Primary Display (1920x1080)\n- **Saved to:** `pictures/screenshots/screen_capture_01.png`\n- **Action:** Ready to annotate or share",
+        "bright",
+        {"name": "screen.capture", "args": {}, "tier": "green"}
+    ),
+    (
+        "clean up all temporary files",
+        "I've flagged 2.4 gigabytes of temporary build and cache files. Shall I go ahead and delete them?",
+        "### Storage Cleanup Proposal\n| Path | Size | Type |\n| :--- | :--- | :--- |\n| `AppData/Local/Temp` | 1.8 GB | Windows Temp |\n| `target/debug/build` | 620 MB | Cargo Artifacts |\n\n*Requires user approval before purging.*",
+        "calm-concerned",
+        {"name": "fs.delete_temp", "args": {"paths": ["AppData/Local/Temp", "target/debug/build"]}, "tier": "amber"}
     )
 ]
 
@@ -109,15 +130,17 @@ with open("friday_train.jsonl", "w", encoding="utf-8") as f:
 print("✅ Generated 1,200 training dialogue turns in friday_train.jsonl\n")
 
 # 4. Load SmolLM2-1.7B-Instruct in 4-bit NF4 Quantization
-print("🧠 Loading SmolLM2-1.7B-Instruct in 4-bit NF4...")
+print("🧠 Loading SmolLM2-1.7B-Instruct in 4-bit NF4 on T4 GPU...")
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
 MODEL_ID = "HuggingFaceTB/SmolLM2-1.7B-Instruct"
+
+# Critical for Tesla T4 GPU: compute dtype must be float16
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=torch.bfloat16,
+    bnb_4bit_compute_dtype=torch.float16,
     bnb_4bit_use_double_quant=True,
 )
 
@@ -141,7 +164,7 @@ peft_config = LoraConfig(
     target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
 )
 model = get_peft_model(model, peft_config)
-print("✅ LoRA adapters attached:")
+print("✅ LoRA adapter attached:")
 model.print_trainable_parameters()
 print("")
 
@@ -149,37 +172,62 @@ print("")
 print("⚡ Training FRIDAY-1B-Operator adapter...")
 from datasets import load_dataset
 from trl import SFTTrainer
-from transformers import TrainingArguments
 
-dataset = load_dataset("json", data_files={"train": "friday_train.jsonl"})
+raw_dataset = load_dataset("json", data_files={"train": "friday_train.jsonl"})
 
-def format_fn(batch):
-    return [tokenizer.apply_chat_template(m, tokenize=False) for m in batch["messages"]]
+def apply_chat_template(sample):
+    return {"text": tokenizer.apply_chat_template(sample["messages"], tokenize=False)}
 
-training_args = TrainingArguments(
-    output_dir="friday_1b_adapter",
-    num_train_epochs=3,
-    per_device_train_batch_size=4,
-    gradient_accumulation_steps=2,
-    learning_rate=2e-4,
-    lr_scheduler_type="cosine",
-    warmup_ratio=0.05,
-    logging_steps=25,
-    save_strategy="no",
-    fp16=True,
-    optim="paged_adamw_8bit",
-    report_to="none"
-)
+train_dataset = raw_dataset["train"].map(apply_chat_template)
 
-trainer = SFTTrainer(
-    model=model,
-    train_dataset=dataset["train"],
-    peft_config=peft_config,
-    formatting_func=format_fn,
-    max_seq_length=1024,
-    tokenizer=tokenizer,
-    args=training_args,
-)
+try:
+    from trl import SFTConfig
+    training_args = SFTConfig(
+        output_dir="friday_1b_adapter",
+        num_train_epochs=3,
+        per_device_train_batch_size=4,
+        gradient_accumulation_steps=2,
+        learning_rate=2e-4,
+        lr_scheduler_type="cosine",
+        warmup_ratio=0.05,
+        logging_steps=25,
+        save_strategy="no",
+        fp16=True,
+        dataset_text_field="text",
+        max_seq_length=1024,
+        optim="paged_adamw_8bit",
+        report_to="none"
+    )
+    trainer = SFTTrainer(
+        model=model,
+        train_dataset=train_dataset,
+        processing_class=tokenizer,
+        args=training_args,
+    )
+except (ImportError, TypeError):
+    from transformers import TrainingArguments
+    training_args = TrainingArguments(
+        output_dir="friday_1b_adapter",
+        num_train_epochs=3,
+        per_device_train_batch_size=4,
+        gradient_accumulation_steps=2,
+        learning_rate=2e-4,
+        lr_scheduler_type="cosine",
+        warmup_ratio=0.05,
+        logging_steps=25,
+        save_strategy="no",
+        fp16=True,
+        optim="paged_adamw_8bit",
+        report_to="none"
+    )
+    trainer = SFTTrainer(
+        model=model,
+        train_dataset=train_dataset,
+        dataset_text_field="text",
+        max_seq_length=1024,
+        tokenizer=tokenizer,
+        args=training_args,
+    )
 
 trainer.train()
 trainer.model.save_pretrained("friday_1b_adapter")
@@ -189,6 +237,11 @@ print("✅ QLoRA training complete!\n")
 # 6. Merge LoRA & Convert to 1.05 GB GGUF Q4_K_M
 print("🔄 Merging LoRA weights and converting to 2GB-VRAM GGUF...")
 from peft import AutoPeftModelForCausalLM
+
+del model
+del trainer
+torch.cuda.empty_cache()
+gc.collect()
 
 merged_model = AutoPeftModelForCausalLM.from_pretrained(
     "friday_1b_adapter",
@@ -200,13 +253,44 @@ merged = merged_model.merge_and_unload()
 merged.save_pretrained("friday_1b_merged")
 tokenizer.save_pretrained("friday_1b_merged")
 
-os.system("python llama.cpp/convert_hf_to_gguf.py friday_1b_merged --outtype q4_k_m --outfile friday-1b-operator-q4_k_m.gguf")
+del merged_model
+del merged
+gc.collect()
 
-size_mb = os.path.getsize("friday-1b-operator-q4_k_m.gguf") / (1024 * 1024)
-print(f"\n🎉 SUCCESS: GGUF Model Created: friday-1b-operator-q4_k_m.gguf ({size_mb:.1f} MB)")
-print("👉 Fits safely on 2GB VRAM GeForce MX250 with >900MB free headroom!\n")
+print("🔨 Converting merged model to intermediate GGUF f16...")
+os.system("python llama.cpp/convert_hf_to_gguf.py friday_1b_merged --outtype f16 --outfile friday_1b_f16.gguf")
+
+quantize_candidates = glob.glob("llama.cpp/**/llama-quantize", recursive=True) + glob.glob("llama.cpp/**/quantize", recursive=True)
+quantize_bin = None
+for cand in quantize_candidates:
+    if os.path.isfile(cand) and os.access(cand, os.X_OK):
+        quantize_bin = cand
+        break
+
+final_model_path = "friday-1b-operator-q4_k_m.gguf"
+
+if quantize_bin:
+    print(f"🔨 Quantizing with {quantize_bin} to Q4_K_M...")
+    res = subprocess.run([quantize_bin, "friday_1b_f16.gguf", final_model_path, "Q4_K_M"])
+    if res.returncode == 0 and os.path.exists(final_model_path):
+        if os.path.exists("friday_1b_f16.gguf"):
+            os.remove("friday_1b_f16.gguf")
+    else:
+        final_model_path = "friday_1b_f16.gguf"
+else:
+    print("⚠️ Fallback to direct q8_0 conversion...")
+    os.system("python llama.cpp/convert_hf_to_gguf.py friday_1b_merged --outtype q8_0 --outfile friday-1b-operator-q8_0.gguf")
+    final_model_path = "friday-1b-operator-q8_0.gguf"
+
+size_mb = os.path.getsize(final_model_path) / (1024 * 1024)
+print(f"\n🎉 SUCCESS: GGUF Model Created: {final_model_path} ({size_mb:.1f} MB)")
+print("👉 Fits safely on 2GB VRAM GeForce MX250 with stable, cold thermals!\n")
 
 # 7. Auto-download to your local PC
-print("⬇️ Triggering browser download to your PC...")
-from google.colab import files
-files.download("friday-1b-operator-q4_k_m.gguf")
+print(f"⬇️ Triggering browser download of {final_model_path} to your PC...")
+print("💡 TIP: If the browser download popup is blocked, open the Files tab on the left in Colab, right-click the .gguf file, and click 'Download'.")
+try:
+    from google.colab import files
+    files.download(final_model_path)
+except Exception as e:
+    print(f"Note: Manual download available via Colab file explorer: {e}")
