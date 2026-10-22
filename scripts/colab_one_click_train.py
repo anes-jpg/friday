@@ -259,65 +259,56 @@ trainer.model.save_pretrained("friday_1b_adapter")
 tokenizer.save_pretrained("friday_1b_adapter")
 print("✅ QLoRA training complete!\n")
 
-# 6. Merge LoRA & Convert to 1.05 GB GGUF Q4_K_M
-print("🔄 Merging LoRA weights and converting to 2GB-VRAM GGUF...")
+# 6. Merge LoRA Directly on GPU & Convert to 1.05 GB GGUF Q4_K_M
+print("🔄 Merging LoRA weights directly on T4 GPU (Fast & Zero CPU RAM bloat)...")
 
-# 1. Cleanly remove Colab's outdated torchao package
 os.system("pip uninstall -y torchao > /dev/null 2>&1")
 for mod_name in list(sys.modules.keys()):
     if "torchao" in mod_name:
         del sys.modules[mod_name]
 
-# 2. Universal patch: force all peft modules to ignore torchao
 for mod_name, mod in list(sys.modules.items()):
     if mod_name.startswith("peft") and hasattr(mod, "is_torchao_available"):
         setattr(mod, "is_torchao_available", lambda: False)
 
-from peft import AutoPeftModelForCausalLM
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import PeftModel
 
-if "model" in locals():
-    del model
-if "trainer" in locals():
-    del trainer
-torch.cuda.empty_cache()
-gc.collect()
+MODEL_ID = "HuggingFaceTB/SmolLM2-1.7B-Instruct"
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 
 try:
-    merged_model = AutoPeftModelForCausalLM.from_pretrained(
-        "friday_1b_adapter",
-        device_map="cpu",
+    base = AutoModelForCausalLM.from_pretrained(
+        MODEL_ID,
+        device_map="cuda",
         dtype=torch.float16,
         low_cpu_mem_usage=True
     )
-    merged = merged_model.merge_and_unload()
-except Exception as e:
-    print(f"Falling back to direct PEFT merge: {e}")
-    from transformers import AutoModelForCausalLM
-    from peft import PeftModel
-    try:
-        base = AutoModelForCausalLM.from_pretrained(
-            "HuggingFaceTB/SmolLM2-1.7B-Instruct",
-            device_map="cpu",
-            dtype=torch.float16,
-            low_cpu_mem_usage=True
-        )
-    except TypeError:
-        base = AutoModelForCausalLM.from_pretrained(
-            "HuggingFaceTB/SmolLM2-1.7B-Instruct",
-            device_map="cpu",
-            torch_dtype=torch.float16,
-            low_cpu_mem_usage=True
-        )
-    peft_m = PeftModel.from_pretrained(base, "friday_1b_adapter")
-    merged = peft_m.merge_and_unload()
+except TypeError:
+    base = AutoModelForCausalLM.from_pretrained(
+        MODEL_ID,
+        device_map="cuda",
+        torch_dtype=torch.float16,
+        low_cpu_mem_usage=True
+    )
 
+peft_m = PeftModel.from_pretrained(base, "friday_1b_adapter")
+merged = peft_m.merge_and_unload()
 merged.save_pretrained("friday_1b_merged")
 tokenizer.save_pretrained("friday_1b_merged")
 
-if "merged_model" in locals():
-    del merged_model
+del peft_m
 del merged
+del base
+torch.cuda.empty_cache()
 gc.collect()
+print("✅ Merged weights saved to friday_1b_merged/\n")
+
+# Ensure llama-quantize is compiled
+if not os.path.exists("llama.cpp/build/bin/llama-quantize"):
+    os.system("cmake -B llama.cpp/build llama.cpp -DGGML_CUDA=OFF > /dev/null 2>&1")
+    os.system("cmake --build llama.cpp/build --target llama-quantize -j4 > /dev/null 2>&1")
 
 print("🔨 Converting merged model to intermediate GGUF f16...")
 os.system("python llama.cpp/convert_hf_to_gguf.py friday_1b_merged --outtype f16 --outfile friday_1b_f16.gguf")
