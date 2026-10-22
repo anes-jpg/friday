@@ -9,6 +9,7 @@
 import os
 import sys
 import gc
+import re
 import glob
 import json
 import subprocess
@@ -180,54 +181,53 @@ def apply_chat_template(sample):
 
 train_dataset = raw_dataset["train"].map(apply_chat_template)
 
+def safe_init(cls, **kwargs):
+    while True:
+        try:
+            return cls(**kwargs)
+        except TypeError as e:
+            msg = str(e)
+            if "unexpected keyword argument" in msg:
+                m = re.search(r"'(\w+)'", msg)
+                if m and m.group(1) in kwargs:
+                    kwargs.pop(m.group(1))
+                    continue
+            raise
+
+args_dict = dict(
+    output_dir="friday_1b_adapter",
+    num_train_epochs=3,
+    per_device_train_batch_size=4,
+    gradient_accumulation_steps=2,
+    learning_rate=2e-4,
+    lr_scheduler_type="cosine",
+    warmup_steps=10,
+    logging_steps=25,
+    save_strategy="no",
+    fp16=True,
+    dataset_text_field="text",
+    max_seq_length=1024,
+    optim="paged_adamw_8bit",
+    report_to="none"
+)
+
 try:
     from trl import SFTConfig
-    training_args = SFTConfig(
-        output_dir="friday_1b_adapter",
-        num_train_epochs=3,
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=2,
-        learning_rate=2e-4,
-        lr_scheduler_type="cosine",
-        warmup_ratio=0.05,
-        logging_steps=25,
-        save_strategy="no",
-        fp16=True,
-        dataset_text_field="text",
-        max_seq_length=1024,
-        optim="paged_adamw_8bit",
-        report_to="none"
-    )
-    trainer = SFTTrainer(
-        model=model,
-        train_dataset=train_dataset,
-        processing_class=tokenizer,
-        args=training_args,
-    )
+    training_args = safe_init(SFTConfig, **args_dict)
 except (ImportError, TypeError):
     from transformers import TrainingArguments
-    training_args = TrainingArguments(
-        output_dir="friday_1b_adapter",
-        num_train_epochs=3,
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=2,
-        learning_rate=2e-4,
-        lr_scheduler_type="cosine",
-        warmup_ratio=0.05,
-        logging_steps=25,
-        save_strategy="no",
-        fp16=True,
-        optim="paged_adamw_8bit",
-        report_to="none"
-    )
-    trainer = SFTTrainer(
-        model=model,
-        train_dataset=train_dataset,
-        dataset_text_field="text",
-        max_seq_length=1024,
-        tokenizer=tokenizer,
-        args=training_args,
-    )
+    training_args = safe_init(TrainingArguments, **args_dict)
+
+trainer = safe_init(
+    SFTTrainer,
+    model=model,
+    train_dataset=train_dataset,
+    dataset_text_field="text",
+    max_seq_length=1024,
+    processing_class=tokenizer,
+    tokenizer=tokenizer,
+    args=training_args,
+)
 
 trainer.train()
 trainer.model.save_pretrained("friday_1b_adapter")
