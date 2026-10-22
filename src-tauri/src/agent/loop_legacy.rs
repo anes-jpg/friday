@@ -53,11 +53,13 @@ pub struct AgentCore {
     pub phrase_bank: Arc<PhraseBank>,
     pub fact_retriever: Arc<FactRetriever>,
     pub hotwords: Arc<Mutex<HotwordsEngine>>,
+    pub semantic_cache: Arc<crate::memory::SemanticCache>,
 }
 
 impl AgentCore {
     pub fn new(db: Arc<Mutex<Database>>, glm_config: GlmConfig) -> Self {
         let fact_retriever = Arc::new(FactRetriever::new(db.clone()));
+        let semantic_cache = Arc::new(crate::memory::SemanticCache::new(db.clone()));
 
         // Ingest existing memory facts into Hotwords biasing engine (§04)
         let mut hw = HotwordsEngine::new();
@@ -91,6 +93,7 @@ impl AgentCore {
             phrase_bank: Arc::new(PhraseBank::new()),
             fact_retriever,
             hotwords,
+            semantic_cache,
         }
     }
 
@@ -215,6 +218,57 @@ impl AgentCore {
             // Require at least 2 distinct operator domain signals (e.g. web + code, or code + memory + report)
             has_operator_signals >= 2
         };
+
+        // Tier 1: Deterministic Action Engine & Semantic Router (<15ms, 0 tokens, 0 cloud calls)
+        if !is_complex_goal {
+            if let Some(intent) = crate::agent::semantic_router::SemanticRouter::route(clean_utt) {
+                let action_res = match intent {
+                    crate::agent::semantic_router::LocalIntent::Media(cmd) => {
+                        crate::agent::local_actions::LocalActionEngine::handle_media(&cmd)
+                    }
+                    crate::agent::semantic_router::LocalIntent::SystemVitals(target) => {
+                        crate::agent::local_actions::LocalActionEngine::handle_vitals(&target)
+                    }
+                    crate::agent::semantic_router::LocalIntent::Git(action) => {
+                        crate::agent::local_actions::LocalActionEngine::handle_git(&action)
+                    }
+                    crate::agent::semantic_router::LocalIntent::WindowFocus(target) => {
+                        crate::agent::local_actions::LocalActionEngine::handle_window_focus(&target)
+                    }
+                    crate::agent::semantic_router::LocalIntent::Clipboard(action) => {
+                        crate::agent::local_actions::LocalActionEngine::handle_clipboard(&action)
+                    }
+                    crate::agent::semantic_router::LocalIntent::SpatialHud(action) => {
+                        crate::agent::local_actions::LocalActionEngine::handle_spatial_hud(&action)
+                    }
+                };
+
+                if let Ok(res) = action_res {
+                    let elapsed = start.elapsed().as_millis() as u64;
+                    self.record_turn_to_db(&res.say, &res.show, elapsed);
+                    self.semantic_cache.store(clean_utt, &res.say, &res.show, Some(&res.tool_name));
+
+                    let tool_res = crate::tools::ToolExecutionResult {
+                        tool_name: res.tool_name.clone(),
+                        output: serde_json::json!({ "result": res.say }),
+                        duration_ms: res.latency_ms,
+                        tier: crate::tools::RiskTier::Green,
+                        allowed: true,
+                        args: serde_json::Value::Null,
+                    };
+
+                    return Ok(TurnResult {
+                        say: res.say,
+                        show: res.show,
+                        pending_plan: None,
+                        tool_calls: vec![tool_res],
+                        latency_ms: elapsed,
+                        ttft_ms: elapsed.min(5),
+                        tokens: 0,
+                    });
+                }
+            }
+        }
 
         // Check if user is asserting a preference / fact to remember (§06 Semantic Memory)
         if !is_complex_goal {
@@ -433,6 +487,38 @@ impl AgentCore {
                         tokens: 30,
                     });
                 }
+            }
+        }
+
+        // Tier 1.5: SQLite Semantic Cache Lookup (<5ms, 0 tokens, 0 cloud calls)
+        if !is_complex_goal {
+            if let Some(cached) = self.semantic_cache.lookup(clean_utt) {
+                let elapsed = start.elapsed().as_millis() as u64;
+                self.record_turn_to_db(&cached.say, &cached.show, elapsed);
+
+                let tool_calls = cached
+                    .tool_name
+                    .map(|t| {
+                        vec![crate::tools::ToolExecutionResult {
+                            tool_name: t,
+                            output: serde_json::json!({ "cached": true }),
+                            duration_ms: 1,
+                            tier: crate::tools::RiskTier::Green,
+                            allowed: true,
+                            args: serde_json::Value::Null,
+                        }]
+                    })
+                    .unwrap_or_default();
+
+                return Ok(TurnResult {
+                    say: cached.say,
+                    show: format!("{}\n\n*⚡ Served from on-device Semantic Cache (0 cloud tokens)*", cached.show),
+                    pending_plan: None,
+                    tool_calls,
+                    latency_ms: elapsed,
+                    ttft_ms: elapsed.min(5),
+                    tokens: 0,
+                });
             }
         }
 
@@ -2087,6 +2173,7 @@ impl AgentCore {
 
         let elapsed = start.elapsed().as_millis() as u64;
         self.record_turn_to_db(&final_say, &final_show, elapsed);
+        self.semantic_cache.store(clean_utt, &final_say, &final_show, None);
 
         Ok(TurnResult {
             say: final_say,
@@ -3815,6 +3902,60 @@ mod tests {
         assert!(show.contains("### PDF Document: Lenovo ThinkPad T590 Datasheet"));
         assert!(show.contains("- **Pages**: 1 pages indexed"));
         assert!(!show.contains("%PDF"));
+    }
+
+    #[tokio::test]
+    async fn test_agent_local_action_tier_1_offloading() {
+        let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+        let agent = AgentCore::new(db, GlmConfig::default());
+
+        // 1. Media Control
+        let res_media = agent.execute_turn("mute", "command").await.unwrap();
+        assert_eq!(res_media.tokens, 0);
+        assert_eq!(res_media.tool_calls.len(), 1);
+        assert_eq!(res_media.tool_calls[0].tool_name, "media.control");
+
+        // 2. Hardware Vitals (GPU)
+        let res_vitals = agent.execute_turn("gpu temp", "command").await.unwrap();
+        assert_eq!(res_vitals.tokens, 0);
+        assert_eq!(res_vitals.tool_calls.len(), 1);
+        assert_eq!(res_vitals.tool_calls[0].tool_name, "hardware.gpu");
+
+        // 3. Git Operations
+        let res_git = agent.execute_turn("what branch am i on", "command").await.unwrap();
+        assert_eq!(res_git.tokens, 0);
+        assert_eq!(res_git.tool_calls.len(), 1);
+        assert_eq!(res_git.tool_calls[0].tool_name, "git.branch");
+
+        // 4. Spatial HUD
+        let res_hud = agent.execute_turn("open gods eye", "command").await.unwrap();
+        assert_eq!(res_hud.tokens, 0);
+        assert_eq!(res_hud.tool_calls.len(), 1);
+        assert_eq!(res_hud.tool_calls[0].tool_name, "os.godseye");
+    }
+
+    #[tokio::test]
+    async fn test_agent_semantic_cache_tier_1_5_offloading() {
+        let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+        let agent = AgentCore::new(db, GlmConfig::default());
+
+        // Prime the cache
+        agent.semantic_cache.store(
+            "explain rust ownership rules in two sentences",
+            "Each value has an owner. When the owner goes out of scope, the value is dropped.",
+            "### Rust Ownership\n- Unique owner\n- Automatic drop",
+            None,
+        );
+
+        // Turn matching prime
+        let res = agent
+            .execute_turn("explain rust ownership rules in two sentences", "command")
+            .await
+            .unwrap();
+
+        assert_eq!(res.tokens, 0);
+        assert!(res.say.contains("Each value has an owner"));
+        assert!(res.show.contains("Served from on-device Semantic Cache"));
     }
 }
 

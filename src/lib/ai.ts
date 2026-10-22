@@ -85,24 +85,23 @@ export async function executeAiTurn(
   const startTime = performance.now()
   const cleanPrompt = userPrompt.trim()
 
-  // 1. Try Desktop Tauri IPC Backend first if running in Tauri
-  if (isDesktop) {
-    try {
-      interface BackendTurnRes {
-        say: string
-        show: string
-        latency_ms?: number
-        ttft_ms?: number
-        tokens?: number
-        model?: string
-        tool_calls?: Array<Record<string, unknown>>
-        pending_plan?: PendingPlanBackend | null
-      }
+  // 1. Try Desktop Tauri IPC Backend (or test mock runner)
+  try {
+    interface BackendTurnRes {
+      say: string
+      show: string
+      latency_ms?: number
+      ttft_ms?: number
+      tokens?: number
+      model?: string
+      tool_calls?: Array<Record<string, unknown>>
+      pending_plan?: PendingPlanBackend | null
+    }
 
-      const res = await invokeCommand<BackendTurnRes>("submit_utterance", {
-        utterance: cleanPrompt,
-        mode,
-      })
+    const res = await invokeCommand<BackendTurnRes>("submit_utterance", {
+      utterance: cleanPrompt,
+      mode,
+    })
 
       if (res && (res.say || res.show)) {
         const totalMs = Math.round(performance.now() - startTime)
@@ -110,9 +109,9 @@ export async function executeAiTurn(
           say: res.say || "All set.",
           show: res.show || res.say,
           emotion: "focused",
-          model: res.model || "glm-5.3",
-          tokens: res.tokens || 60,
-          ttftMs: res.ttft_ms || 250,
+          model: res.model || (res.tokens === 0 ? "on-device-engine" : "glm-5.3"),
+          tokens: typeof res.tokens === "number" ? res.tokens : 60,
+          ttftMs: typeof res.ttft_ms === "number" ? res.ttft_ms : 250,
           totalMs,
           pendingPlan: res.pending_plan || null,
           toolCalls: (res.tool_calls || []).map((tc, i) => {
@@ -136,7 +135,6 @@ export async function executeAiTurn(
     } catch (e) {
       console.warn("[FRIDAY AI] Native IPC failed, falling back to direct HTTP:", e)
     }
-  }
 
   // 2. Direct HTTP / Browser Execution
   const config = getAiConfig()

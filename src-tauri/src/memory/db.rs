@@ -80,6 +80,19 @@ pub struct DbSkill {
     pub enabled: bool,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DbSemanticCacheEntry {
+    pub id: String,
+    pub query_hash: String,
+    pub prompt: String,
+    pub say: String,
+    pub show: String,
+    pub tool_name: Option<String>,
+    pub hit_count: i64,
+    pub created_at: i64,
+    pub last_accessed_at: i64,
+}
+
 pub struct Database {
     conn: Connection,
 }
@@ -230,6 +243,18 @@ impl Database {
                 duration_secs INTEGER NOT NULL DEFAULT 0
             );
 
+            CREATE TABLE IF NOT EXISTS semantic_cache (
+                id TEXT PRIMARY KEY,
+                query_hash TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                say TEXT NOT NULL,
+                show TEXT NOT NULL,
+                tool_name TEXT,
+                hit_count INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL,
+                last_accessed_at INTEGER NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id);
             CREATE INDEX IF NOT EXISTS idx_messages_thread_time ON messages(thread_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
@@ -240,6 +265,8 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_automations_enabled ON automations(enabled);
             CREATE INDEX IF NOT EXISTS idx_skills_enabled ON skills(enabled);
             CREATE INDEX IF NOT EXISTS idx_episodic_created ON episodic_timeline(created_at);
+            CREATE INDEX IF NOT EXISTS idx_semantic_cache_hash ON semantic_cache(query_hash);
+            CREATE INDEX IF NOT EXISTS idx_semantic_cache_accessed ON semantic_cache(last_accessed_at);
             "#,
         )?;
         let _ = self
@@ -1132,6 +1159,119 @@ impl Database {
         }
         Ok(events)
     }
+
+    pub fn get_semantic_cache_by_hash(&self, query_hash: &str) -> Result<Option<DbSemanticCacheEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, query_hash, prompt, say, show, tool_name, hit_count, created_at, last_accessed_at
+             FROM semantic_cache
+             WHERE query_hash = ?1
+             LIMIT 1",
+        )?;
+        let mut rows = stmt.query_map(params![query_hash], |row| {
+            Ok(DbSemanticCacheEntry {
+                id: row.get(0)?,
+                query_hash: row.get(1)?,
+                prompt: row.get(2)?,
+                say: row.get(3)?,
+                show: row.get(4)?,
+                tool_name: row.get(5)?,
+                hit_count: row.get(6)?,
+                created_at: row.get(7)?,
+                last_accessed_at: row.get(8)?,
+            })
+        })?;
+        if let Some(r) = rows.next() {
+            Ok(Some(r?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn record_semantic_cache_hit(&self, id: &str) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        self.conn.execute(
+            "UPDATE semantic_cache 
+             SET hit_count = hit_count + 1, last_accessed_at = ?1 
+             WHERE id = ?2",
+            params![now, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn store_semantic_cache(&self, entry: &DbSemanticCacheEntry) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO semantic_cache (id, query_hash, prompt, say, show, tool_name, hit_count, created_at, last_accessed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(id) DO UPDATE SET
+                say = excluded.say,
+                show = excluded.show,
+                tool_name = excluded.tool_name,
+                last_accessed_at = excluded.last_accessed_at",
+            params![
+                entry.id,
+                entry.query_hash,
+                entry.prompt,
+                entry.say,
+                entry.show,
+                entry.tool_name,
+                entry.hit_count,
+                entry.created_at,
+                entry.last_accessed_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_recent_semantic_cache(&self, limit: usize) -> Result<Vec<DbSemanticCacheEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, query_hash, prompt, say, show, tool_name, hit_count, created_at, last_accessed_at
+             FROM semantic_cache
+             ORDER BY last_accessed_at DESC
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |row| {
+            Ok(DbSemanticCacheEntry {
+                id: row.get(0)?,
+                query_hash: row.get(1)?,
+                prompt: row.get(2)?,
+                say: row.get(3)?,
+                show: row.get(4)?,
+                tool_name: row.get(5)?,
+                hit_count: row.get(6)?,
+                created_at: row.get(7)?,
+                last_accessed_at: row.get(8)?,
+            })
+        })?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    pub fn prune_semantic_cache(&self, max_entries: usize) -> Result<usize> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM semantic_cache",
+            [],
+            |r| r.get(0),
+        ).unwrap_or(0);
+
+        if count > max_entries as i64 {
+            let to_delete = count - max_entries as i64;
+            let deleted = self.conn.execute(
+                "DELETE FROM semantic_cache WHERE id IN (
+                    SELECT id FROM semantic_cache ORDER BY last_accessed_at ASC LIMIT ?1
+                )",
+                params![to_delete],
+            )?;
+            Ok(deleted)
+        } else {
+            Ok(0)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1247,5 +1387,47 @@ mod tests {
         assert!(!remaining_threads.iter().any(|t| t.id == "thread-test-1"));
         let remaining_messages = db.get_messages_for_thread("thread-test-1").unwrap();
         assert!(remaining_messages.is_empty());
+    }
+
+    #[test]
+    fn test_semantic_cache_crud() {
+        let db = Database::open_in_memory().unwrap();
+
+        let entry = DbSemanticCacheEntry {
+            id: "cache-1".to_string(),
+            query_hash: "hash_calc_loan".to_string(),
+            prompt: "calculate loan payment".to_string(),
+            say: "Here is your loan calculation.".to_string(),
+            show: "### Loan Breakdown".to_string(),
+            tool_name: Some("openui.loan".to_string()),
+            hit_count: 1,
+            created_at: 1000,
+            last_accessed_at: 1000,
+        };
+
+        // Store
+        assert!(db.store_semantic_cache(&entry).is_ok());
+
+        // Retrieve
+        let retrieved = db.get_semantic_cache_by_hash("hash_calc_loan").unwrap();
+        assert!(retrieved.is_some());
+        let cached = retrieved.unwrap();
+        assert_eq!(cached.id, "cache-1");
+        assert_eq!(cached.prompt, "calculate loan payment");
+        assert_eq!(cached.hit_count, 1);
+
+        // Record hit
+        assert!(db.record_semantic_cache_hit("cache-1").is_ok());
+        let updated = db.get_semantic_cache_by_hash("hash_calc_loan").unwrap().unwrap();
+        assert_eq!(updated.hit_count, 2);
+
+        // Recent entries
+        let recent = db.get_recent_semantic_cache(10).unwrap();
+        assert_eq!(recent.len(), 1);
+
+        // Pruning when max_entries = 0
+        let deleted = db.prune_semantic_cache(0).unwrap();
+        assert_eq!(deleted, 1);
+        assert!(db.get_semantic_cache_by_hash("hash_calc_loan").unwrap().is_none());
     }
 }

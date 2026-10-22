@@ -1,18 +1,22 @@
 pub mod beast;
 pub mod browser;
 pub mod legion;
+pub mod local_actions;
 pub mod loop_legacy;
 pub mod machine;
 pub mod mcp_client;
 pub mod overwatch;
 pub mod perception;
 pub mod review;
+pub mod semantic_router;
 
 pub use beast::*;
 pub use browser::*;
 pub use legion::*;
+pub use local_actions::*;
 pub use loop_legacy::*;
 pub use machine::*;
 pub use overwatch::*;
 pub use perception::*;
 pub use review::*;
+pub use semantic_router::*;

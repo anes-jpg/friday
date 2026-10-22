@@ -244,6 +244,51 @@ export async function invokeCommand<T>(cmd: string, args?: Record<string, unknow
       findings: [],
     } as unknown as T
   }
+  if (cmd === "submit_utterance") {
+    const utt = String(args?.utterance || "").toLowerCase().trim()
+    if (utt === "mute" || utt.includes("volume") || utt.includes("play")) {
+      return {
+        say: "Audio toggled.",
+        show: "### Media Control Actuated\n- Action: Media Control\n- Latency: < 2 ms\n- Tokens Used: 0 (Local Engine)",
+        pending_plan: null,
+        tool_calls: [{ tool_name: "media.control", output: { result: "ok" }, duration_ms: 2, tier: "green", allowed: true }],
+        latency_ms: 2,
+        ttft_ms: 2,
+        tokens: 0,
+      } as unknown as T
+    }
+    if (utt.includes("gpu") || utt.includes("ram") || utt.includes("vitals")) {
+      return {
+        say: "GPU is running at 42 degrees Celsius.",
+        show: "### GPU Telemetry · On-Device Sensor\n- Temp: 42°C\n*Zero cloud API tokens used*",
+        pending_plan: null,
+        tool_calls: [{ tool_name: "hardware.gpu", output: { result: "ok" }, duration_ms: 3, tier: "green", allowed: true }],
+        latency_ms: 3,
+        ttft_ms: 3,
+        tokens: 0,
+      } as unknown as T
+    }
+    if (utt.includes("branch") || utt.includes("git status")) {
+      return {
+        say: "You are currently on the master branch.",
+        show: "### Git Status · Branch `master`\n*(working tree clean)*",
+        pending_plan: null,
+        tool_calls: [{ tool_name: "git.branch", output: { result: "ok" }, duration_ms: 4, tier: "green", allowed: true }],
+        latency_ms: 4,
+        ttft_ms: 4,
+        tokens: 0,
+      } as unknown as T
+    }
+    return {
+      say: "Processed successfully.",
+      show: "### Operation Completed",
+      pending_plan: null,
+      tool_calls: [],
+      latency_ms: 120,
+      ttft_ms: 80,
+      tokens: 45,
+    } as unknown as T
+  }
 
   return null as unknown as T
 }
