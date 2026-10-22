@@ -147,13 +147,23 @@ bnb_config = BitsAndBytesConfig(
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 tokenizer.pad_token = tokenizer.eos_token
 
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_ID,
-    quantization_config=bnb_config,
-    torch_dtype=torch.float16,
-    device_map="auto",
-    trust_remote_code=True
-)
+try:
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_ID,
+        quantization_config=bnb_config,
+        dtype=torch.float16,
+        device_map="auto",
+        trust_remote_code=True
+    )
+except TypeError:
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_ID,
+        quantization_config=bnb_config,
+        torch_dtype=torch.float16,
+        device_map="auto",
+        trust_remote_code=True
+    )
+
 model = prepare_model_for_kbit_training(model)
 
 peft_config = LoraConfig(
@@ -250,24 +260,49 @@ print("✅ QLoRA training complete!\n")
 
 # 6. Merge LoRA & Convert to 1.05 GB GGUF Q4_K_M
 print("🔄 Merging LoRA weights and converting to 2GB-VRAM GGUF...")
+
+# Bypass Colab's outdated torchao conflict
+try:
+    import peft.import_utils
+    peft.import_utils.is_torchao_available = lambda: False
+except Exception:
+    pass
+
 from peft import AutoPeftModelForCausalLM
 
-del model
-del trainer
+if "model" in locals():
+    del model
+if "trainer" in locals():
+    del trainer
 torch.cuda.empty_cache()
 gc.collect()
 
-merged_model = AutoPeftModelForCausalLM.from_pretrained(
-    "friday_1b_adapter",
-    device_map="cpu",
-    torch_dtype=torch.float16,
-    low_cpu_mem_usage=True
-)
-merged = merged_model.merge_and_unload()
+try:
+    merged_model = AutoPeftModelForCausalLM.from_pretrained(
+        "friday_1b_adapter",
+        device_map="cpu",
+        dtype=torch.float16,
+        low_cpu_mem_usage=True
+    )
+    merged = merged_model.merge_and_unload()
+except Exception as e:
+    print(f"Falling back to direct PEFT merge: {e}")
+    from transformers import AutoModelForCausalLM
+    from peft import PeftModel
+    base = AutoModelForCausalLM.from_pretrained(
+        "HuggingFaceTB/SmolLM2-1.7B-Instruct",
+        device_map="cpu",
+        dtype=torch.float16,
+        low_cpu_mem_usage=True
+    )
+    peft_m = PeftModel.from_pretrained(base, "friday_1b_adapter")
+    merged = peft_m.merge_and_unload()
+
 merged.save_pretrained("friday_1b_merged")
 tokenizer.save_pretrained("friday_1b_merged")
 
-del merged_model
+if "merged_model" in locals():
+    del merged_model
 del merged
 gc.collect()
 
