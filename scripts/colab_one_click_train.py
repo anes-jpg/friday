@@ -214,7 +214,7 @@ args_dict = dict(
     warmup_steps=10,
     logging_steps=25,
     save_strategy="no",
-    fp16=True,
+    fp16=False,
     bf16=False,
     dataset_text_field="text",
     max_seq_length=1024,
@@ -239,6 +239,9 @@ trainer = safe_init(
     tokenizer=tokenizer,
     args=training_args,
 )
+
+if hasattr(trainer, "accelerator") and hasattr(trainer.accelerator, "scaler"):
+    trainer.accelerator.scaler = None
 
 trainer.train()
 trainer.model.save_pretrained("friday_1b_adapter")
