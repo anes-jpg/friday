@@ -3,6 +3,26 @@ use crate::providers::models::{test_model_ping, AiModel, ModelStatus};
 use serde_json::Value;
 use std::time::Instant;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserves_local_and_openai_compatible_provider_routes() {
+        let mut models = crate::providers::models::get_default_models_fleet();
+        let mut local = models[0].clone();
+        local.id = "legacy-local".into();
+        local.name = "friday-1b-operator".into();
+        local.base_url = "http://127.0.0.1:11434/v1".into();
+        models.push(local.clone());
+        let mut router = AiRouter::new(models);
+        router.models.push(local);
+        assert!(router.set_active_model("legacy-local").is_ok());
+        assert!(router.select_execution_candidates().iter().any(|m| m.id == "legacy-local"));
+        assert!(router.select_execution_candidates().iter().any(|m| m.name.starts_with("gpt-")));
+    }
+}
+
 #[derive(Clone)]
 pub struct AiRouter {
     pub models: Vec<AiModel>,
@@ -11,6 +31,11 @@ pub struct AiRouter {
 
 impl AiRouter {
     pub fn new(initial_models: Vec<AiModel>) -> Self {
+        let mut initial_models: Vec<AiModel> = initial_models.into_iter().filter(|m| crate::providers::glm::validate_provider_config(&m.base_url, &m.name).is_ok()).collect();
+        if initial_models.is_empty() { initial_models = crate::providers::models::get_default_models_fleet(); }
+        if !initial_models.iter().any(|m| m.is_active) {
+            if let Some(first) = initial_models.first_mut() { first.is_active = true; }
+        }
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(60))
             .tcp_keepalive(std::time::Duration::from_secs(30))
@@ -39,6 +64,9 @@ impl AiRouter {
     }
 
     pub fn set_active_model(&mut self, id: &str) -> Result<(), String> {
+        if let Some(model) = self.models.iter().find(|m| m.id == id) {
+            crate::providers::glm::validate_provider_config(&model.base_url, &model.name)?;
+        }
         let exists = self.models.iter().any(|m| m.id == id);
         if !exists {
             return Err(format!("Model '{}' not found in fleet", id));
@@ -92,21 +120,21 @@ impl AiRouter {
 
         // 1. Primary active model (skip if marked NoTraffic)
         if let Some(active) = self.get_active_model() {
-            if active.status != ModelStatus::NoTraffic {
+            if active.status != ModelStatus::NoTraffic && crate::providers::glm::validate_provider_config(&active.base_url, &active.name).is_ok() {
                 candidates.push(active.clone());
             }
         }
 
         // 2. Normal status models as fallback
         for m in &self.models {
-            if candidates.iter().all(|c| c.id != m.id) && m.status == ModelStatus::Normal {
+            if candidates.iter().all(|c| c.id != m.id) && m.status == ModelStatus::Normal && crate::providers::glm::validate_provider_config(&m.base_url, &m.name).is_ok() {
                 candidates.push(m.clone());
             }
         }
 
         // 3. Demoted models if no Normal model exists
         for m in &self.models {
-            if candidates.iter().all(|c| c.id != m.id) && m.status == ModelStatus::Demote {
+            if candidates.iter().all(|c| c.id != m.id) && m.status == ModelStatus::Demote && crate::providers::glm::validate_provider_config(&m.base_url, &m.name).is_ok() {
                 candidates.push(m.clone());
             }
         }
@@ -174,16 +202,16 @@ impl AiRouter {
                 .api_key
                 .as_deref()
                 .filter(|k| !k.trim().is_empty())
-                .unwrap_or(global_key);
+                .unwrap_or(if candidate.provider.starts_with("profile:") { "" } else { global_key });
 
             let config = GlmConfig {
-                base_url: candidate.base_url.clone(),
-                api_key: key.to_string(),
-                heavy_model: candidate.name.clone(),
-                light_model: candidate.name.clone(),
+                base_url: candidate.base_url.clone(), api_key: key.to_string(),
+                heavy_model: if candidate.provider == "local_edge" { candidate.id.clone() } else { candidate.name.clone() },
+                light_model: if candidate.provider == "local_edge" { candidate.id.clone() } else { candidate.name.clone() },
             };
 
-            let provider = GlmProvider::with_client(config, self.http.clone());
+            let mut provider = GlmProvider::with_client(config, self.http.clone());
+            provider.isolated_credentials = candidate.provider.starts_with("profile:");
             let start = Instant::now();
 
             match provider

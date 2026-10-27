@@ -19,7 +19,7 @@ An intelligent, voice-first desktop operator and spatial AI companion for Window
 ## 📐 The Three Design Laws
 
 - **Surface Law**: Rounded rectangles on an 8px grid (radius 16px for containers, 8px for controls). Surfaces sit on Mica (Windows 11) or Acrylic (Windows 10).
-- **One-Signal Law**: The accent color `--color-acid: oklch(78% 0.19 152)` appears at most twice per viewport and only signifies that FRIDAY is actively doing something (listening, thinking, streaming, or executing).
+- **One-Signal Law**: Preserve the violet accent `--color-acid: oklch(68.5% 0.205 285.5)` and the existing Atmospheric Halftone OS interface. Use neutral completion tones; no green styling.
 - **Sub-Frame Law**: All transitions are 120–220ms, transform and opacity only, using `cubic-bezier(0.22, 1, 0.36, 1)`. `prefers-reduced-motion` collapses transitions to opacity fades. The 2D Canvas Orb and WebGL2 map burn **0% CPU** in Idle state.
 
 ---

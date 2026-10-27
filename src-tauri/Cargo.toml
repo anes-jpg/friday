@@ -59,10 +59,12 @@ sqlite-vec = "0.1"
 refinery = "0.8"                 # migrations
 
 # platform
-keyring = "3"                    # Windows Credential Manager
+keyring = { version = "3", features = ["windows-native"] }                    # Windows Credential Manager
 enigo   = "0.2"                  # keyboard/mouse synthesis
 notify  = "6"                    # file watch triggers
 tokio-cron-scheduler = "0.11"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+chrono-tz = "0.10"
 
 # core
 tokio = { version = "1", features = ["full"] }

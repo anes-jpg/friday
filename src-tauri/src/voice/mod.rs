@@ -1,4 +1,5 @@
 pub mod capture;
+pub mod discovery;
 pub mod directives;
 pub mod hotwords;
 pub mod normalize;

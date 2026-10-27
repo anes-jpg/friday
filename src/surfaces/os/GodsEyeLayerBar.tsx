@@ -70,7 +70,7 @@ export const GodsEyeLayerBar: React.FC<GodsEyeLayerBarProps> = ({
   return (
     <div
       className={cn(
-        "flex items-center gap-1.5 p-1 rounded-[var(--radius-panel)] border border-black/10 dark:border-white/10 bg-[#090A0C]/90 backdrop-blur-md shadow-lg select-none",
+        "flex items-center gap-1.5 p-1.5 rounded-2xl border border-white/10 bg-[#141416]/90 backdrop-blur-2xl shadow-2xl select-none",
         className
       )}
     >
@@ -85,17 +85,17 @@ export const GodsEyeLayerBar: React.FC<GodsEyeLayerBarProps> = ({
             type="button"
             onClick={() => onToggleLayer(layer.id)}
             className={cn(
-              "flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--radius-control)] text-xs font-medium transition-all cursor-pointer",
+              "flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-medium transition-all cursor-pointer whitespace-nowrap",
               isActive
-                ? "bg-[hsl(var(--signal))]/15 border border-[hsl(var(--signal))]/30 text-[hsl(var(--signal))] shadow-xs"
-                : "text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))] hover:bg-white/5 border border-transparent"
+                ? "bg-white/20 border border-white/25 text-white shadow-xs"
+                : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5 border border-transparent"
             )}
             title={`Toggle ${layer.label}`}
           >
-            <Icon className="size-3.5" />
+            <Icon className={cn("size-3.5", isActive ? "text-white" : "text-zinc-400")} />
             <span>{layer.label}</span>
             {count !== undefined && count > 0 && (
-              <span className="font-mono text-[9px] px-1 rounded bg-black/40 text-[hsl(var(--muted))] tabular-nums">
+              <span className="font-mono text-[9px] px-1 py-0.5 rounded bg-black/60 text-zinc-300 tabular-nums">
                 {count}
               </span>
             )}

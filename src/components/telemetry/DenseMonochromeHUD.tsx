@@ -452,11 +452,11 @@ export const DenseMonochromeHUD: React.FC<DenseMonochromeHUDProps> = ({
               </div>
               <div className="flex items-center justify-between bg-black/40 border border-white/5 p-1.5 rounded">
                 <span>NAME // asr-sensor</span>
-                <span className="text-emerald-400 font-bold">Ok</span>
+                <span className="text-[hsl(var(--success))] font-bold">Ok</span>
               </div>
               <div className="flex items-center justify-between bg-black/40 border border-white/5 p-1.5 rounded">
                 <span>NAME // glm_stream</span>
-                <span className="text-emerald-400 font-bold">Ok</span>
+                <span className="text-[hsl(var(--success))] font-bold">Ok</span>
               </div>
             </div>
           </div>

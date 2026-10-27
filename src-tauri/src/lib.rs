@@ -5,6 +5,10 @@ pub mod scheduler;
 pub mod skills;
 pub mod tools;
 pub mod voice;
+pub mod settings;
+pub mod workspace_commands;
+pub mod places;
+pub mod health;
 
 use agent::{AgentCore, PendingPlan, TurnResult};
 use memory::db::{Database, DbAuditEntry, DbAutomation, DbFact, DbMessage, DbSkill, DbThread};
@@ -21,6 +25,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 use voice::AudioCaptureManager;
 
 pub struct AppState {
+    pub places: Arc<places::NativePlaceService>,
     pub agent: Arc<AgentCore>, // Keeping legacy for now in case of deep dependencies
     pub kernel: Arc<crate::agent::machine::HarnessKernel>,
     pub audio_capture: Arc<AudioCaptureManager>,
@@ -55,15 +60,29 @@ pub struct AudioRmsResponse {
 async fn submit_utterance(
     utterance: String,
     mode: Option<String>,
+    request_id: Option<String>,
+    thread_id: Option<String>,
+    project_id: Option<String>,
+    provider_profile_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<TurnResult, String> {
     let mode_str = mode.unwrap_or_else(|| "command".to_string());
-    state.agent.execute_turn(&utterance, &mode_str).await
+    state.agent.execute_request(&utterance, &mode_str, agent::runs::RequestContext {request_id,thread_id,project_id,provider_profile_id}).await
 }
 
 #[tauri::command]
-async fn confirm_plan(plan_id: String, state: State<'_, AppState>) -> Result<PendingPlan, String> {
-    state.agent.confirm_plan(&plan_id).await.map(|(p, _)| p)
+async fn confirm_plan(plan_id: String, confirmation: Option<String>, state: State<'_, AppState>) -> Result<PendingPlan, String> {
+    let explicit = confirmation.as_deref().is_some_and(|value|value.trim().eq_ignore_ascii_case("confirm"));
+    state.agent.confirm_plan_explicit(&plan_id, explicit).await.map(|(p, _)| p)
+}
+
+#[tauri::command]
+fn cancel_run(run_id: String, state: State<'_,AppState>) -> Result<(),String> {state.agent.cancel_run(&run_id)}
+
+#[tauri::command]
+fn cancel_plan(plan_id: String,state:State<'_,AppState>) -> Result<(),String> {
+    let run_id=state.agent.db.lock().map_err(|e|e.to_string())?.approval_plan(&plan_id).map_err(|e|e.to_string())?.ok_or("Plan not found")?.0;
+    state.agent.cancel_run(&run_id)
 }
 
 #[tauri::command]
@@ -72,8 +91,9 @@ fn undo_last(state: State<'_, AppState>) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn start_mic_capture(state: State<'_, AppState>) -> Result<(), String> {
-    state.audio_capture.start_capture()
+async fn start_mic_capture(state: State<'_, AppState>) -> Result<(), String> {
+    let capture=state.audio_capture.clone();
+    tokio::task::spawn_blocking(move ||capture.start_capture()).await.map_err(|e|e.to_string())?
 }
 
 #[tauri::command]
@@ -81,11 +101,16 @@ fn stop_mic_capture(state: State<'_, AppState>) -> Result<(), String> {
     state.audio_capture.stop_capture();
     Ok(())
 }
+#[tauri::command]
+fn finish_mic_capture(state:State<'_,AppState>)->Result<(),String> {state.audio_capture.finish_capture()}
 
 #[tauri::command]
-fn start_listening(state: State<'_, AppState>) -> Result<(), String> {
-    state.audio_capture.start_capture()
+async fn start_listening(state: State<'_, AppState>) -> Result<(), String> {
+    start_mic_capture(state).await
 }
+
+#[tauri::command]
+fn get_speech_status(state:State<'_,AppState>)->Result<voice::capture::SpeechStatus,String> {state.audio_capture.status()}
 
 #[tauri::command]
 fn stop_listening(state: State<'_, AppState>) -> Result<(), String> {
@@ -104,6 +129,7 @@ fn get_audio_rms(state: State<'_, AppState>) -> AudioRmsResponse {
 #[tauri::command]
 fn barge_in(state: State<'_, AppState>) -> Result<(), String> {
     state.agent.phrase_bank.barge_in();
+    state.audio_capture.stop_capture();
     Ok(())
 }
 
@@ -124,9 +150,8 @@ fn start_wake_word(
     sensitivity: Option<f32>,
     state: State<'_, AppState>,
 ) -> Result<voice::WakeWordStatus, String> {
-    state.audio_capture.wake_word.enable(sensitivity);
-    state.audio_capture.ensure_stream_running()?;
-    Ok(state.audio_capture.wake_word.get_status())
+    let _=(sensitivity,state);
+    Err("Wake-word detector is unavailable. Use the microphone button or Alt+Shift.".into())
 }
 
 #[tauri::command]
@@ -359,13 +384,15 @@ fn get_automations(state: State<'_, AppState>) -> Result<Vec<DbAutomation>, Stri
 
 #[tauri::command]
 fn toggle_automation(id: String, state: State<'_, AppState>) -> Result<bool, String> {
-    state
-        .agent
-        .db
-        .lock()
-        .map_err(|e| e.to_string())?
-        .toggle_automation(&id)
-        .map_err(|e| e.to_string())
+    state.scheduler.toggle(&id)
+}
+#[tauri::command]
+fn create_automation(name: String, expr: String, tool: String, args: String, state: State<'_, AppState>) -> Result<DbAutomation, String> {
+    state.scheduler.create(name, expr, tool, args)
+}
+#[tauri::command]
+fn delete_automation(id: String, state: State<'_, AppState>) -> Result<bool, String> {
+    state.agent.db.lock().map_err(|e| e.to_string())?.delete_automation(&id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -467,76 +494,24 @@ fn update_glm_settings(
     api_key: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let clean_key = api_key
-        .as_ref()
-        .map(|k| k.trim())
-        .filter(|k| !k.is_empty() && !k.contains('•'));
-
-    // 1. Persist to SQLite settings table
-    if let Ok(db) = state.agent.db.lock() {
-        let _ = db.save_setting("glm_base_url", &base_url);
-        let _ = db.save_setting("glm_heavy_model", &heavy_model);
-        let _ = db.save_setting("glm_light_model", &light_model);
-        if let Some(key) = clean_key {
-            let _ = db.save_setting("glm_api_key", key);
-        }
-    }
-
-    // 2. Update in-memory GlmProvider config first so it works even if keyring fails
-    {
-        let mut glm = state.agent.glm.lock().map_err(|e| e.to_string())?;
-        glm.config.base_url = base_url.clone();
-        glm.config.heavy_model = heavy_model.clone();
-        glm.config.light_model = light_model;
-        if let Some(key) = clean_key {
-            glm.config.api_key = key.to_string();
-        }
-    }
-
-    // 2b. Synchronize with active model in AiRouter
-    if let Ok(mut router) = state.agent.router.lock() {
-        let matching_id = router
-            .models
-            .iter()
-            .find(|m| {
-                m.id.eq_ignore_ascii_case(&heavy_model) || m.name.eq_ignore_ascii_case(&heavy_model)
-            })
-            .map(|m| m.id.clone());
-
-        if let Some(target_id) = matching_id {
-            for m in &mut router.models {
-                m.is_active = m.id == target_id;
-                if m.is_active {
-                    m.base_url = base_url.clone();
-                    if let Some(key) = clean_key {
-                        m.api_key = Some(key.to_string());
-                    }
-                }
-            }
-        } else if let Some(active) = router.models.iter_mut().find(|m| m.is_active) {
-            active.base_url = base_url.clone();
-            active.name = heavy_model.clone();
-            if let Some(key) = clean_key {
-                active.api_key = Some(key.to_string());
-            }
-        }
-
-        if let Some(active_model) = router.get_active_model().cloned() {
-            if let Ok(db) = state.agent.db.lock() {
-                let _ = db.save_ai_model(&active_model);
-            }
-        }
-    }
-
-    // 3. Best-effort save to Windows Credential Manager
-    if let Some(key) = clean_key {
-        let _ = GlmProvider::save_key_to_keyring(key);
-    }
-
+    let mut settings = settings::load(&state)?;
+    let profile = settings.profiles.iter_mut().find(|profile| profile.id == settings.active_profile_id).ok_or("Active provider missing")?;
+    profile.base_url = base_url;
+    profile.model = heavy_model;
+    profile.light_model = light_model;
+    let mut keys = std::collections::HashMap::new();
+    if let Some(key) = api_key { keys.insert(profile.id.clone(), key); }
+    settings::save(&state, settings, keys)?;
     Ok(())
 }
 
+static PIPER_SPAWNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn spawn_piper_service_if_needed() {
+    if PIPER_SPAWNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return; // Already attempting spawn
+    }
+
     std::thread::spawn(|| {
         // Quick TCP connection test to 127.0.0.1:8880 without needing Tokio reactor
         if std::net::TcpStream::connect_timeout(
@@ -545,6 +520,7 @@ fn spawn_piper_service_if_needed() {
         )
         .is_ok()
         {
+            PIPER_SPAWNING.store(false, std::sync::atomic::Ordering::SeqCst);
             return; // Already listening!
         }
 
@@ -552,7 +528,6 @@ fn spawn_piper_service_if_needed() {
             r"C:\Users\anesx\AppData\Local\Programs\Python\Python312\python.exe",
             "python.exe",
             "python",
-            "py",
         ];
 
         let mut script_candidates = vec![
@@ -578,9 +553,6 @@ fn spawn_piper_service_if_needed() {
         if let Some(script_path) = script {
             for py in &python_execs {
                 let mut cmd = std::process::Command::new(py);
-                if *py == "py" {
-                    cmd.arg("-3.12");
-                }
                 cmd.arg(&script_path).arg("8880");
                 if let Some(script_dir) = script_path.parent() {
                     if let Some(project_root) = script_dir.parent() {
@@ -598,11 +570,69 @@ fn spawn_piper_service_if_needed() {
                 }
             }
         }
+        PIPER_SPAWNING.store(false, std::sync::atomic::Ordering::SeqCst);
     });
 }
 
 fn spawn_kokoro_service_if_needed() {
     spawn_piper_service_if_needed();
+}
+
+pub fn ensure_ollama_service_running() {
+    tauri::async_runtime::spawn(async move {
+        let is_running = match reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(600))
+            .build()
+        {
+            Ok(c) => match c.get("http://127.0.0.1:11434/api/tags").send().await {
+                Ok(r) => r.status().is_success(),
+                Err(_) => false,
+            },
+            Err(_) => false,
+        };
+
+        if !is_running {
+            tracing::info!("[Ollama SLM] Local daemon not responding. Attempting auto-spawn...");
+            let mut candidates = vec![
+                std::path::PathBuf::from(r"C:\Users\anesx\AppData\Local\Programs\Ollama\ollama.exe"),
+                std::path::PathBuf::from("ollama.exe"),
+                std::path::PathBuf::from("ollama"),
+            ];
+            if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+                candidates.push(std::path::PathBuf::from(local_app_data).join(r"Programs\Ollama\ollama.exe"));
+            }
+
+            for exe in candidates {
+                let mut cmd = std::process::Command::new(&exe);
+                cmd.arg("serve");
+                #[cfg(target_os = "windows")]
+                {
+                    use std::os::windows::process::CommandExt;
+                    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+                }
+                if cmd.spawn().is_ok() {
+                    tracing::info!("[Ollama SLM] Auto-spawned background Ollama daemon from {:?}", exe);
+                    break;
+                }
+            }
+        }
+    });
+}
+
+#[tauri::command]
+async fn get_ollama_status() -> Result<bool, String> {
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(1000))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return Err(e.to_string()),
+    };
+    let is_ok = match client.get("http://127.0.0.1:11434/api/tags").send().await {
+        Ok(r) => r.status().is_success(),
+        Err(_) => false,
+    };
+    Ok(is_ok)
 }
 
 #[tauri::command]
@@ -618,9 +648,6 @@ async fn get_piper_status() -> Result<bool, String> {
         Ok(r) => r.status().is_success(),
         Err(_) => false,
     };
-    if !is_ok {
-        spawn_piper_service_if_needed();
-    }
     Ok(is_ok)
 }
 
@@ -847,6 +874,20 @@ fn toggle_os_fullscreen(window: tauri::Window, exclusive: Option<bool>) -> Resul
 }
 
 #[tauri::command]
+fn set_app_fullscreen(window: tauri::Window, target: bool, spatial: Option<bool>) -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    if spatial.unwrap_or(false) {
+        window_vibrancy::clear_mica(&window).map_err(|e| e.to_string())?;
+    }
+    window.set_fullscreen(target).map_err(|e| e.to_string())?;
+    #[cfg(target_os = "windows")]
+    if !spatial.unwrap_or(false) {
+        let _ = window_vibrancy::apply_mica(&window, None);
+    }
+    window.is_fullscreen().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn get_ai_models(
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::providers::models::AiModel>, String> {
@@ -854,7 +895,7 @@ fn get_ai_models(
         return Ok(router.models.clone());
     }
     if let Ok(db) = state.agent.db.lock() {
-        return db.get_all_ai_models().map_err(|e| e.to_string());
+        return db.get_all_ai_models().map(|models| models.into_iter().filter(|m| crate::providers::glm::validate_provider_config(&m.base_url, &m.name).is_ok()).collect()).map_err(|e| e.to_string());
     }
     Ok(crate::providers::models::get_default_models_fleet())
 }
@@ -864,10 +905,14 @@ fn set_active_model(model_id: String, state: State<'_, AppState>) -> Result<(), 
     if let Ok(mut router) = state.agent.router.lock() {
         router.set_active_model(&model_id)?;
         if let Some(active) = router.get_active_model() {
+            crate::providers::glm::validate_provider_config(&active.base_url, &active.name)?;
+            let model_tag = if active.provider == "local_edge" { active.id.clone() } else { active.name.clone() };
+            let base_url = active.base_url.clone();
+
             if let Ok(mut glm) = state.agent.glm.lock() {
-                glm.config.base_url = active.base_url.clone();
-                glm.config.heavy_model = active.name.clone();
-                glm.config.light_model = active.name.clone();
+                glm.config.base_url = base_url;
+                glm.config.heavy_model = model_tag.clone();
+                glm.config.light_model = model_tag;
             }
         }
     }
@@ -883,6 +928,7 @@ fn update_ai_model(
     model: crate::providers::models::AiModel,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    crate::providers::glm::validate_provider_config(&model.base_url, &model.name)?;
     if let Ok(mut router) = state.agent.router.lock() {
         router.update_model(model.clone());
     }
@@ -897,6 +943,7 @@ fn add_ai_model(
     model: crate::providers::models::AiModel,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    crate::providers::glm::validate_provider_config(&model.base_url, &model.name)?;
     if let Ok(mut router) = state.agent.router.lock() {
         router.add_model(model.clone());
     }
@@ -1016,13 +1063,10 @@ fn save_api_key(key: String, state: State<'_, AppState>) -> Result<(), String> {
     if clean.is_empty() || clean.contains('•') {
         return Err("Cannot save empty or masked API key".to_string());
     }
-    if let Ok(db) = state.agent.db.lock() {
-        let _ = db.save_setting("glm_api_key", clean);
-    }
-    if let Ok(mut glm) = state.agent.glm.lock() {
-        glm.config.api_key = clean.to_string();
-    }
-    let _ = GlmProvider::save_key_to_keyring(clean);
+    let settings = settings::load(&state)?;
+    let mut keys = std::collections::HashMap::new();
+    keys.insert(settings.active_profile_id.clone(), clean.to_string());
+    settings::save(&state, settings, keys)?;
     Ok(())
 }
 
@@ -1094,15 +1138,13 @@ async fn test_glm_connection(
                     k.trim().to_string()
                 } else {
                     std::env::var("GLM_API_KEY")
-                        .or_else(|_| std::env::var("DEEPSEEK_API_KEY"))
-                        .or_else(|_| std::env::var("ZHIPU_API_KEY"))
+                            .or_else(|_| std::env::var("ZHIPU_API_KEY"))
                         .unwrap_or_default()
                         .trim()
                         .to_string()
                 }
             } else {
                 std::env::var("GLM_API_KEY")
-                    .or_else(|_| std::env::var("DEEPSEEK_API_KEY"))
                     .or_else(|_| std::env::var("ZHIPU_API_KEY"))
                     .unwrap_or_default()
                     .trim()
@@ -1115,9 +1157,10 @@ async fn test_glm_connection(
         return Err("No API key entered or found in configuration. Please enter your API key in the field and click Save Settings or Test Connection.".to_string());
     }
 
-    let raw_url = base_url.unwrap_or_else(|| "https://api.deepseek.com/v1".to_string());
+    let raw_url = base_url.unwrap_or_else(|| GlmConfig::default().base_url);
     let endpoint = crate::providers::glm::normalize_api_url(&raw_url);
-    let test_model = model.unwrap_or_else(|| "deepseek-chat".to_string());
+    let test_model = model.unwrap_or_else(|| GlmConfig::default().light_model);
+    crate::providers::glm::validate_provider_config(&raw_url, &test_model)?;
     let is_reasoner = test_model.contains("reasoner") || test_model.contains("r1");
 
     let client = reqwest::Client::builder()
@@ -1298,7 +1341,7 @@ async fn process_voice_utterance(
     mode: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<TurnResult, String> {
-    submit_utterance(utterance, mode, state).await
+    submit_utterance(utterance, mode, None, None, None, None, state).await
 }
 
 #[tauri::command]
@@ -1457,9 +1500,19 @@ fn browser_action(
     op.execute_action(node, &action, text.as_deref())
 }
 
+pub fn hidden_cmd(prog: &str) -> std::process::Command {
+    let mut cmd = std::process::Command::new(prog);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    cmd
+}
+
 #[tauri::command]
 fn review_diff() -> Result<serde_json::Value, String> {
-    let output_bytes = std::process::Command::new("git")
+    let output_bytes = hidden_cmd("git")
         .args(["diff", "HEAD"])
         .output()
         .map(|o| o.stdout)
@@ -1476,7 +1529,7 @@ fn review_diff() -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 fn review_scan() -> Result<serde_json::Value, String> {
-    let output_bytes = std::process::Command::new("git")
+    let output_bytes = hidden_cmd("git")
         .args(["diff", "HEAD"])
         .output()
         .map(|o| o.stdout)
@@ -1770,7 +1823,7 @@ fn get_project_git_diff(project_path: String) -> Result<serde_json::Value, Strin
         return Err(format!("Project path does not exist: {}", project_path));
     }
 
-    let branch_output = std::process::Command::new("git")
+    let branch_output = hidden_cmd("git")
         .args(["-C", &project_path, "rev-parse", "--abbrev-ref", "HEAD"])
         .output()
         .ok();
@@ -1778,7 +1831,7 @@ fn get_project_git_diff(project_path: String) -> Result<serde_json::Value, Strin
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_else(|| "main".to_string());
 
-    let status_output = std::process::Command::new("git")
+    let status_output = hidden_cmd("git")
         .args(["-C", &project_path, "status", "--porcelain"])
         .output()
         .ok();
@@ -1794,7 +1847,7 @@ fn get_project_git_diff(project_path: String) -> Result<serde_json::Value, Strin
         }
     }
 
-    let diff_output = std::process::Command::new("git")
+    let diff_output = hidden_cmd("git")
         .args(["-C", &project_path, "diff", "HEAD"])
         .output()
         .ok();
@@ -1817,7 +1870,7 @@ fn commit_project_changes(project_path: String, message: String) -> Result<serde
         return Err("Commit message cannot be empty".to_string());
     }
 
-    let add_res = std::process::Command::new("git")
+    let add_res = hidden_cmd("git")
         .args(["-C", &project_path, "add", "-A"])
         .output()
         .map_err(|e| format!("git add failed: {}", e))?;
@@ -1826,7 +1879,7 @@ fn commit_project_changes(project_path: String, message: String) -> Result<serde
         return Err(String::from_utf8_lossy(&add_res.stderr).to_string());
     }
 
-    let commit_res = std::process::Command::new("git")
+    let commit_res = hidden_cmd("git")
         .args(["-C", &project_path, "commit", "-m", clean_msg])
         .output()
         .map_err(|e| format!("git commit failed: {}", e))?;
@@ -2107,7 +2160,7 @@ fn inspect_project_metadata(path: String) -> Result<ProjectMetadataDto, String> 
 
 #[tauri::command]
 fn init_project_git(path: String) -> Result<String, String> {
-    let output = std::process::Command::new("git")
+    let output = hidden_cmd("git")
         .args(["-C", &path, "init"])
         .output()
         .map_err(|e| format!("Failed to run git init: {}", e))?;
@@ -2121,13 +2174,7 @@ fn init_project_git(path: String) -> Result<String, String> {
 pub fn run() {
     let db = match Database::open_app_database() {
         Ok(d) => Arc::new(Mutex::new(d)),
-        Err(_) => match Database::open_in_memory() {
-            Ok(mem_db) => Arc::new(Mutex::new(mem_db)),
-            Err(e) => {
-                eprintln!("CRITICAL: Failed to initialize SQLite: {e}");
-                return;
-            }
-        },
+        Err(error) => { eprintln!("FRIDAY cannot open its saved workspace: {error}. Existing data has been retained. Repair storage before restarting."); return; },
     };
 
     let mut glm_config = GlmConfig::default();
@@ -2155,15 +2202,13 @@ pub fn run() {
     }
 
     let agent = Arc::new(AgentCore::new(db.clone(), glm_config));
+    let places=Arc::new(places::NativePlaceService::new(db.clone()));
     let kernel = Arc::new(crate::agent::machine::HarnessKernel::with_mcp_client(
         agent.tools.mcp_client.clone(),
     ));
 
-    // Boot the kernel (spawns Python MCP Server)
-    let k_clone = kernel.clone();
-    tauri::async_runtime::spawn(async move {
-        let _ = k_clone.boot().await;
-    });
+    // Python is an optional tool adapter; AgentCore owns execution. Initialize
+    // the adapter lazily only when a configured MCP-backed tool needs it.
 
 
     let audio_capture = Arc::new(AudioCaptureManager::new(kernel.clone(), agent.clone()));
@@ -2179,9 +2224,9 @@ pub fn run() {
     let legion = Arc::new(crate::agent::legion::IronLegionSwarm::new());
     let episodic = Arc::new(crate::memory::episodic::EpisodicContextEngine::new(db));
     spawn_kokoro_service_if_needed();
-
     tauri::Builder::default()
         .manage(AppState {
+            places,
             agent,
             kernel,
             audio_capture,
@@ -2216,12 +2261,10 @@ pub fn run() {
                                 let _ = bar.show();
                                 let _ = bar.set_focus();
                                 let _ = bar.emit("global-shortcut-voice-toggle", "pressed");
-                                let _ = bar.emit("global-shortcut-alt-space", "pressed");
                             }
                         } else if event.state() == ShortcutState::Released {
                             if let Some(bar) = app.get_webview_window("main") {
                                 let _ = bar.emit("global-shortcut-voice-toggle", "released");
-                                let _ = bar.emit("global-shortcut-alt-space", "released");
                             }
                         }
                     }
@@ -2252,11 +2295,34 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             submit_utterance,
+            places::get_place_data,
+            places::cancel_place_request,
             confirm_plan,
+            cancel_run,
+            cancel_plan,
+            workspace_commands::workspace_snapshot,
+            workspace_commands::workspace_save,
+            workspace_commands::workspace_delete,
+            workspace_commands::workspace_import,
+            workspace_commands::workspace_search,
+            workspace_commands::workspace_agenda,
+            workspace_commands::get_run_history,
+            workspace_commands::get_run_events,
+            workspace_commands::get_run_receipt,
+workspace_commands::get_reconcile_actions,
+
+            workspace_commands::undo_action,
+            workspace_commands::save_reminder,
+            workspace_commands::preview_reminder,
+            workspace_commands::get_automation_history,
             undo_last,
             get_telemetry,
+            health::get_settings_health,
+            health::get_resource_sample,
             start_mic_capture,
+            get_speech_status,
             stop_mic_capture,
+            finish_mic_capture,
             get_audio_rms,
             barge_in,
             is_speaking,
@@ -2276,6 +2342,8 @@ pub fn run() {
             get_messages,
             get_automations,
             toggle_automation,
+            create_automation,
+            delete_automation,
             trigger_automation,
             get_skills,
             toggle_skill,
@@ -2286,6 +2354,7 @@ pub fn run() {
             test_glm_connection,
             get_kokoro_status,
             get_piper_status,
+            get_ollama_status,
             piper_speak,
             piper_stop,
             get_piper_engine_status,
@@ -2308,6 +2377,11 @@ pub fn run() {
             get_geospatial_telemetry,
             get_hardware_vitals,
             toggle_os_fullscreen,
+            set_app_fullscreen,
+            settings::get_desktop_settings,
+            settings::save_desktop_settings,
+            settings::test_provider_profile,
+            settings::activate_provider_profile,
             get_ai_models,
             set_active_model,
             update_ai_model,
@@ -2370,9 +2444,9 @@ pub fn run() {
         ])
         .setup(|app| {
             let state = app.state::<AppState>();
+            if let Ok(mut handle) = state.agent.app.lock() { *handle = Some(app.handle().clone()); }
             state.audio_capture.set_app_handle(app.handle().clone());
-            state.audio_capture.wake_word.enable(Some(0.55));
-            let _ = state.audio_capture.ensure_stream_running();
+            state.scheduler.set_app_handle(app.handle().clone())?;
 
             #[cfg(target_os = "windows")]
             {

@@ -156,9 +156,9 @@ export const InAppTerminal: React.FC<InAppTerminalProps> = ({
   }
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-[#141517] shadow-[0_20px_40px_-15px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col h-[680px]">
+    <div className="rounded-2xl border border-white/10 bg-[hsl(var(--canvas))] shadow-[0_20px_40px_-15px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col h-full min-h-[360px]">
       {/* ── Toolbar & Script Chips ─────────────────────────────────────── */}
-      <div className="p-3.5 border-b border-white/[0.08] bg-[#161719] flex flex-wrap items-center justify-between gap-3">
+      <div className="p-3.5 border-b border-white/[0.08] bg-[hsl(var(--canvas))] flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <TerminalIcon className="size-4 text-[hsl(var(--signal))]" />
           <span className="font-mono text-xs font-semibold text-white">In-App Terminal & Scripts</span>
@@ -181,7 +181,7 @@ export const InAppTerminal: React.FC<InAppTerminalProps> = ({
 
       {/* ── 1-Click Package Script Chips ──────────────────────────────── */}
       {scripts.length > 0 && (
-        <div className="px-4 py-2.5 border-b border-white/[0.04] bg-[#151618] flex items-center gap-2 overflow-x-auto">
+        <div className="px-4 py-2.5 border-b border-white/[0.04] bg-[hsl(var(--canvas))] flex items-center gap-2 overflow-x-auto">
           <span className="font-mono text-[10px] uppercase text-white/40 tracking-wider font-semibold flex-shrink-0">
             Detected Scripts:
           </span>
@@ -199,7 +199,7 @@ export const InAppTerminal: React.FC<InAppTerminalProps> = ({
                     : sc.category === "build"
                     ? "bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/20"
                     : sc.category === "test"
-                    ? "bg-purple-500/10 text-purple-400 border border-purple-500/20 hover:bg-purple-500/20"
+                    ? "bg-[hsl(var(--surface-raised))] text-[hsl(var(--ink))] border border-[hsl(var(--line))]"
                     : "bg-white/5 text-white/70 border border-white/10 hover:bg-white/10 text-white"
                 )}
               >
@@ -212,7 +212,7 @@ export const InAppTerminal: React.FC<InAppTerminalProps> = ({
       )}
 
       {/* ── Terminal Output Stream ────────────────────────────────────── */}
-      <div className="flex-1 p-4 overflow-y-auto font-mono text-[12px] bg-[#101113] space-y-4">
+      <div className="flex-1 p-4 overflow-y-auto font-mono text-[12px] bg-[hsl(var(--canvas))] space-y-4">
         {logs.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center text-white/30 space-y-2">
             <TerminalIcon className="size-10 text-white/10" />
@@ -223,7 +223,7 @@ export const InAppTerminal: React.FC<InAppTerminalProps> = ({
           </div>
         ) : (
           logs.map((log) => (
-            <div key={log.id} className="rounded-xl border border-white/[0.06] bg-[#141517] overflow-hidden">
+            <div key={log.id} className="rounded-xl border border-white/[0.06] bg-[hsl(var(--canvas))] overflow-hidden">
               {/* Header */}
               <div className="flex items-center justify-between px-3 py-1.5 bg-white/[0.02] border-b border-white/[0.04] text-[11px] text-white/50">
                 <div className="flex items-center gap-2">
@@ -244,7 +244,7 @@ export const InAppTerminal: React.FC<InAppTerminalProps> = ({
                       className={cn(
                         "text-[10px] px-1.5 py-0.2 rounded border font-semibold",
                         log.result.exit_code === 0
-                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                          ? "bg-[hsl(var(--success))]/10 text-[hsl(var(--success))] border-[hsl(var(--success))]/20"
                           : "bg-red-500/10 text-red-400 border-red-500/20"
                       )}
                     >
@@ -264,7 +264,7 @@ export const InAppTerminal: React.FC<InAppTerminalProps> = ({
                       title="Copy Output"
                     >
                       {copiedId === log.id ? (
-                        <Check className="size-3 text-emerald-400" />
+                        <Check className="size-3 text-[hsl(var(--success))]" />
                       ) : (
                         <Copy className="size-3" />
                       )}
@@ -294,7 +294,7 @@ export const InAppTerminal: React.FC<InAppTerminalProps> = ({
       {/* ── Interactive Command Line Prompt ───────────────────────────── */}
       <form
         onSubmit={handleInputSubmit}
-        className="p-3 border-t border-white/[0.08] bg-[#161719] flex items-center gap-2"
+        className="p-3 border-t border-white/[0.08] bg-[hsl(var(--canvas))] flex items-center gap-2"
       >
         <span className="font-mono text-xs font-bold text-[hsl(var(--signal))] pl-1">
           $

@@ -1,969 +1,164 @@
-import React, { useState, useEffect } from "react"
-import { useFridayStore, speakWithNativeVoice, stopNativeVoice } from "@/lib/store"
-import { PIPER_VOICES, KOKORO_VOICES } from "@/lib/kokoro"
-import { ipcGetPiperStatus, ipcConfigurePiper, type PiperProsodyStyle } from "@/lib/piper"
-import type { VoiceProfile } from "@/lib/voice"
-import { invokeCommand } from "@/lib/ipc"
-import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
-import {
-  Server, Volume2, Shield, DollarSign, CheckCircle2, AlertCircle, RefreshCw,
-  Radio, Play, Square, Settings2, Sliders, Eye, EyeOff,
-  Smartphone, Copy, ExternalLink, Download, Cpu, Thermometer, Zap, Sparkles,
-} from "lucide-react"
+import { useEffect, useState } from "react"
+import { useSettings, type ProviderProfile, type DesktopSettings } from "@/lib/settings"
+import { useFriday, speakWithNativeVoice, stopNativeVoice } from "@/lib/store"
+import { invokeCommand, isDesktop } from "@/lib/ipc"
+import { ipcGetPiperStatus } from "@/lib/piper"
+import { PIPER_VOICES } from "@/lib/kokoro"
+import { useWindowMode } from "@/lib/window-mode"
+import { Plus, Search, ArrowUpRight, Eye, EyeOff, Trash2, Check, RefreshCw, Play, Square, Monitor, Mic, Server, Volume2, Shield, Camera, Activity } from "lucide-react"
 import { cn } from "@/lib/utils"
-import {
-  WatermelonBentoCard,
-  MagneticSelect,
-  SloshSlider,
-} from "./BenchoWatermelonPrimitives"
+import { SettingsHealth } from "./SettingsHealth"
 
-export const SettingsTab: React.FC = () => {
-  const {
-    glmSettings,
-    updateGlmSettings,
-    voiceProfile,
-    setVoiceProfile,
-    kokoroEndpoint,
-    setKokoroEndpoint,
-    wakeWord,
-    setWakeWord,
-    toggleWakeWord,
-  } = useFridayStore()
+const speechVoices = Array.from(new Map(Object.values(PIPER_VOICES).map((voice) => [voice.id, voice])).values())
 
-  const [activeSection, setActiveSection] = useState<"models" | "voice" | "audio" | "vault" | "remote">("models")
-  const [apiKey, setApiKey] = useState("")
-  const [storedKeyLength, setStoredKeyLength] = useState<number | null>(null)
+const categories = [
+  { id: "providers", label: "Providers", icon: Server, description: "Endpoints, models, API mode, credentials and fallback" },
+  { id: "voice", label: "Voice", icon: Volume2, description: "Local speech, voice and delivery" },
+  { id: "listening", label: "Listening", icon: Mic, description: "Wake word, microphone and sensitivity" },
+  { id: "appearance", label: "Appearance", icon: Monitor, description: "Theme, motion, fullscreen and control room" },
+  { id: "monitoring", label: "Monitoring", icon: Camera, description: "Camera preview limits, recording storage and retention" },
+  { id: "security", label: "Privacy & spend", icon: Shield, description: "Credentials, confirmations and daily spend" },
+  { id: "diagnostics", label: "Diagnostics", icon: Activity, description: "Hardware and local service readiness" },
+] as const
+type Category = typeof categories[number]["id"]
+const presets: Record<string, { name: string; baseUrl: string }> = {
+  custom: { name: "Custom provider", baseUrl: "" }, openai: { name: "OpenAI", baseUrl: "https://api.openai.com/v1" },
+  deepseek: { name: "DeepSeek", baseUrl: "https://api.deepseek.com/v1" }, agentrouter: { name: "AgentRouter", baseUrl: "https://agentrouter.org/v1" },
+  ollama: { name: "Ollama", baseUrl: "http://127.0.0.1:11434/v1" }, lmstudio: { name: "LM Studio", baseUrl: "http://127.0.0.1:1234/v1" },
+  glm: { name: "GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4" },
+}
+function FormRow({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
+  return <div className="settings-row"><div><span className="settings-row-title">{title}</span>{description && <p>{description}</p>}</div><div className="settings-row-control">{children}</div></div>
+}
+function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (value: boolean) => void; label: string }) {
+  return <button type="button" role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)} className={cn("settings-switch", checked && "is-on")}><span /></button>
+}
+export function SettingsTab() {
+  const { draft, saved, keys, loaded, loading, saving, error, hydrate, edit, setKey, save, discard } = useSettings()
+  const [category, setCategory] = useState<Category>("providers")
+  const [query, setQuery] = useState("")
+  const [selected, setSelected] = useState(draft.activeProfileId)
   const [showKey, setShowKey] = useState(false)
-
-  const [baseUrl, setBaseUrl] = useState(glmSettings.baseUrl || "https://agentrouter.org/v1")
-  const [heavyModel, setHeavyModel] = useState(glmSettings.heavyModel || "gpt-6-astra")
-  const [lightModel, setLightModel] = useState(glmSettings.lightModel || "deepseek-v4-flash")
-  const [spendCap, setSpendCap] = useState(String(glmSettings.dailySpendCapUsd || 5.0))
-  const [localKokoroUrl, setLocalKokoroUrl] = useState(
-    kokoroEndpoint && !kokoroEndpoint.includes("localhost") ? kokoroEndpoint : "http://127.0.0.1:8880/v1"
-  )
-  const [kokoroOnline, setKokoroOnline] = useState<boolean | null>(null)
-  const [piperEngineReady, setPiperEngineReady] = useState(false)
-  const [piperStyle, setPiperStyle] = useState<PiperProsodyStyle>("calm")
-  const [auditioning, setAuditioning] = useState(false)
-  const [saved, setSaved] = useState(false)
   const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
-  const [keyringStored, setKeyringStored] = useState(true)
-  const [hardwareVitals, setHardwareVitals] = useState<{
-    gpu: {
-      name: string
-      temperature_c: number
-      utilization_percent: number
-      vram_used_mb: number
-      vram_total_mb: number
-      vram_budget_mb: number
-      thermal_status: string
-    }
-  } | null>(null)
-
-  const checkKokoroStatus = async () => {
-    try {
-      const piperStatus = await ipcGetPiperStatus()
-      setPiperEngineReady(piperStatus.ready)
-      setPiperStyle(piperStatus.active_style)
-    } catch {}
-    try {
-      const ok = await invokeCommand<boolean>("get_piper_status").catch(() => invokeCommand<boolean>("get_kokoro_status"))
-      if (typeof ok === "boolean") {
-        setKokoroOnline(ok)
-        return
-      }
-    } catch {}
-    try {
-      const resp = await fetch(`${localKokoroUrl}/health`)
-      setKokoroOnline(resp.ok)
-    } catch {
-      setKokoroOnline(false)
-    }
+  const [connection, setConnection] = useState<{ ok: boolean; message: string } | null>(null)
+  const [savedNotice, setSavedNotice] = useState(false)
+  const [auditioning, setAuditioning] = useState(false)
+  const [diagnostics, setDiagnostics] = useState<{ piper: boolean | null; hardware: string | null }>({ piper: null, hardware: null })
+  const [diagnosticError, setDiagnosticError] = useState<string | null>(null)
+  const [removing, setRemoving] = useState(false)
+  useEffect(() => { void hydrate() }, [hydrate])
+  const profile = draft.profiles.find((item) => item.id === selected) ?? draft.profiles[0]
+  const dirty = JSON.stringify(draft) !== JSON.stringify(saved) || Object.keys(keys).length > 0
+  const update = (patch: Partial<DesktopSettings>) => { setSavedNotice(false); edit((current) => ({ ...current, ...patch })) }
+  const updateProfile = (patch: Partial<ProviderProfile>) => {
+    setConnection(null); setSavedNotice(false)
+    edit((current) => ({ ...current, profiles: current.profiles.map((item) => item.id === profile.id ? { ...item, ...patch } : item) }))
   }
-
-  const handleSetProsody = async (style: PiperProsodyStyle) => {
-    setPiperStyle(style)
+  const addProvider = () => {
+    const id = crypto.randomUUID()
+    const added: ProviderProfile = { id, name: "New provider", baseUrl: "", model: "", lightModel: "", apiMode: "chat", hasKey: false, fallback: false }
+    update({ profiles: [...draft.profiles, added] }); setSelected(id); setConnection(null)
+  }
+  const test = async () => {
+    setTesting(true); setConnection(null)
     try {
-      await ipcConfigurePiper({ style })
-    } catch (e) {
-      console.warn("Error updating Piper prosody:", e)
-    }
+      if (!isDesktop) throw new Error("Connection tests require the Windows app.")
+      const message = await invokeCommand<string>("test_provider_profile", { profile, apiKey: keys[profile.id] })
+      setConnection({ ok: true, message })
+    } catch (error) { setConnection({ ok: false, message: String(error) }) }
+    finally { setTesting(false) }
   }
-
-  const handleAudition = () => {
-    if (auditioning) {
-      stopNativeVoice()
-      setAuditioning(false)
-      return
-    }
-    setAuditioning(true)
-    speakWithNativeVoice("Hey. I'm right here whenever you need me. What are we working on?", () => {
-      setAuditioning(false)
-    })
+  const checkDiagnostics = async () => {
+    setDiagnosticError(null)
+    const results = await Promise.allSettled([
+      ipcGetPiperStatus(),
+      isDesktop ? invokeCommand<{ cpu_percent: number; ram_used_mb: number; ram_total_mb: number; gpu: { name: string } }>("get_hardware_vitals") : Promise.reject(new Error("Hardware diagnostics require the Windows app.")),
+    ])
+    setDiagnostics({ piper: results[0].status === "fulfilled" ? results[0].value.ready : false, hardware: results[1].status === "fulfilled" ? `${results[1].value.gpu.name} · ${Math.round(results[1].value.ram_used_mb / 1024)} / ${Math.round(results[1].value.ram_total_mb / 1024)} GB RAM` : null })
+    if (results[1].status === "rejected") setDiagnosticError(String(results[1].reason))
   }
-
-  useEffect(() => {
-    invokeCommand<any>("get_glm_settings")
-      .then((settings) => {
-        if (settings) {
-          const bUrl = settings.baseUrl || settings.base_url
-          const hModel = settings.heavyModel || settings.heavy_model
-          const lModel = settings.lightModel || settings.light_model
-          const hKey = settings.hasKey ?? settings.has_key
-          const kLen = settings.keyLength ?? settings.key_length
-          if (bUrl) setBaseUrl(bUrl)
-          if (hModel) setHeavyModel(hModel)
-          if (lModel) setLightModel(lModel)
-          if (typeof hKey === "boolean") setKeyringStored(hKey)
-          if (typeof kLen === "number") setStoredKeyLength(kLen)
-          updateGlmSettings({
-            baseUrl: bUrl || baseUrl,
-            heavyModel: hModel || heavyModel,
-            lightModel: lModel || lightModel,
-            hasKey: Boolean(hKey),
-          })
-        }
-      })
-      .catch(() => {})
-
-    invokeCommand<boolean>("get_api_key_status")
-      .then((hasKey) => setKeyringStored(Boolean(hasKey)))
-      .catch(() => setKeyringStored(true))
-
-    invokeCommand<{
-      gpu: {
-        name: string
-        temperature_c: number
-        utilization_percent: number
-        vram_used_mb: number
-        vram_total_mb: number
-        vram_budget_mb: number
-        thermal_status: string
-      }
-    }>("get_hardware_vitals")
-      .then((vitals) => {
-        if (vitals && vitals.gpu) {
-          setHardwareVitals(vitals)
-        }
-      })
-      .catch(() => {
-        setHardwareVitals({
-          gpu: {
-            name: "NVIDIA GeForce MX250 (2GB Dedicated)",
-            temperature_c: 48.5,
-            utilization_percent: 18.0,
-            vram_used_mb: 850,
-            vram_total_mb: 2048,
-            vram_budget_mb: 2048,
-            thermal_status: "Cold (<50°C)",
-          },
-        })
-      })
-
-    checkKokoroStatus()
-  }, [])
-
-  const handleTestConnection = async () => {
-    setTesting(true)
-    setTestResult(null)
-    try {
-      const cleanKey = apiKey && !apiKey.includes("•") ? apiKey.trim() : undefined
-      const res = await invokeCommand<string>("test_glm_connection", {
-        baseUrl,
-        model: lightModel,
-        apiKey: cleanKey,
-      })
-      setTestResult({ success: true, message: res || "Connection verified successfully." })
-      if (cleanKey) {
-        setStoredKeyLength(cleanKey.length)
-        setKeyringStored(true)
-        setApiKey("")
-      }
-      handleSave()
-    } catch (err) {
-      setTestResult({
-        success: false,
-        message: err instanceof Error ? err.message : String(err),
-      })
-    } finally {
-      setTesting(false)
-    }
-  }
-
-  const handleSave = async () => {
-    const cleanKey = apiKey && !apiKey.includes("•") ? apiKey.trim() : undefined
-
-    try {
-      await invokeCommand("update_glm_settings", {
-        baseUrl,
-        heavyModel,
-        lightModel,
-        apiKey: cleanKey,
-      })
-      if (cleanKey) {
-        setKeyringStored(true)
-        setStoredKeyLength(cleanKey.length)
-        setApiKey("")
-        if (typeof window !== "undefined") {
-          sessionStorage.removeItem("friday_api_key_draft")
-        }
-      }
-    } catch (e) {
-      console.warn("Backend update_glm_settings notice:", e)
-    }
-
-    if (cleanKey) {
-      try {
-        await invokeCommand("save_api_key", { key: cleanKey })
-        setKeyringStored(true)
-        setStoredKeyLength(cleanKey.length)
-      } catch {}
-    }
-
-    updateGlmSettings({
-      baseUrl,
-      heavyModel,
-      lightModel,
-      dailySpendCapUsd: parseFloat(spendCap) || 5.0,
-      hasKey: true,
-    })
-    setKokoroEndpoint(localKokoroUrl)
-    try {
-      localStorage.setItem("friday_kokoro_endpoint", localKokoroUrl)
-    } catch {}
-
-    setSaved(true)
-    setTimeout(() => setSaved(false), 3000)
-    checkKokoroStatus()
-  }
-
-  const sections = [
-    { id: "models", label: "Model & Routing", icon: Server },
-    { id: "voice", label: "Voice & Piper TTS", icon: Volume2 },
-    { id: "audio", label: "Audio & Wake Word", icon: Radio },
-    { id: "vault", label: "Security & Spend", icon: Shield },
-    { id: "remote", label: "Mobile Access", icon: Smartphone },
-  ] as const
-
-  const getEstimatedModelVramMb = (model: string): number => {
-    const m = model.toLowerCase()
-    if (m.includes("bitnet")) return 410
-    if (m.includes("lfm")) return 650
-    if (m.includes("smollm2") || m.includes("friday-1b") || m.includes("friday")) return 1050
-    if (m.includes("3b")) return 2100
-    if (m.includes("7b") || m.includes("8b") || m.includes("llama3") || m.includes("qwen")) return 4200
-    if (m.includes("14b")) return 8500
-    if (baseUrl.includes("agentrouter") || baseUrl.includes("api.deepseek") || baseUrl.includes("openai")) return 0
-    return 1050
-  }
-
-  const activeModelSizeMb = getEstimatedModelVramMb(heavyModel || lightModel)
-  const isCloudModel = activeModelSizeMb === 0
-  const totalVramMb = hardwareVitals?.gpu.vram_budget_mb || 2048
-  const dwmReservedMb = 400
-  const maxSafeModelMb = totalVramMb - dwmReservedMb
-  const isVramSafe = isCloudModel || activeModelSizeMb <= maxSafeModelMb
-  const freeVramMb = Math.max(0, totalVramMb - dwmReservedMb - (isCloudModel ? 0 : activeModelSizeMb))
-
+  const visibleCategories = categories.filter((item) => (item.label + " " + item.description).toLowerCase().includes(query.toLowerCase()))
   return (
-    <div className="flex-1 flex flex-col h-full bg-[hsl(var(--surface))] text-[hsl(var(--ink))] p-6 overflow-hidden select-none">
-      {/* Standard Page Header */}
-      <div className="flex items-center justify-between border-b border-black/10 dark:border-white/10 pb-4 mb-6 shrink-0">
-        <div>
-          <div className="flex items-center gap-2">
-            <Settings2 className="size-4 text-[hsl(var(--signal))]" />
-            <h2 className="text-lg font-semibold tracking-tight text-[hsl(var(--ink))]">
-              Settings & Configuration
-            </h2>
-            <span className="font-instrument text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--signal))]/30 bg-[hsl(var(--signal))]/10 text-[hsl(var(--signal))] uppercase">
-              CREDENTIAL VAULT
-            </span>
-          </div>
-          <p className="font-instrument text-[11px] text-[hsl(var(--muted))] mt-1">
-            Local DPAPI keyring, GLM neural routing tiers, Piper TTS speech engine, and audio thresholds.
-          </p>
+    <div className="settings-workspace">
+      <aside className="settings-index">
+        <div className="settings-index-title"><span className="instrument-label">Workspace preferences</span><h1 className="page-heading">Settings</h1></div>
+        <div className="settings-search"><Search size={15} /><input aria-label="Search settings" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a setting" /></div>
+        <nav aria-label="Settings categories">{visibleCategories.map(({ id, label, icon: Icon }) => <button key={id} type="button" aria-current={id === category ? "page" : undefined} onClick={() => setCategory(id)} className={cn(id === category && "is-selected")}><Icon size={16} /><span>{label}</span></button>)}</nav>
+        {visibleCategories.length === 0 && <p className="settings-index-note">No settings found. Try “voice” or “models”.</p>}
+        <div className="settings-index-note">Changes stay in your draft until you save.{!isDesktop && <p>Browser preview · credentials and native services require Windows.</p>}</div>
+      </aside>
+      <div className="settings-main">
+        <div className="settings-scroll">
+          <header className="settings-page-title"><span className="instrument-label">Settings / {categories.find((item) => item.id === category)?.label}</span><h2 className="page-heading">{categories.find((item) => item.id === category)?.label}</h2><p>{categories.find((item) => item.id === category)?.description}.</p></header>
+          {loading && <p role="status">Reading saved settings…</p>}
+          {category === "providers" && profile && (
+            <div className="provider-layout">
+              <div className="provider-index">
+                <div className="provider-index-header"><span className="instrument-label">{draft.profiles.length} providers</span><button type="button" aria-label="Add provider" title="Add provider" onClick={addProvider}><Plus size={16} /></button></div>
+                {draft.profiles.map((item) => <button type="button" key={item.id} aria-pressed={profile.id === item.id} className={cn("provider-item", profile.id === item.id && "is-selected")} onClick={() => { setSelected(item.id); setConnection(null); setRemoving(false) }}><span>{item.name}</span><small>{item.model || "Choose a model"}</small>{item.id === draft.activeProfileId && <small className="provider-current">Current</small>}</button>)}
+                <button type="button" className="quiet-action mt-4 w-full" onClick={addProvider}><Plus size={15} />Add provider</button>
+              </div>
+              <section className="provider-detail" aria-label="Provider details">
+                <div className="provider-detail-title"><h3>{profile.name}</h3><button type="button" className="quiet-action" onClick={() => update({ activeProfileId: profile.id })} disabled={draft.activeProfileId === profile.id}>{draft.activeProfileId === profile.id ? <><Check size={14} />Current provider</> : "Use this provider"}</button></div>
+                <label className="settings-field">Start from a preset<select aria-label="Provider preset" defaultValue="custom" onChange={(event) => { const preset = presets[event.target.value]; updateProfile({ name: preset.name, baseUrl: preset.baseUrl }) }}>{Object.entries(presets).map(([id, preset]) => <option key={id} value={id}>{preset.name}</option>)}</select></label>
+                <label className="settings-field">Display name<input value={profile.name} onChange={(event) => updateProfile({ name: event.target.value })} /></label>
+                <label className="settings-field">Base URL<input type="url" spellCheck={false} value={profile.baseUrl} placeholder="https://your-provider.example/v1" onChange={(event) => updateProfile({ baseUrl: event.target.value })} /><small>Any OpenAI-compatible local or remote endpoint.</small></label>
+                <div className="settings-field-pair">
+                  <label className="settings-field">API mode<select value={profile.apiMode} onChange={(event) => updateProfile({ apiMode: event.target.value as ProviderProfile["apiMode"] })}><option value="chat">Chat Completions</option><option value="responses">Responses</option></select></label>
+                  <label className="settings-field">Exact model ID<input spellCheck={false} value={profile.model} onChange={(event) => updateProfile({ model: event.target.value, lightModel: profile.lightModel === profile.model || !profile.lightModel ? event.target.value : profile.lightModel })} placeholder="Model ID from your provider" /></label>
+                </div>
+                <label className="settings-field">Lightweight model ID<input spellCheck={false} value={profile.lightModel} onChange={(event) => updateProfile({ lightModel: event.target.value })} /><small>Used for simpler instructions. IDs are sent exactly as entered.</small></label>
+                <label className="settings-field">API key<div className="settings-secret"><input type={showKey ? "text" : "password"} value={keys[profile.id] ?? ""} autoComplete="new-password" spellCheck={false} placeholder={profile.hasKey ? "Stored · enter a replacement" : "Optional for local endpoints"} onChange={(event) => setKey(profile.id, event.target.value)} /><button type="button" aria-label={showKey ? "Hide API key" : "Show API key"} onClick={() => setShowKey(!showKey)}>{showKey ? <EyeOff size={16} /> : <Eye size={16} />}</button></div><small>{isDesktop ? "Stored in Windows Credential Manager per provider." : "API keys can be saved in the Windows app."}</small></label>
+                <FormRow title="Allow fallback" description="Use this profile if the current provider fails. Its own credentials are used."><Toggle label="Allow provider fallback" checked={profile.fallback} onChange={(fallback) => updateProfile({ fallback })} /></FormRow>
+                <div className="provider-detail-actions"><button type="button" className="quiet-action" disabled={testing} onClick={() => void test()}><RefreshCw size={14} />{testing ? "Testing…" : "Test connection"}</button>{draft.profiles.length > 1 && <button type="button" className="quiet-action" onClick={() => setRemoving(!removing)}><Trash2 size={14} />Remove</button>}</div>
+                {removing && <div className="settings-notice"><p>Remove {profile.name} from your profiles?</p><button type="button" className="quiet-action mt-2" onClick={() => { const profiles = draft.profiles.filter((item) => item.id !== profile.id); update({ profiles, activeProfileId: draft.activeProfileId === profile.id ? profiles[0].id : draft.activeProfileId }); setSelected(profiles[0].id); setRemoving(false) }}>Remove provider</button></div>}
+                {connection && <p role="status" className={cn("settings-notice", !connection.ok && "is-error")}>{connection.message}</p>}
+              </section>
+            </div>
+          )}
+          {category === "voice" && <div className="settings-section">
+            <FormRow title="Voice" description="Speech stays on your device. A voice must be installed before it can speak."><select aria-label="Speech voice" value={draft.voice.profile} onChange={(event) => update({ voice: { ...draft.voice, profile: event.target.value } })}>{speechVoices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name}</option>)}</select></FormRow>
+            <FormRow title="Delivery" description="The character of spoken responses."><select aria-label="Speech delivery" value={draft.voice.style} onChange={(event) => update({ voice: { ...draft.voice, style: event.target.value as DesktopSettings["voice"]["style"] } })}><option value="calm">Calm</option><option value="tactical">Direct</option><option value="whisper">Quiet</option><option value="witty">Conversational</option></select></FormRow>
+            <FormRow title="Local speech endpoint" description="Only loopback endpoints are accepted."><input aria-label="Local speech endpoint" value={draft.voice.endpoint} onChange={(event) => update({ voice: { ...draft.voice, endpoint: event.target.value } })} /></FormRow>
+            <button type="button" className="quiet-action mt-6" disabled={!isDesktop} onClick={() => { if (auditioning) { stopNativeVoice(); setAuditioning(false) } else { setAuditioning(true); speakWithNativeVoice("I'm here. What are we working on?", () => setAuditioning(false)) } }}>{auditioning ? <Square size={14} /> : <Play size={14} />}{auditioning ? "Stop preview" : "Preview saved voice"}</button>
+            <p className="settings-help">Preview uses your saved voice. Save the draft to apply a new voice.</p>
+          </div>}
+          {category === "listening" && <div className="settings-section">
+            <FormRow title="Wake-word listening" description="A real wake-word detector is not connected in this candidate."><span>Unavailable / disabled</span></FormRow>
+            <FormRow title="Push to talk" description="Hold Alt+Shift to speak. Tap to toggle. Escape interrupts the current turn."><kbd>Alt + Shift</kbd></FormRow>
+            <p className="settings-help">Enabling a preference does not confirm the speech models are ready. Check Diagnostics for service readiness.</p>
+          </div>}
+          {category === "appearance" && <div className="settings-section">
+            <FormRow title="Theme"><select aria-label="Theme" value={draft.appearance.theme} onChange={(event) => update({ appearance: { ...draft.appearance, theme: event.target.value as "dark" | "bright" } })}><option value="dark">Dark</option><option value="bright">Light</option></select></FormRow>
+            <FormRow title="Reduce motion" description="Remove movement and artificial delays. Your operating-system preference also applies."><Toggle label="Reduce motion" checked={draft.appearance.reducedMotion} onChange={(reducedMotion) => update({ appearance: { ...draft.appearance, reducedMotion } })} /></FormRow>
+            <FormRow title="Fullscreen" description="Keep the current workspace and use the whole display."><button type="button" className="quiet-action" onClick={() => void useWindowMode.getState().toggleFullscreen()}>Toggle <kbd>F11</kbd></button></FormRow>
+            <FormRow title="Spatial control room" description="Open the map and spatial tools. Exiting restores your previous fullscreen state."><button type="button" className="quiet-action" onClick={() => window.dispatchEvent(new CustomEvent("friday:trigger-hud-boot"))}>Open <ArrowUpRight size={14} /></button></FormRow>
+            <FormRow title="Startup" description="Quiet readiness check. No startup sound or decorative loading percentage."><span className="instrument-label">Sound off</span></FormRow>
+          </div>}
+          {category === "monitoring" && <div className="settings-section">
+            <FormRow title="Simultaneous previews" description="Additional cameras stay paused until you focus them."><select aria-label="Simultaneous camera previews" value={draft.monitoring.previewLimit} onChange={(event) => update({ monitoring: { ...draft.monitoring, previewLimit: Number(event.target.value) } })}>{[1, 2, 3, 4].map((value) => <option key={value} value={value}>{value} {value === 1 ? "preview" : "previews"}</option>)}</select></FormRow>
+            <FormRow title="Recording storage limit" description="Stop new recordings when this limit is reached."><div className="settings-unit-input"><input type="number" aria-label="Recording storage limit" min="1" max="1000" value={draft.monitoring.storageLimitGb} onChange={(event) => update({ monitoring: { ...draft.monitoring, storageLimitGb: Number(event.target.value) } })} /><span>GB</span></div></FormRow>
+            <FormRow title="Recording" description="Recording starts manually. Camera audio is off. Manual recordings are kept until you delete them."><span className="instrument-label">Manual</span></FormRow>
+            <button type="button" className="quiet-action mt-6" onClick={() => useFriday.getState().setTab("cameras")}>Manage cameras <ArrowUpRight size={14} /></button>
+          </div>}
+          {category === "security" && <div className="settings-section">
+            <FormRow title="Daily spend cap" description="Saved as your budget preference. Provider billing remains the authority for actual spend."><div className="settings-unit-input"><span>$</span><input aria-label="Daily spend cap" type="number" min="0" step="0.5" value={draft.dailySpendCapUsd} onChange={(event) => update({ dailySpendCapUsd: Number(event.target.value) })} /></div></FormRow>
+            <FormRow title="Credentials" description="Each provider owns its key. Saved keys are never returned to the interface."><span className="instrument-label">Windows Credential Manager</span></FormRow>
+            <FormRow title="Action confirmation" description="Routine actions run directly. Sensitive actions require a preview; high-risk actions require “confirm”."><span className="instrument-label">Three tiers</span></FormRow>
+            <FormRow title="Mobile access" description="Remote access is optional. No gateway is started by this interface."><span className="instrument-label">Off</span></FormRow>
+          </div>}
+          {category === "diagnostics" && <div className="settings-section">
+            <SettingsHealth />
+            <button type="button" className="quiet-action" onClick={() => void checkDiagnostics()}><RefreshCw size={14} />Check services</button>
+            <FormRow title="Local speech engine"><span>{diagnostics.piper === null ? "Not checked" : diagnostics.piper ? "Ready" : "Unavailable"}</span></FormRow>
+            <FormRow title="Hardware"><span>{diagnostics.hardware ?? "Not checked"}</span></FormRow>
+            {diagnosticError && <p className="settings-notice" role="status">{diagnosticError}</p>}
+            <button type="button" className="quiet-action mt-6" onClick={() => window.dispatchEvent(new CustomEvent("friday:open-onboarding"))}>Open setup guide</button>
+          </div>}
         </div>
-
-        {/* Persistent Save Status & Action */}
-        <div className="flex items-center gap-3">
-          {saved && (
-            <span className="flex items-center gap-1.5 font-instrument text-xs text-[hsl(var(--success))]">
-              <CheckCircle2 className="size-3.5" />
-              Saved to Vault
-            </span>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => window.dispatchEvent(new CustomEvent("friday:open-onboarding"))}
-            className="font-instrument text-xs border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer"
-          >
-            Replay Onboarding
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleSave}
-            className="bg-[hsl(var(--ink))] text-[hsl(var(--surface))] hover:opacity-90 font-instrument text-xs font-semibold cursor-pointer"
-          >
-            Save Settings
-          </Button>
-        </div>
-      </div>
-
-      {/* Main Layout: Left Section Index + Centered Max 640px Form */}
-      <div className="flex-1 flex gap-8 min-h-0 overflow-hidden">
-        {/* Left Section Index inside content canvas (not second rail) */}
-        <nav className="w-48 shrink-0 flex flex-col gap-1 font-instrument text-xs">
-          {sections.map((sec) => {
-            const Icon = sec.icon
-            const isActive = activeSection === sec.id
-            return (
-              <button
-                key={sec.id}
-                type="button"
-                onClick={() => setActiveSection(sec.id)}
-                className={cn(
-                  "flex items-center gap-2.5 px-3 py-2 rounded-[var(--radius-control)] text-left transition-colors cursor-pointer",
-                  isActive
-                    ? "bg-[hsl(var(--surface-raised))] text-[hsl(var(--ink))] font-semibold shadow-xs"
-                    : "text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))] hover:bg-black/5 dark:hover:bg-white/5"
-                )}
-              >
-                <Icon className={cn("size-3.5", isActive ? "text-[hsl(var(--signal))]" : "text-[hsl(var(--muted))]")} />
-                <span>{sec.label}</span>
-              </button>
-            )
-          })}
-        </nav>
-
-        {/* Right Form: Max width 640px */}
-        <div className="flex-1 max-w-[640px] overflow-y-auto pr-2 pb-10 space-y-6">
-          {/* Section 1: Model & Routing */}
-          {activeSection === "models" && (
-            <section className="space-y-4">
-              <WatermelonBentoCard className="p-6 space-y-4">
-                <h3 className="font-semibold text-sm text-[hsl(var(--ink))] flex items-center gap-2">
-                  <Server className="size-4 text-[hsl(var(--signal))]" />
-                  AI Reasoning Engine & Providers
-                </h3>
-
-                {/* Presets */}
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="font-instrument text-[10px] text-[hsl(var(--muted))] uppercase tracking-wider block">
-                      2026 Model Architecture Presets (2GB VRAM Profile)
-                    </span>
-                    <span className="text-[10px] font-mono text-[hsl(var(--signal))]">
-                      VRAM Ceiling: 2,048 MB
-                    </span>
-                  </div>
-                  <MagneticSelect
-                    options={[
-                      { value: "friday-1b-operator", label: "FRIDAY-1B (Fine-Tuned · 1.05GB)" },
-                      { value: "smollm2-1.7b", label: "SmolLM2-1.7B (4-Bit · 1.05GB)" },
-                      { value: "bitnet-b1.58-2b", label: "BitNet 2B (Ternary · 410MB)" },
-                      { value: "lfm-1b", label: "Liquid LFM-1B (LNN · 650MB)" },
-                      { value: "agentrouter", label: "AgentRouter (Cloud Turbo)" },
-                      { value: "deepseek-official", label: "DeepSeek Official (Cloud)" },
-                      { value: "openai", label: "OpenAI (Cloud)" },
-                    ]}
-                    value={
-                      heavyModel.includes("friday-1b")
-                        ? "friday-1b-operator"
-                        : heavyModel.includes("bitnet")
-                        ? "bitnet-b1.58-2b"
-                        : heavyModel.includes("lfm")
-                        ? "lfm-1b"
-                        : heavyModel.includes("smollm2")
-                        ? "smollm2-1.7b"
-                        : baseUrl.includes("deepseek.com")
-                        ? "deepseek-official"
-                        : baseUrl.includes("openai.com")
-                        ? "openai"
-                        : "agentrouter"
-                    }
-                    onChange={(preset) => {
-                      const presetsMap: Record<string, { url: string; heavy: string; light: string }> = {
-                        "friday-1b-operator": {
-                          url: "http://localhost:11434/v1",
-                          heavy: "friday-1b-operator",
-                          light: "friday-1b-operator",
-                        },
-                        "smollm2-1.7b": {
-                          url: "http://localhost:11434/v1",
-                          heavy: "smollm2:1.7b-instruct-q4_K_M",
-                          light: "smollm2:1.7b-instruct-q4_K_M",
-                        },
-                        "bitnet-b1.58-2b": {
-                          url: "http://localhost:11434/v1",
-                          heavy: "bitnet-b1.58-2b",
-                          light: "bitnet-b1.58-2b",
-                        },
-                        "lfm-1b": {
-                          url: "http://localhost:11434/v1",
-                          heavy: "lfm-1b",
-                          light: "lfm-1b",
-                        },
-                        "agentrouter": {
-                          url: "https://agentrouter.org/v1",
-                          heavy: "deepseek-v4-flash",
-                          light: "deepseek-v4-flash",
-                        },
-                        "deepseek-official": {
-                          url: "https://api.deepseek.com/v1",
-                          heavy: "deepseek-chat",
-                          light: "deepseek-chat",
-                        },
-                        "openai": {
-                          url: "https://api.openai.com/v1",
-                          heavy: "gpt-4o",
-                          light: "gpt-4o-mini",
-                        },
-                      }
-                      const p = presetsMap[preset]
-                      if (p) {
-                        setBaseUrl(p.url)
-                        setHeavyModel(p.heavy)
-                        setLightModel(p.light)
-                      }
-                    }}
-                    accent="violet"
-                  />
-                </div>
-
-                <div className="space-y-3 font-instrument text-xs">
-                  <div>
-                    <label className="text-[10px] text-[hsl(var(--muted))] uppercase block mb-1">Base URL</label>
-                    <input
-                      type="text"
-                      value={baseUrl}
-                      onChange={(e) => setBaseUrl(e.target.value)}
-                      className="w-full bg-[hsl(var(--surface))] border border-black/10 dark:border-white/10 rounded-[var(--radius-control)] px-3 py-1.5 text-xs text-[hsl(var(--ink))] focus:outline-none focus:border-[hsl(var(--signal))]"
-                    />
-                  </div>
-
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-1.5">
-                        <label className="text-[10px] text-[hsl(var(--muted))] uppercase">API Key (DPAPI Vault)</label>
-                        {apiKey ? (
-                          <span className="text-[10px] text-[hsl(var(--signal))] font-mono">({apiKey.length} chars typed)</span>
-                        ) : storedKeyLength ? (
-                          <span className="text-[10px] text-[hsl(var(--muted))] font-mono">({storedKeyLength} chars active)</span>
-                        ) : null}
-                      </div>
-                      {keyringStored && (
-                        <span className="text-[10px] text-[hsl(var(--signal))] flex items-center gap-1">
-                          <Shield className="size-3" />
-                          Encrypted & Stored {storedKeyLength ? `(${storedKeyLength} chars)` : ""}
-                        </span>
-                      )}
-                    </div>
-                    <div className="relative flex items-center">
-                      <input
-                        type={showKey ? "text" : "password"}
-                        value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
-                        placeholder={
-                          keyringStored && storedKeyLength
-                            ? `••••••••••••••••••••••••••••••••••••••••••••••••••• (${storedKeyLength} chars in Vault)`
-                            : keyringStored
-                            ? "•••••••••••••••••••••••••••••••• (Key saved in Vault)"
-                            : "Enter provider key (e.g. sk-...)"
-                        }
-                        className="w-full bg-[hsl(var(--surface))] border border-black/10 dark:border-white/10 rounded-[var(--radius-control)] px-3 pr-9 py-1.5 text-xs text-[hsl(var(--ink))] focus:outline-none focus:border-[hsl(var(--signal))] font-mono"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowKey(!showKey)}
-                        className="absolute right-2.5 text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))] cursor-pointer p-0.5"
-                        title={showKey ? "Hide key" : "Show key"}
-                      >
-                        {showKey ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-                      </button>
-                    </div>
-                    <p className="text-[10px] text-[hsl(var(--muted))] mt-1 font-instrument">
-                      {keyringStored
-                        ? `Vault has a ${storedKeyLength ?? 51}-character key stored securely via Windows DPAPI. Type or paste only if replacing.`
-                        : "Key is saved locally using Windows DPAPI Credential Manager."}
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[10px] text-[hsl(var(--muted))] uppercase block mb-1">Heavy Model</label>
-                      <input
-                        type="text"
-                        value={heavyModel}
-                        onChange={(e) => setHeavyModel(e.target.value)}
-                        className="w-full bg-[hsl(var(--surface))] border border-black/10 dark:border-white/10 rounded-[var(--radius-control)] px-3 py-1.5 text-xs text-[hsl(var(--ink))] focus:outline-none focus:border-[hsl(var(--signal))]"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-[hsl(var(--muted))] uppercase block mb-1">Light Model</label>
-                      <input
-                        type="text"
-                        value={lightModel}
-                        onChange={(e) => setLightModel(e.target.value)}
-                        className="w-full bg-[hsl(var(--surface))] border border-black/10 dark:border-white/10 rounded-[var(--radius-control)] px-3 py-1.5 text-xs text-[hsl(var(--ink))] focus:outline-none focus:border-[hsl(var(--signal))]"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="pt-2 border-t border-black/10 dark:border-white/10 flex items-center justify-between">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={handleTestConnection}
-                    disabled={testing}
-                    className="font-instrument text-xs gap-1.5"
-                  >
-                    <RefreshCw className={cn("size-3", testing && "animate-spin")} />
-                    {testing ? "Testing..." : "Test Connection"}
-                  </Button>
-                </div>
-
-                {testResult && (
-                  <div
-                    className={cn(
-                      "p-3 rounded-[var(--radius-control)] text-xs font-instrument flex items-start gap-2 border",
-                      testResult.success
-                        ? "border-[hsl(var(--success))]/30 bg-[hsl(var(--success))]/5 text-[hsl(var(--success))]"
-                        : "border-[hsl(var(--danger))]/30 bg-[hsl(var(--danger))]/5 text-[hsl(var(--danger))]"
-                    )}
-                  >
-                    {testResult.success ? <CheckCircle2 className="size-4 shrink-0 mt-0.5" /> : <AlertCircle className="size-4 shrink-0 mt-0.5" />}
-                    <span>{testResult.message}</span>
-                  </div>
-                )}
-              </WatermelonBentoCard>
-
-              {/* Hardware VRAM & Thermal Safety Gauge */}
-              <WatermelonBentoCard
-                className="p-6 space-y-4 font-instrument"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Cpu className="size-4 text-[hsl(var(--signal))]" />
-                    <div>
-                      <h4 className="text-xs font-semibold text-[hsl(var(--ink))]">
-                        Hardware VRAM & Thermal Safety Guard
-                      </h4>
-                      <p className="text-[10px] text-[hsl(var(--muted))]">
-                        {hardwareVitals?.gpu.name || "NVIDIA GeForce MX250 (2GB Dedicated)"} · Active Thermal Watchdog
-                      </p>
-                    </div>
-                  </div>
-                  <span
-                    className={cn(
-                      "text-[10px] font-mono px-2 py-0.5 rounded-full border",
-                      isCloudModel
-                        ? "border-sky-500/30 bg-sky-500/10 text-sky-400"
-                        : isVramSafe
-                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-                        : "border-rose-500/30 bg-rose-500/10 text-rose-400"
-                    )}
-                  >
-                    {isCloudModel
-                      ? "Cloud Offloaded (0 MB VRAM)"
-                      : isVramSafe
-                      ? `${activeModelSizeMb} MB · VRAM Safe (< 1.5GB)`
-                      : `⚠ ${activeModelSizeMb} MB · OOM Risk`}
-                  </span>
-                </div>
-
-                {/* VRAM Allocation Visual Bar */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-[10px] text-[hsl(var(--muted))] font-mono">
-                    <span>VRAM Usage Allocation</span>
-                    <span className="tabular-nums">
-                      {isCloudModel
-                        ? "400 MB / 2,048 MB (19.5%)"
-                        : `${400 + activeModelSizeMb} MB / 2,048 MB (${(((400 + activeModelSizeMb) / 2048) * 100).toFixed(1)}%)`}
-                    </span>
-                  </div>
-
-                  <div className="w-full h-3 rounded-full bg-black/20 dark:bg-white/5 overflow-hidden flex border border-black/10 dark:border-white/10 p-0.5 gap-0.5">
-                    {/* DWM / UI Compositing Reserve (400MB) */}
-                    <div
-                      style={{ width: `${(400 / 2048) * 100}%` }}
-                      className="h-full bg-zinc-600 rounded-l-full relative group cursor-help transition-all duration-300"
-                      title="Windows DWM & UI Compositor Reserve (400 MB)"
-                    />
-                    {/* Model Footprint */}
-                    {!isCloudModel && (
-                      <div
-                        style={{ width: `${Math.min(100 - (400 / 2048) * 100, (activeModelSizeMb / 2048) * 100)}%` }}
-                        className={cn(
-                          "h-full transition-all duration-300",
-                          isVramSafe ? "bg-[hsl(var(--signal))]" : "bg-rose-500 animate-pulse"
-                        )}
-                        title={`Active Model Footprint: ${activeModelSizeMb} MB`}
-                      />
-                    )}
-                    {/* Free Headroom */}
-                    <div
-                      style={{ width: `${(freeVramMb / 2048) * 100}%` }}
-                      className="h-full bg-emerald-500/30 rounded-r-full transition-all duration-300"
-                      title={`Safe Free Headroom: ${freeVramMb} MB`}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between text-[9px] font-mono text-[hsl(var(--muted))] pt-1">
-                    <span className="flex items-center gap-1">
-                      <span className="size-2 rounded-full bg-zinc-600 inline-block" />
-                      DWM Reserve (400 MB)
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className={cn("size-2 rounded-full inline-block", isVramSafe ? "bg-[hsl(var(--signal))]" : "bg-rose-500")} />
-                      Model ({isCloudModel ? "0 MB" : `${activeModelSizeMb} MB`})
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="size-2 rounded-full bg-emerald-500/40 inline-block" />
-                      Free Headroom ({freeVramMb} MB)
-                    </span>
-                  </div>
-                </div>
-
-                {/* Hardware Telemetry & Architecture Cards */}
-                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-black/10 dark:border-white/10">
-                  <div className="p-2.5 rounded-[var(--radius-control)] bg-[hsl(var(--surface))] border border-black/5 dark:border-white/5 space-y-1">
-                    <div className="text-[10px] text-[hsl(var(--muted))] uppercase flex items-center gap-1">
-                      <Thermometer className="size-3 text-emerald-400" />
-                      Thermal Status
-                    </div>
-                    <div className="text-xs font-semibold text-[hsl(var(--ink))]">
-                      {isCloudModel
-                        ? "Ambient (<40°C)"
-                        : activeModelSizeMb <= 450
-                        ? "Cold (<45°C · Ternary)"
-                        : activeModelSizeMb <= 1100
-                        ? "Optimal (<55°C · 4-bit)"
-                        : "Hot Throttling (>78°C)"}
-                    </div>
-                    <p className="text-[9px] text-[hsl(var(--muted))]">
-                      {isCloudModel
-                        ? "Zero local GPU duty cycle"
-                        : activeModelSizeMb <= 1100
-                        ? "Stable fans under sustained load"
-                        : "Memory bandwidth thrashing"}
-                    </p>
-                  </div>
-
-                  <div className="p-2.5 rounded-[var(--radius-control)] bg-[hsl(var(--surface))] border border-black/5 dark:border-white/5 space-y-1">
-                    <div className="text-[10px] text-[hsl(var(--muted))] uppercase flex items-center gap-1">
-                      <Zap className="size-3 text-[hsl(var(--signal))]" />
-                      Latency Tier
-                    </div>
-                    <div className="text-xs font-semibold text-[hsl(var(--ink))]">
-                      {isCloudModel ? "Cloud p95 ~850ms" : "< 250ms On-Device"}
-                    </div>
-                    <p className="text-[9px] text-[hsl(var(--muted))]">
-                      {isCloudModel ? "Dependent on network WAN" : "Deterministic local dispatch"}
-                    </p>
-                  </div>
-
-                  <div className="p-2.5 rounded-[var(--radius-control)] bg-[hsl(var(--surface))] border border-black/5 dark:border-white/5 space-y-1">
-                    <div className="text-[10px] text-[hsl(var(--muted))] uppercase flex items-center gap-1">
-                      <Sparkles className="size-3 text-amber-400" />
-                      Turnkey Pipeline
-                    </div>
-                    <div className="text-xs font-semibold text-[hsl(var(--ink))]">
-                      Colab T4 Free
-                    </div>
-                    <p className="text-[9px] text-[hsl(var(--muted))]">
-                      1-Click QLoRA & GGUF export
-                    </p>
-                  </div>
-                </div>
-
-                {/* Pipeline Actions & Modelfile Quick Links */}
-                <div className="p-2.5 rounded-[var(--radius-control)] bg-black/10 dark:bg-white/5 border border-black/5 dark:border-white/5 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
-                    <Shield className="size-3.5 text-[hsl(var(--signal))]" />
-                    <span className="text-[11px] text-[hsl(var(--ink))]">
-                      Fine-Tuning Stack: <code className="text-[10px] bg-black/20 px-1 py-0.5 rounded">scripts/friday_colab_finetune.ipynb</code> &amp; <code className="text-[10px] bg-black/20 px-1 py-0.5 rounded">scripts/Modelfile</code>
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-mono text-[hsl(var(--muted))]">
-                    Ollama · llama.cpp · BitNet
-                  </span>
-                </div>
-              </WatermelonBentoCard>
-            </section>
-          )}
-
-          {/* Section 2: Voice & Piper TTS */}
-          {activeSection === "voice" && (
-            <section className="space-y-4">
-              <div className="p-4 rounded-[var(--radius-panel)] border border-black/10 dark:border-white/10 bg-[hsl(var(--surface-raised))] space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-semibold text-sm text-[hsl(var(--ink))] flex items-center gap-2">
-                    <Volume2 className="size-4 text-[hsl(var(--signal))]" />
-                    Local Voice Synthesis (Piper Neural TTS)
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={handleAudition}
-                    className="px-3 py-1 rounded-[var(--radius-control)] bg-[hsl(var(--surface))] border border-black/10 dark:border-white/10 font-instrument text-xs text-[hsl(var(--ink))] hover:border-[hsl(var(--signal))] flex items-center gap-1.5 cursor-pointer"
-                  >
-                    {auditioning ? (
-                      <>
-                        <Square className="size-3 text-[hsl(var(--signal))]" />
-                        <span>Stop Audition</span>
-                      </>
-                    ) : (
-                      <>
-                        <Play className="size-3 text-[hsl(var(--signal))]" />
-                        <span>Audition Voice</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                <div>
-                  <span className="font-instrument text-[10px] text-[hsl(var(--muted))] uppercase tracking-wider block mb-2">
-                    Active Voice Persona
-                  </span>
-                  <div className="grid grid-cols-2 gap-2">
-                    {Array.from(new Map(Object.values(PIPER_VOICES).map((v) => [v.id, v])).values()).map((voice) => {
-                      const isSelected =
-                        voiceProfile === voice.id ||
-                        (voice.id === "en_GB-alba-medium" &&
-                          (voiceProfile === "bf_emma" ||
-                            voiceProfile === "friday-irish" ||
-                            voiceProfile === "friday-british" ||
-                            voiceProfile === "af_bella" ||
-                            voiceProfile === "af_sky")) ||
-                        (voice.id === "en_US-amy-medium" &&
-                          (voiceProfile === "af_heart" || voiceProfile === "af_nicole" || voiceProfile === "friday-warm"))
-                      return (
-                        <div
-                          key={voice.id}
-                          onClick={() => setVoiceProfile(voice.id as VoiceProfile)}
-                          className={cn(
-                            "p-3 rounded-[var(--radius-control)] border text-left cursor-pointer transition-all",
-                            isSelected
-                              ? "border-[hsl(var(--signal))] bg-[hsl(var(--signal))]/5 shadow-xs"
-                              : "border-black/10 dark:border-white/10 bg-[hsl(var(--surface))] hover:border-black/20"
-                          )}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-semibold text-xs text-[hsl(var(--ink))]">{voice.name}</span>
-                            <span className="font-instrument text-[9px] px-1 rounded bg-black/5 dark:bg-white/10 text-[hsl(var(--muted))]">{voice.accent}</span>
-                          </div>
-                          <p className="font-instrument text-[10px] text-[hsl(var(--signal))]">{voice.timbre}</p>
-                          <p className="text-[11px] text-[hsl(var(--muted))] line-clamp-1 mt-0.5">{voice.description}</p>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-
-                <div>
-                  <span className="font-instrument text-[10px] text-[hsl(var(--muted))] uppercase tracking-wider block mb-2">
-                    Dynamic Companion Prosody (Kerry Condon Persona)
-                  </span>
-                  <div className="grid grid-cols-4 gap-2">
-                    {(
-                      [
-                        { id: "calm", label: "Calm", desc: "Composed operator" },
-                        { id: "tactical", label: "Tactical", desc: "Amber/Red alerts" },
-                        { id: "whisper", label: "Whisper", desc: "Overwatch mode" },
-                        { id: "witty", label: "Witty", desc: "Conversational rapport" },
-                      ] as const
-                    ).map((p) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => handleSetProsody(p.id)}
-                        className={cn(
-                          "p-2.5 rounded-[var(--radius-control)] border text-left cursor-pointer transition-all",
-                          piperStyle === p.id
-                            ? "border-[hsl(var(--signal))] bg-[hsl(var(--signal))]/10 text-[hsl(var(--ink))] shadow-xs"
-                            : "border-black/10 dark:border-white/10 bg-[hsl(var(--surface))] text-[hsl(var(--muted))] hover:border-black/20"
-                        )}
-                      >
-                        <span className="font-semibold text-xs block text-[hsl(var(--ink))]">{p.label}</span>
-                        <span className="text-[10px] text-[hsl(var(--muted))] block mt-0.5">{p.desc}</span>
-                      </button>
-                    ))}
-                  </div>
-                  {piperEngineReady && (
-                    <span className="font-instrument text-[10px] text-[hsl(var(--success))] block mt-2">
-                      ● Native In-Process Piper TTS Active (&lt;55ms TTFA)
-                    </span>
-                  )}
-                </div>
-
-                <div>
-                  <label className="font-instrument text-[10px] text-[hsl(var(--muted))] uppercase block mb-1">
-                    Piper Daemon URL
-                  </label>
-                  <input
-                    type="text"
-                    value={localKokoroUrl}
-                    onChange={(e) => setLocalKokoroUrl(e.target.value)}
-                    className="w-full bg-[hsl(var(--surface))] border border-black/10 dark:border-white/10 rounded-[var(--radius-control)] px-3 py-1.5 text-xs text-[hsl(var(--ink))] focus:outline-none focus:border-[hsl(var(--signal))] font-instrument"
-                  />
-                  {kokoroOnline !== null && (
-                    <span className={cn(
-                      "font-instrument text-[10px] block mt-1",
-                      kokoroOnline ? "text-[hsl(var(--success))]" : "text-[hsl(var(--muted))]"
-                    )}>
-                      {kokoroOnline ? "● Piper TTS service online" : "○ Local standalone mode"}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* Section 3: Audio & Wake Word */}
-          {activeSection === "audio" && (
-            <section className="space-y-4">
-              <div className="p-4 rounded-[var(--radius-panel)] border border-black/10 dark:border-white/10 bg-[hsl(var(--surface-raised))] space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-semibold text-sm text-[hsl(var(--ink))] flex items-center gap-2">
-                      <Radio className="size-4 text-[hsl(var(--signal))]" />
-                      Continuous Wake-Word Detection
-                    </h3>
-                    <p className="font-instrument text-[11px] text-[hsl(var(--muted))] mt-0.5">
-                      "Hey Friday" acoustic detector (&lt; 0.5% CPU idle)
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => toggleWakeWord()}
-                    className={cn(
-                      "px-3 py-1 rounded-[var(--radius-control)] font-instrument text-xs border transition-colors cursor-pointer",
-                      wakeWord.enabled
-                        ? "border-[hsl(var(--signal))] bg-[hsl(var(--signal))]/10 text-[hsl(var(--signal))] font-semibold"
-                        : "border-black/10 dark:border-white/10 bg-[hsl(var(--surface))] text-[hsl(var(--muted))]"
-                    )}
-                  >
-                    {wakeWord.enabled ? "ACTIVE" : "DISABLED"}
-                  </button>
-                </div>
-
-                <div className="pt-2 border-t border-black/10 dark:border-white/10 font-instrument text-xs space-y-2">
-                  <SloshSlider
-                    label="Detection Sensitivity"
-                    value={Math.round(wakeWord.sensitivity * 100)}
-                    min={20}
-                    max={95}
-                    step={5}
-                    unit="%"
-                    onChange={(val) => {
-                      const decimalVal = +(val / 100).toFixed(2)
-                      setWakeWord({ sensitivity: decimalVal })
-                      invokeCommand("set_wake_word_sensitivity", { sensitivity: decimalVal }).catch(() => {})
-                    }}
-                  />
-                  <span className="text-[10px] text-[hsl(var(--muted))] block">
-                    Higher sensitivity catches whispers; lower avoids noise triggers.
-                  </span>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* Section 4: Security & Spend */}
-          {activeSection === "vault" && (
-            <section className="space-y-4">
-              <div className="p-4 rounded-[var(--radius-panel)] border border-black/10 dark:border-white/10 bg-[hsl(var(--surface-raised))] space-y-4">
-                <h3 className="font-semibold text-sm text-[hsl(var(--ink))] flex items-center gap-2">
-                  <Shield className="size-4 text-[hsl(var(--signal))]" />
-                  Security Vault & Daily Spend
-                </h3>
-
-                <div className="space-y-3 font-instrument text-xs">
-                  <div>
-                    <label className="text-[10px] text-[hsl(var(--muted))] uppercase block mb-1">
-                      Daily Hard Spend Cap (USD)
-                    </label>
-                    <input
-                      type="text"
-                      value={spendCap}
-                      onChange={(e) => setSpendCap(e.target.value)}
-                      placeholder="5.00"
-                      className="w-full bg-[hsl(var(--surface))] border border-black/10 dark:border-white/10 rounded-[var(--radius-control)] px-3 py-1.5 text-xs text-[hsl(var(--ink))] focus:outline-none focus:border-[hsl(var(--signal))]"
-                    />
-                  </div>
-                  <div className="p-3 rounded-[var(--radius-control)] bg-black/5 dark:bg-white/5 text-[hsl(var(--muted))] space-y-1">
-                    <p>Current spend today: <strong className="text-[hsl(var(--ink))]">${(glmSettings.currentSpendUsd || 0).toFixed(2)}</strong></p>
-                    <p className="text-[10px]">When cap is reached, non-local models pause automatically.</p>
-                  </div>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* Section 5: Mobile Access & Gateway */}
-          {activeSection === "remote" && (
-            <section className="space-y-4">
-              <div className="p-4 rounded-[var(--radius-panel)] border border-black/10 dark:border-white/10 bg-[hsl(var(--surface-raised))] space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-semibold text-sm text-[hsl(var(--ink))] flex items-center gap-2">
-                      <Smartphone className="size-4 text-[hsl(var(--signal))]" />
-                      FRIDAY Mobile Access Gateway
-                    </h3>
-                    <p className="font-instrument text-[11px] text-[hsl(var(--muted))] mt-0.5">
-                      Operate FRIDAY remotely from your Android phone via LAN or Tunnel on port 18420.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="space-y-3 font-instrument text-xs">
-                  <div className="p-3 rounded-[var(--radius-control)] bg-black/5 dark:bg-white/5 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-[hsl(var(--muted))] uppercase">6-Digit Pairing PIN</span>
-                      <span className="font-mono font-bold text-sm text-[hsl(var(--signal))]">749201</span>
-                    </div>
-                    <p className="text-[11px] text-[hsl(var(--muted))]">
-                      Enter this PIN on your Android device during initial setup to establish secure pairing.
-                    </p>
-                  </div>
-
-                  <div className="p-3 rounded-[var(--radius-control)] border border-black/10 dark:border-white/10 bg-[hsl(var(--surface))] space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-[hsl(var(--ink))]">Android APK Client</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-[hsl(var(--signal))]/10 text-[hsl(var(--signal))] font-semibold">
-                        Ready (28 MB)
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-[hsl(var(--muted))]">
-                      Download and install the native Android APK directly to your phone:
-                    </p>
-                    <a
-                      href="http://localhost:18420/download/app.apk"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-control)] bg-[hsl(var(--ink))] text-[hsl(var(--surface))] font-medium text-xs hover:opacity-90 transition-opacity"
-                    >
-                      <Download className="size-3.5" />
-                      <span>Download friday-mobile.apk</span>
-                    </a>
-                  </div>
-
-                  <div className="pt-2 border-t border-black/10 dark:border-white/10 text-[11px] text-[hsl(var(--muted))] space-y-1">
-                    <p>Start Gateway: <code className="px-1.5 py-0.5 rounded bg-black/10 dark:bg-white/10 font-mono text-[10px] text-[hsl(var(--ink))]">python scripts/remote_gateway.py</code></p>
-                    <p>Supports Push-To-Talk voice streaming, live Utterance Contract cards, and Desktop Screen Peek.</p>
-                  </div>
-                </div>
-              </div>
-            </section>
-          )}
-        </div>
+        <footer className="settings-save-bar"><div aria-live="polite">{error ? <span className="settings-save-error">{error}</span> : savedNotice ? "Changes saved" : dirty ? "Unsaved changes" : loaded ? "All changes saved" : "Settings not loaded"}</div><div className="flex gap-2"><button type="button" className="quiet-action" disabled={!dirty || saving} onClick={() => { discard(); setSavedNotice(false) }}>Discard</button><button type="button" className="primary-action" disabled={!dirty || saving || loading} onClick={async () => { if (await save()) setSavedNotice(true) }}>{saving ? "Saving…" : "Save changes"}</button></div></footer>
       </div>
     </div>
   )
 }
-
 export default SettingsTab

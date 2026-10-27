@@ -11,6 +11,7 @@
 
 import type { RiskTier } from "@/lib/types"
 import { useFriday } from "@/lib/store"
+import { toast } from "sonner"
 import { invokeCommand } from "@/lib/ipc"
 
 export interface Command {
@@ -134,14 +135,14 @@ function derivedCommands(): Command[] {
       label: `${a.name} — ${a.enabled ? "disable" : "enable"}`,
       group: "Automations",
       keywords: a.trigger.type === "cron" ? a.trigger.expr : a.trigger.on,
-      run: () => s.toggleAutomation(a.id),
+      run: () => { void s.toggleAutomation(a.id).catch((error: unknown) => toast.error(String(error))) },
     })
     out.push({
       id: `au-run-${a.id}`,
       label: `Run "${a.name}" now`,
       group: "Automations",
       tier: "amber",
-      run: () => s.runAutomationNow(a.id),
+      run: () => { void s.runAutomationNow(a.id).catch((error: unknown) => toast.error(String(error))) },
     })
   }
 
@@ -152,7 +153,7 @@ function derivedCommands(): Command[] {
       group: "Memory",
       keywords: f.value,
       tier: "amber",
-      run: () => s.deleteFact(f.id),
+      run: () => { s.setTab("memory") },
     })
   }
 

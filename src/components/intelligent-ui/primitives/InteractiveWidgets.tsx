@@ -52,7 +52,7 @@ export const FlashcardPrimitive: React.FC<{
         {/* BACK SIDE (Answer) */}
         <div className="absolute inset-0 w-full h-full rounded-2xl border border-[hsl(var(--signal))]/30 bg-black/40 dark:bg-black/60 p-5 shadow-[0_20px_40px_-15px_rgba(0,0,0,0.6)] flex flex-col justify-between [transform:rotateY(180deg)] [backface-visibility:hidden]">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full bg-[hsl(var(--success))]/10 text-[hsl(var(--success))] border border-[hsl(var(--success))]/20">
               Answer & Insight
             </span>
             <span className="text-[11px] font-mono text-[hsl(var(--signal))] flex items-center gap-1">

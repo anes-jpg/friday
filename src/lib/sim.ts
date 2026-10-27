@@ -487,7 +487,7 @@ export function startTelemetry(): () => void {
     s.setLatency(
       s.latency.map((l) => ({
         ...l,
-        value: Math.max(1, Math.round(l.value * (0.96 + Math.random() * 0.08))),
+        value: Math.max(1, Math.round((l.value ?? l.budget) * (0.96 + Math.random() * 0.08))),
       }))
     )
   }, 2_000)

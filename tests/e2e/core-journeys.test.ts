@@ -1,8 +1,10 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as ipc from '../../src/lib/ipc';
 import { useFriday } from '../../src/lib/store';
 import type { PlanStep, TurnOutput, Confirmation } from '../../src/lib/types';
 
 describe('FRIDAY 12 Core E2E Journeys (§11, §12)', () => {
+  afterEach(() => vi.restoreAllMocks());
   beforeEach(() => {
     const store = useFriday.getState();
     store.closeBar();
@@ -242,22 +244,24 @@ describe('FRIDAY 12 Core E2E Journeys (§11, §12)', () => {
     expect(useFriday.getState().tab).toBe('chat');
   });
 
-  it('Journey 10: Stored memory fact addition and deletion', () => {
+  it('Journey 10: Stored memory fact addition and deletion', async () => {
+      vi.spyOn(ipc, 'deleteBackendFact').mockResolvedValueOnce(true);
     const store = useFriday.getState();
     const initialFactsCount = store.facts.length;
     expect(initialFactsCount).toBeGreaterThan(0);
 
     const factId = store.facts[0].id;
-    store.deleteFact(factId);
+    await store.deleteFact(factId);
     expect(useFriday.getState().facts.find((f) => f.id === factId)).toBeUndefined();
   });
 
-  it('Journey 11: Automation manual trigger execution', () => {
+  it('Journey 11: Automation pause persists before changing state', async () => {
+      vi.spyOn(ipc, 'invokeCommand').mockResolvedValueOnce(false);
     const store = useFriday.getState();
     const auto = store.automations[0];
     const initialStatus = auto.enabled;
 
-    store.toggleAutomation(auto.id);
+    await store.toggleAutomation(auto.id);
     expect(useFriday.getState().automations[0].enabled).toBe(!initialStatus);
   });
 
@@ -367,7 +371,7 @@ describe('FRIDAY 12 Core E2E Journeys (§11, §12)', () => {
     expect(focusResult).toBe(true);
   });
 
-  it('Journey 17: Speech-to-Text partial streaming & voice listener pipeline (§04, §07)', () => {
+  it('Journey 17: Native voice availability and partial transcript state (§04, §07)', async () => {
     const store = useFriday.getState();
 
     // 1. Initial state
@@ -375,8 +379,8 @@ describe('FRIDAY 12 Core E2E Journeys (§11, §12)', () => {
     expect(store.utterance.partial).toBe('');
 
     // 2. Start capture
-    store.startVoiceCapture?.();
-    expect(useFriday.getState().orb).toBe('listening');
+    await store.startVoiceCapture();
+    expect(useFriday.getState().orb).toBe('idle');
 
     // 3. Receive partial ASR text
     store.setPartial('open the browser');
@@ -388,7 +392,7 @@ describe('FRIDAY 12 Core E2E Journeys (§11, §12)', () => {
     expect(useFriday.getState().utterance.partial).toBe('');
 
     // 5. Stop capture
-    store.stopVoiceCapture?.();
+    await store.stopVoiceCapture();
     expect(useFriday.getState().orb).toBe('idle');
   });
 

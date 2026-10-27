@@ -7,7 +7,7 @@
  */
 
 import React, { useState } from "react"
-import { motion, AnimatePresence } from "framer-motion"
+import { motion, AnimatePresence } from "motion/react"
 import {
   X,
   Radio,
@@ -183,15 +183,14 @@ export const EntityDossierDrawer: React.FC<EntityDossierDrawerProps> = ({
 
               {/* Bencho-style Slide to Confirm Bar */}
               <div className="relative p-1 rounded-[var(--radius-panel)] border border-rose-500/30 bg-rose-950/20 overflow-hidden">
-                <div
-                  className="absolute inset-y-0 left-0 bg-rose-600/30 transition-all duration-75"
-                  style={{ width: `${slideProgress}%` }}
-                />
+                <svg className="absolute inset-y-0 left-0 w-full h-full pointer-events-none" preserveAspectRatio="none">
+                  <rect x="0" y="0" width={`${slideProgress}%`} height="100%" className="fill-rose-600/30 transition-all duration-75" />
+                </svg>
 
                 <div className="relative flex items-center justify-between px-3 py-2 text-xs font-mono">
                   <span className="text-rose-300 flex items-center gap-1.5">
                     {isTerminated ? (
-                      <CheckCircle2 className="size-3.5 text-emerald-400" />
+                      <CheckCircle2 className="size-3.5 text-white" />
                     ) : (
                       <Lock className="size-3.5 text-rose-400" />
                     )}
@@ -218,7 +217,7 @@ export const EntityDossierDrawer: React.FC<EntityDossierDrawerProps> = ({
               </div>
 
               {statusMessage && (
-                <p className={cn("text-[11px] font-mono", isTerminated ? "text-emerald-400" : "text-rose-300")}>
+                <p className={cn("text-[11px] font-mono", isTerminated ? "text-white" : "text-rose-300")}>
                   {statusMessage}
                 </p>
               )}

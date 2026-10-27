@@ -97,9 +97,9 @@ export const InAppGitViewer: React.FC<InAppGitViewerProps> = ({
   }
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-[#141517] shadow-[0_20px_40px_-15px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col h-[680px]">
+    <div className="rounded-2xl border border-white/10 bg-[hsl(var(--canvas))] shadow-[0_20px_40px_-15px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col h-full min-h-[360px]">
       {/* ── Toolbar Header ─────────────────────────────────────────────── */}
-      <div className="p-3.5 border-b border-white/[0.08] bg-[#161719] flex items-center justify-between">
+      <div className="p-3.5 border-b border-white/[0.08] bg-[hsl(var(--canvas))] flex items-center justify-between">
         <div className="flex items-center gap-2">
           <GitBranch className="size-4 text-[hsl(var(--signal))]" />
           <span className="font-mono text-xs font-semibold text-white">In-App Git & Diff Review</span>
@@ -142,7 +142,7 @@ export const InAppGitViewer: React.FC<InAppGitViewerProps> = ({
       {/* ── Main Body: 2 Columns ───────────────────────────────────────── */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Column: Modified Files & Commit Box */}
-        <div className="w-64 sm:w-72 border-r border-white/[0.08] bg-[#121315] flex flex-col overflow-hidden">
+        <div className="w-48 border-r border-white/[0.08] bg-[hsl(var(--canvas))] flex flex-col overflow-hidden">
           <div className="p-3 border-b border-white/[0.04] flex items-center justify-between">
             <span className="font-mono text-[10px] uppercase tracking-wider text-white/40 font-semibold">
               Changed Files ({gitInfo.modified_files.length})
@@ -171,7 +171,7 @@ export const InAppGitViewer: React.FC<InAppGitViewerProps> = ({
               })
             ) : (
               <div className="p-6 text-center text-white/30 font-mono text-xs space-y-1">
-                <CheckCircle2 className="size-6 mx-auto text-emerald-400/50 mb-1" />
+                <CheckCircle2 className="size-6 mx-auto text-[hsl(var(--success))]/50 mb-1" />
                 <div>Working tree clean.</div>
                 <div className="text-[10px] text-white/20">No uncommitted changes detected.</div>
               </div>
@@ -181,7 +181,7 @@ export const InAppGitViewer: React.FC<InAppGitViewerProps> = ({
           {/* In-App Commit Box */}
           <form
             onSubmit={handleCommit}
-            className="p-3 border-t border-white/[0.06] bg-[#141517] space-y-2"
+            className="p-3 border-t border-white/[0.06] bg-[hsl(var(--canvas))] space-y-2"
           >
             <input
               type="text"
@@ -208,9 +208,9 @@ export const InAppGitViewer: React.FC<InAppGitViewerProps> = ({
         </div>
 
         {/* Right Column: Unified Diff Viewer */}
-        <div className="flex-1 flex flex-col bg-[#161719] overflow-hidden p-4">
+        <div className="flex-1 flex flex-col bg-[hsl(var(--canvas))] overflow-hidden p-4">
           {gitInfo.diff ? (
-            <div className="flex-1 overflow-auto rounded-xl border border-white/[0.08] bg-[#101113] p-2">
+            <div className="flex-1 overflow-auto rounded-xl border border-white/[0.08] bg-[hsl(var(--canvas))] p-2">
               <DiffViewer
                 filename={selectedFile || `${gitInfo.branch} Diff`}
                 diff={gitInfo.diff}

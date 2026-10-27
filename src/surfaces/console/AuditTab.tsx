@@ -34,18 +34,16 @@ export const AuditTab: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[hsl(var(--surface))] text-[hsl(var(--ink))] p-6 overflow-hidden select-none">
+    <div className="legacy-workspace flex-1 flex flex-col h-full bg-[hsl(var(--surface))] text-[hsl(var(--ink))] p-6 overflow-hidden select-none">
       {/* Standard Page Header */}
       <div className="flex items-center justify-between border-b border-black/10 dark:border-white/10 pb-4 mb-4 shrink-0">
         <div>
           <div className="flex items-center gap-2">
-            <ScrollText className="size-4 text-[hsl(var(--signal))]" />
-            <h2 className="text-lg font-semibold tracking-tight text-[hsl(var(--ink))]">
-              Security Audit Log
+            <ScrollText className="size-4 text-[hsl(var(--ink))]" />
+            <h2 className="page-heading">
+              Activity audit
             </h2>
-            <WatermelonStatusBadge tone="violet">
-              SQLCIPHER • APPEND-ONLY
-            </WatermelonStatusBadge>
+
           </div>
           <p className="font-instrument text-[11px] text-[hsl(var(--muted))] mt-1">
             Cryptographic ledger of tool invocations, confirmations, and security decisions.
@@ -55,7 +53,7 @@ export const AuditTab: React.FC = () => {
         <Button
           size="sm"
           onClick={handleExport}
-          className="font-instrument text-xs bg-[hsl(var(--surface-raised))] border border-black/10 dark:border-white/10 text-[hsl(var(--ink))] hover:border-[hsl(var(--signal))] cursor-pointer gap-1.5"
+          className="font-instrument text-xs bg-[hsl(var(--surface-raised))] border border-black/10 dark:border-white/10 text-[hsl(var(--ink))] hover:border-[hsl(var(--ink))] cursor-pointer gap-1.5"
         >
           <Download className="size-3.5" />
           Export JSON
@@ -95,7 +93,7 @@ export const AuditTab: React.FC = () => {
               </div>
             ) : (
               filteredLogs.map((entry, idx) => {
-                const row = normalizeAuditEntry(entry as any, idx)
+                const row = normalizeAuditEntry(entry, idx)
                 const isSelected = selectedAuditId === row.id
                 return (
                   <div
@@ -104,7 +102,7 @@ export const AuditTab: React.FC = () => {
                     className={cn(
                       "grid grid-cols-12 items-center px-4 py-3 cursor-pointer transition-colors",
                       isSelected
-                        ? "bg-[hsl(var(--signal))]/10"
+                        ? "bg-[hsl(var(--ink))]/10"
                         : "hover:bg-black/[0.02] dark:hover:bg-white/[0.02]"
                     )}
                   >
@@ -132,7 +130,7 @@ export const AuditTab: React.FC = () => {
                         className={cn(
                           "px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tabular-telemetry",
                           row.decision.includes("ESCALAT")
-                            ? "bg-[hsl(var(--signal))]/10 text-[hsl(var(--signal))]"
+                            ? "bg-[hsl(var(--ink))]/10 text-[hsl(var(--ink))]"
                             : row.decision.includes("CONFIRM")
                             ? "bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))]"
                             : "bg-black/5 dark:bg-white/10 text-[hsl(var(--muted))]"
@@ -152,7 +150,7 @@ export const AuditTab: React.FC = () => {
         {selectedLog && (
           <WatermelonBentoCard className="w-[320px] shrink-0 p-4 font-instrument text-xs flex flex-col min-h-0 overflow-y-auto space-y-3">
             <div className="flex items-center justify-between border-b border-black/10 dark:border-white/10 pb-2">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--signal))]">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--ink))]">
                 Receipt #{selectedLog.id.slice(0, 8)}
               </span>
               <span className="text-[hsl(var(--muted))] tabular-telemetry">{selectedLog.durationMs}ms</span>

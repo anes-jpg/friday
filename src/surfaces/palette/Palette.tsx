@@ -10,11 +10,14 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import { useFridayStore } from "@/lib/store";
+import { useFriday } from "@/lib/store";
+import { useProjects } from "@/lib/projects";
+import { useSavedPlaces } from "@/lib/saved-places";
 
 export type PaletteAction = {
   id: string;
   label: string;
-  group: "Actions" | "Navigation" | "Recent" | "Settings";
+  group: "Actions" | "Navigation" | "Recent" | "Settings" | "Projects" | "Tasks & notes" | "Saved places" | "Conversations";
   shortcut?: string;
   run: () => void;
 };
@@ -42,12 +45,16 @@ export function Palette({
     startVoiceCapture,
     stopVoiceCapture,
     bargeIn,
-    inputMode,
+    mode: inputMode,
     setInputMode,
-    orbState,
+    orb: orbState,
   } = useFridayStore();
 
   const isOpen = controlledOpen !== undefined ? controlledOpen : paletteOpen;
+  const projects = useProjects(state => state.projects);
+  const workspaceItems = useProjects(state => state.items);
+  const savedPlaces = useSavedPlaces(state => state.places);
+  const threads = useFriday(state => state.threads);
   const handleOpenChange = (nextOpen: boolean) => {
     if (controlledOnOpenChange) {
       controlledOnOpenChange(nextOpen);
@@ -258,8 +265,19 @@ export function Palette({
     onOpenSettings,
   ]);
 
-  const effectiveActions = customActions || defaultActions;
-  const groups = ["Actions", "Navigation", "Recent", "Settings"] as const;
+  const openWork = (projectId: string, view: string, itemId?: string) => {
+    useProjects.getState().select(projectId);
+    openConsoleTab("projects");
+    window.dispatchEvent(new CustomEvent("friday:open-work-record", { detail: { projectId, view, itemId } }));
+  };
+  const recordActions: PaletteAction[] = [
+    ...projects.map(project => ({ id: `project-${project.id}`, label: project.name, group: "Projects" as const, run: () => openWork(project.id, "overview") })),
+    ...workspaceItems.filter(item => ["task", "note"].includes(item.type)).map(item => ({ id: `item-${item.id}`, label: `${item.title} · ${projects.find(project => project.id === item.projectId)?.name || "Project"}`, group: "Tasks & notes" as const, run: () => openWork(item.projectId, item.type === "note" ? "notes" : "tasks", item.id) })),
+    ...savedPlaces.map(place => ({ id: `place-${place.id}`, label: place.name, group: "Saved places" as const, run: () => { openConsoleTab("map"); window.dispatchEvent(new CustomEvent("friday:select-place", { detail: place })); sessionStorage.setItem("friday-open-place", JSON.stringify(place)); } })),
+    ...threads.map(thread => ({ id: `thread-${thread.id}`, label: thread.title, group: "Conversations" as const, run: () => { useFriday.getState().setActiveThread(thread.id); openConsoleTab("chat"); } })),
+  ];
+  const effectiveActions = customActions || [...defaultActions, ...recordActions];
+  const groups = ["Projects", "Tasks & notes", "Saved places", "Conversations", "Actions", "Navigation", "Recent", "Settings"] as const;
 
   return (
     <CommandDialog

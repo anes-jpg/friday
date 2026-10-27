@@ -51,7 +51,7 @@ export const BadgePrimitive: React.FC<{
 }> = ({ text, variant = "neutral" }) => {
   const styles =
     variant === "success"
-      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+      ? "bg-[hsl(var(--success))]/10 text-[hsl(var(--success))] border-[hsl(var(--success))]/20"
       : variant === "signal"
       ? "bg-[hsl(var(--signal))]/10 text-[hsl(var(--signal))] border-[hsl(var(--signal))]/25"
       : variant === "amber"
@@ -115,7 +115,7 @@ export const ListItemPrimitive: React.FC<ListItemProps> = ({
         isActive
           ? "border-[hsl(var(--signal))]/40 bg-[hsl(var(--signal))]/5 shadow-sm"
           : isDone
-          ? "border-emerald-500/20 bg-emerald-500/5 opacity-80"
+          ? "border-[hsl(var(--success))]/20 bg-[hsl(var(--success))]/5 opacity-80"
           : "border-black/5 dark:border-white/5 bg-black/10 dark:bg-black/25 hover:border-black/10 dark:hover:border-white/10"
       } ${onToggle ? "cursor-pointer" : ""}`}
     >
@@ -126,7 +126,7 @@ export const ListItemPrimitive: React.FC<ListItemProps> = ({
             isActive
               ? "text-[hsl(var(--signal))]"
               : isDone
-              ? "text-emerald-400"
+              ? "text-[hsl(var(--success))]"
               : "text-[hsl(var(--muted))]"
           }`}
         >
@@ -134,7 +134,7 @@ export const ListItemPrimitive: React.FC<ListItemProps> = ({
         </span>
         <div className="mt-1 flex items-center justify-center">
           {isDone ? (
-            <div className="size-4 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400">
+            <div className="size-4 rounded-full bg-[hsl(var(--success))]/20 flex items-center justify-center text-[hsl(var(--success))]">
               <Check className="size-2.5" />
             </div>
           ) : isActive ? (

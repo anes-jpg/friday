@@ -126,16 +126,16 @@ export const BrowserTab: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[hsl(var(--surface))] text-[hsl(var(--ink))] p-6 overflow-y-auto select-none">
+    <div className="legacy-workspace flex-1 flex flex-col h-full bg-[hsl(var(--surface))] text-[hsl(var(--ink))] p-6 overflow-y-auto select-none">
       {/* Standard Page Header */}
       <div className="flex items-center justify-between border-b border-black/10 dark:border-white/10 pb-4 mb-6 shrink-0">
         <div>
           <div className="flex items-center gap-2">
-            <Globe className="size-4 text-[hsl(var(--signal))]" />
-            <h2 className="text-lg font-semibold tracking-tight text-[hsl(var(--ink))]">
+            <Globe className="size-4 text-[hsl(var(--ink))]" />
+            <h2 className="page-heading">
               Browser Operator
             </h2>
-            <span className="font-instrument text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--signal))]/30 bg-[hsl(var(--signal))]/10 text-[hsl(var(--signal))] uppercase">
+            <span className="font-instrument text-[9px] px-1.5 py-0.5 rounded border border-white/10 bg-[hsl(var(--surface-raised))] text-[hsl(var(--ink))] uppercase">
               CDP ENGINE
             </span>
           </div>
@@ -164,7 +164,7 @@ export const BrowserTab: React.FC = () => {
       {/* Target URL Bar */}
       <div className="flex items-center gap-3 mb-6 bg-[hsl(var(--surface-raised))] border border-black/10 dark:border-white/10 rounded-[var(--radius-control)] p-2 font-instrument">
         <div className="flex items-center gap-2 px-3 text-xs text-[hsl(var(--muted))]">
-          <Globe className="size-3.5 text-[hsl(var(--signal))]" />
+          <Globe className="size-3.5 text-[hsl(var(--ink))]" />
           <span>TARGET_URL:</span>
         </div>
         <input
@@ -197,7 +197,7 @@ export const BrowserTab: React.FC = () => {
           </div>
           <div className="p-3 border border-black/10 dark:border-white/10 rounded-[var(--radius-panel)] bg-[hsl(var(--surface-raised))] font-instrument">
             <span className="text-[10px] text-[hsl(var(--muted))] uppercase">Snapshot Latency</span>
-            <div className="text-xs font-semibold text-[hsl(var(--signal))] mt-1">
+            <div className="text-xs font-semibold text-[hsl(var(--ink))] mt-1">
               {snapshot.elapsed_ms} ms
             </div>
           </div>
@@ -222,7 +222,7 @@ export const BrowserTab: React.FC = () => {
         <div className="lg:col-span-2 flex flex-col min-h-0 bg-[hsl(var(--surface-raised))] border border-black/10 dark:border-white/10 rounded-[var(--radius-panel)] p-4 overflow-y-auto max-h-[620px] font-instrument">
           <div className="flex items-center justify-between border-b border-black/10 dark:border-white/10 pb-3 mb-4">
             <span className="text-xs font-semibold text-[hsl(var(--ink))] uppercase tracking-wider flex items-center gap-2">
-              <Zap className="size-3.5 text-[hsl(var(--signal))]" />
+              <Zap className="size-3.5 text-[hsl(var(--ink))]" />
               Atomic Indexed Action Space
             </span>
             <span className="text-[10px] text-[hsl(var(--muted))]">
@@ -248,7 +248,7 @@ export const BrowserTab: React.FC = () => {
                     }`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <span className="size-7 rounded bg-[hsl(var(--signal))]/10 border border-[hsl(var(--signal))]/30 text-[hsl(var(--signal))] flex items-center justify-center font-bold text-xs shrink-0">
+                      <span className="size-7 rounded bg-[hsl(var(--surface-raised))] border border-white/10 text-[hsl(var(--ink))] flex items-center justify-center font-bold text-xs shrink-0">
                         [{el.node}]
                       </span>
                       <div className="min-w-0">
@@ -278,7 +278,7 @@ export const BrowserTab: React.FC = () => {
                         }}
                         className="h-7 text-[10px] font-instrument px-2.5"
                       >
-                        <MousePointerClick className="size-3 mr-1 text-[hsl(var(--signal))]" />
+                        <MousePointerClick className="size-3 mr-1 text-[hsl(var(--ink))]" />
                         Click
                       </Button>
                       {el.kind === "fill" && (
@@ -292,7 +292,7 @@ export const BrowserTab: React.FC = () => {
                           }}
                           className="h-7 text-[10px] font-instrument px-2.5"
                         >
-                          <TextCursorInput className="size-3 mr-1 text-[hsl(var(--signal))]" />
+                          <TextCursorInput className="size-3 mr-1 text-[hsl(var(--ink))]" />
                           Fill
                         </Button>
                       )}
@@ -314,7 +314,7 @@ export const BrowserTab: React.FC = () => {
           {/* Action Dispatcher Card */}
           <div className="p-4 border border-black/10 dark:border-white/10 rounded-[var(--radius-panel)] bg-[hsl(var(--surface-raised))] font-instrument">
             <span className="text-xs font-semibold text-[hsl(var(--ink))] uppercase tracking-wider flex items-center gap-2 mb-3">
-              <Play className="size-3.5 text-[hsl(var(--signal))]" />
+              <Play className="size-3.5 text-[hsl(var(--ink))]" />
               Dispatch Action
             </span>
 
@@ -375,7 +375,7 @@ export const BrowserTab: React.FC = () => {
           {/* Action History Timeline */}
           <div className="flex-1 flex flex-col p-4 border border-black/10 dark:border-white/10 rounded-[var(--radius-panel)] bg-[hsl(var(--surface-raised))] font-instrument overflow-hidden">
             <span className="text-xs font-semibold text-[hsl(var(--ink))] uppercase tracking-wider flex items-center gap-2 mb-3">
-              <Terminal className="size-3.5 text-[hsl(var(--signal))]" />
+              <Terminal className="size-3.5 text-[hsl(var(--ink))]" />
               Action History
             </span>
 
@@ -391,7 +391,7 @@ export const BrowserTab: React.FC = () => {
                     className="p-2.5 rounded-[var(--radius-control)] border border-black/10 dark:border-white/10 bg-[hsl(var(--surface))] text-xs space-y-1"
                   >
                     <div className="flex items-center justify-between text-[10px]">
-                      <span className="font-bold text-[hsl(var(--signal))]">
+                      <span className="font-bold text-[hsl(var(--ink))]">
                         [{log.action.toUpperCase()}] on Node [{log.node}]
                       </span>
                       <span className="text-[hsl(var(--muted))]">{log.timestamp}</span>

@@ -1,3 +1,4 @@
+import { automationFromSaved, type SavedAutomation } from "./automations"
 /** FRIDAY store — Zustand state with real AI dispatch & voice synthesis.
  *
  * Shared across Console and all surfaces, powered by Claude's clean domain model
@@ -32,6 +33,7 @@ import type {
   PendingPlanBackend,
 } from "./types"
 import { seed } from "./seed"
+import { DEFAULT_AI_URL, DEFAULT_HEAVY_MODEL, DEFAULT_LIGHT_MODEL, validateProviderConfig } from "./ai-config"
 import type { GlmSettings } from "./bindings"
 import {
   invokeCommand,
@@ -61,6 +63,59 @@ import {
 } from "./voice"
 import { PHRASE_BANK_CATALOG, preloadPhraseBank, playInstantAcousticCue } from "./phrasebank"
 import { executeAiTurn } from "./ai"
+import { flushWorkspaceWrites, type RunEvent } from "./workspace-native"
+
+interface PendingRequest { id: string; threadId: string; runId?: string; cancelled: boolean; lastSequence?:number }
+const pendingRequests = new Map<string, PendingRequest>()
+let visibleRequestId: string | undefined
+
+export function acceptRunEvent(event: RunEvent) {
+  const requestId = typeof event.detail.request_id === "string" ? event.detail.request_id : undefined
+  const request = requestId ? pendingRequests.get(requestId) : [...pendingRequests.values()].find(item => item.runId === event.run_id)
+  if (!request) return
+  if (event.sequence <= (request.lastSequence || 0)) return
+  request.lastSequence=event.sequence
+  request.runId = event.run_id
+  if (request.cancelled) { void invokeCommand("cancel_run", { runId: event.run_id }).catch(() => {}); return }
+  if (visibleRequestId !== request.id || useFriday.getState().activeThreadId !== request.threadId) return
+  const store = useFriday.getState()
+  if (event.status === "running" && event.step) {
+    const label = typeof event.detail.tool === "string" ? event.detail.tool : "Work through the request"
+    store.setPlan([{ id: event.step, label, tier: "green", status: "active" }])
+    store.setDoing(0)
+  }
+  if (["cancelled", "interrupted", "failed"].includes(event.status)) {
+    request.cancelled = event.status !== "failed"
+    store.setDoing(null); store.setOrb("idle")
+  }
+}
+
+export async function cancelActiveExecution() {
+  const started=performance.now()
+  stopFridayVoice()
+  useFriday.getState().setDoing(null)
+  useFriday.getState().setOrb("idle")
+  const request = visibleRequestId ? pendingRequests.get(visibleRequestId) : undefined
+  if (request) {
+    request.cancelled = true
+  }
+  await Promise.all([invokeCommand("barge_in").catch(() => {}),request?.runId && isDesktop ? invokeCommand("cancel_run", { runId:request.runId }).catch(()=>{}) : Promise.resolve()])
+  recordLatency("barge",performance.now()-started)
+}
+
+const latencySamples=new Map<string,number[]>()
+export function recordLatency(key:string,value:number) {
+  if (!Number.isFinite(value) || value<0) return
+  const samples=[...(latencySamples.get(key) || []).slice(-99),value]
+  latencySamples.set(key,samples)
+  const ordered=[...samples].sort((a,b)=>a-b)
+  const measured=ordered[Math.ceil(ordered.length*.95)-1]
+  useFriday.setState(state=>({latency:state.latency.map(stage=>stage.key===key ? {...stage,value:measured} : stage)}))
+}
+export function recordVoiceMetrics(metrics:Record<string,unknown>) {
+  if (typeof metrics.endpoint_ms==="number") recordLatency("endpoint",metrics.endpoint_ms)
+  if (typeof metrics.recognition_tail_ms==="number") recordLatency("asr",metrics.recognition_tail_ms)
+}
 
 if (typeof window !== "undefined") {
   const endpoint =
@@ -75,11 +130,15 @@ if (typeof window !== "undefined") {
       ? rawProfile
       : "bf_emma"
   setTimeout(() => {
-    preloadPhraseBank(endpoint, profile as any)
+    preloadPhraseBank(endpoint, profile)
   }, 1000)
 }
 
 export type ConsoleTab =
+  | "map"
+  | "cameras"
+  | "recordings"
+  | "alerts"
   | "chat"
   | "hud"
   | "beast"
@@ -125,23 +184,39 @@ export function getVoiceUiState(s: {
 }
 
 interface SpeechRecognitionInstance {
+  processLocally?: boolean
   continuous: boolean
   interimResults: boolean
   lang: string
   onstart: (() => void) | null
-  onresult: ((event: any) => void) | null
-  onerror: ((event: any) => void) | null
+  onresult: ((event: SpeechRecognitionResultEvent) => void) | null
+  onerror: ((event: { error: string }) => void) | null
   onend: (() => void) | null
   start: () => void
   stop: () => void
   abort: () => void
 }
 
+interface SpeechRecognitionResultEvent {
+  resultIndex: number
+  results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>
+}
+
+type SpeechRecognitionWindow = Window & {
+  webkitSpeechRecognition?: new () => SpeechRecognitionInstance
+  SpeechRecognition?: new () => SpeechRecognitionInstance
+}
+
 let activeSpeechRecognition: SpeechRecognitionInstance | null = null
 
 export function startWebSpeechRecognition() {
   if (typeof window === "undefined") return
-  const SpeechRec = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition
+  if (useFriday.getState().micMuted) {
+    console.warn("[Voice] Web Speech blocked: microphone is currently muted.")
+    return
+  }
+  const speechWindow = window as SpeechRecognitionWindow
+  const SpeechRec = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition
   if (!SpeechRec) return
 
   try {
@@ -151,6 +226,9 @@ export function startWebSpeechRecognition() {
     }
 
     const rec = new SpeechRec() as SpeechRecognitionInstance
+    // Browser speech must explicitly support local recognition; never use cloud ASR.
+    if (!("processLocally" in rec)) return
+    rec.processLocally = true
     rec.continuous = true
     rec.interimResults = true
     rec.lang = "en-US"
@@ -159,7 +237,13 @@ export function startWebSpeechRecognition() {
       useFriday.setState({ orb: "listening" })
     }
 
-    rec.onresult = (event: any) => {
+    rec.onresult = (event: SpeechRecognitionResultEvent) => {
+      if (useFriday.getState().micMuted) {
+        try { rec.stop() } catch {}
+        activeSpeechRecognition = null
+        return
+      }
+
       let interim = ""
       let finalTranscript = ""
 
@@ -187,7 +271,7 @@ export function startWebSpeechRecognition() {
       }
     }
 
-    rec.onerror = (e: any) => {
+    rec.onerror = (e: { error: string }) => {
       console.warn("Speech recognition notice:", e?.error)
     }
 
@@ -325,18 +409,20 @@ interface State {
   appendToolCall: (threadId: string, call: ToolCall) => void
   updateToolCall: (threadId: string, id: string, patch: Partial<ToolCall>) => void
   appendAudit: (e: AuditEntry) => void
-  pushMessage: (threadId: string, msg: Thread["messages"][number]) => void
+  pushMessage: (threadId: string, msg: Thread["messages"][number], persist?: boolean) => void
   patchLastMessage: (threadId: string, patch: Partial<Thread["messages"][number]>) => void
 
   toggleFactPin: (id: string) => void
-  deleteFact: (id: string) => void
+  deleteFact: (id: string) => Promise<void>
   addFact: (f: Fact) => void
   setFacts: (facts: Fact[]) => void
   loadFactsFromBackend: () => Promise<void>
   addFactToBackend: (subject: string, value: string, tier?: Fact["tier"]) => Promise<Fact>
-  toggleAutomation: (id: string) => void
-  addAutomation: (auto: Omit<Automation, "id" | "history">) => Automation
-  runAutomationNow: (id: string) => void
+  toggleAutomation: (id: string) => Promise<void>
+  addAutomation: (auto: Omit<Automation, "id" | "history">) => Promise<Automation>
+  runAutomationNow: (id: string) => Promise<string>
+  loadAutomationsFromBackend: () => Promise<void>
+  deleteAutomation: (id: string) => Promise<void>
   toggleSkill: (id: string) => void
 
   setLatency: (l: LatencyStage[]) => void
@@ -375,35 +461,35 @@ interface State {
   killSwitch: () => void
 
   /* Legacy adapter properties for UI compatibility */
-  activeSurface?: string
-  setActiveSurface?: (s: string) => void
-  setActiveConsoleTab?: (t: ConsoleTab) => void
-  setPaletteOpen?: (o: boolean) => void
-  startVoiceCapture?: () => void
-  stopVoiceCapture?: () => void
-  bargeIn?: () => void
-  updateAudioRms?: (v: number) => void
-  loadBackendData?: () => Promise<void>
-  orbState?: OrbState
-  setOrbState?: (s: OrbState) => void
-  inputMode?: Mode
-  setInputMode?: (m: Mode) => void
-  telemetry?: any
+  activeSurface: string
+  setActiveSurface: (s: string) => void
+  setActiveConsoleTab: (t: ConsoleTab) => void
+  setPaletteOpen: (o: boolean) => void
+  startVoiceCapture: () => Promise<void>
+  stopVoiceCapture: () => Promise<void>
+  bargeIn: () => Promise<unknown>
+  updateAudioRms: (v: number) => void
+  loadBackendData: () => Promise<void>
+  orbState: OrbState
+  setOrbState: (s: OrbState) => void
+  inputMode: Mode
+  setInputMode: (m: Mode) => void
+  telemetry: LatencyStage[]
   glmSettings: GlmSettings
   updateGlmSettings: (settings: Partial<GlmSettings>) => void
   
-  caretText?: string
-  setCaretText?: (s: string) => void
-  asrPartial?: string
-  pendingPlan?: PlanStep[] | PendingPlanBackend | null
-  openConsoleTab?: (t: string) => void
-  confirmPendingPlan?: (planId?: string) => Promise<void> | void
-  cancelPendingPlan?: (planId?: string) => void
-  undoLastAction?: () => void
-  activeConsoleTab?: string
-  setActiveThreadId?: (id: string) => void
-  simulateVoiceTurn?: () => void
-  auditLog?: any[]
+  caretText: string
+  setCaretText: (s: string) => void
+  asrPartial: string
+  pendingPlan: PlanStep[] | PendingPlanBackend | null
+  openConsoleTab: (t: string) => void
+  confirmPendingPlan: (planId?: string) => Promise<void>
+  cancelPendingPlan: (planId?: string) => void
+  undoLastAction: () => Promise<void>
+  activeConsoleTab: string
+  setActiveThreadId: (id: string) => void
+  simulateVoiceTurn: () => void
+  auditLog: AuditEntry[]
 }
 
 export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => ({
@@ -421,26 +507,26 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
 
   tab: "chat",
   theme: (typeof window !== "undefined" && (localStorage.getItem("friday-theme") as "dark" | "bright")) || "dark",
-  threads: seed.threads,
-  activeThreadId: seed.threads[0]?.id ?? null,
+  threads: [],
+  activeThreadId: null,
   chatHistoryOpen: false,
   spatialHudActive: false,
   contextInspectorOpen: true,
   debugDrawerOpen: false,
 
-  facts: seed.facts,
-  audit: seed.audit,
-  automations: seed.automations,
-  skills: seed.skills,
-  latency: seed.latency,
-  resources: seed.resources,
+  facts: [],
+  audit: [],
+  automations: [],
+  skills: [],
+  latency: [...seed.latency.filter(stage=>stage.key!=="wake").map(stage=>({...stage,value:null})),{key:"barge",label:"Barge-in stop",value:null,budget:200,kind:"local"}],
+  resources: {cpu_pct:null,rss_mb:null,thermal_c:null,asr_warm:false,tts_warm:false},
   connectivity: "online",
   spend: { used: 0.14, cap: 5.0 },
 
   glmSettings: {
-    baseUrl: (typeof window !== "undefined" && localStorage.getItem("friday_glm_base_url")) || "https://api.deepseek.com/v1",
-    heavyModel: (typeof window !== "undefined" && (localStorage.getItem("friday_glm_heavy_model") || localStorage.getItem("friday_glm_model"))) || "deepseek-chat",
-    lightModel: (typeof window !== "undefined" && localStorage.getItem("friday_glm_light_model")) || "deepseek-chat",
+    baseUrl: (typeof window !== "undefined" && localStorage.getItem("friday_glm_base_url")) || DEFAULT_AI_URL,
+    heavyModel: (typeof window !== "undefined" && (localStorage.getItem("friday_glm_heavy_model") || localStorage.getItem("friday_glm_model"))) || DEFAULT_HEAVY_MODEL,
+    lightModel: (typeof window !== "undefined" && localStorage.getItem("friday_glm_light_model")) || DEFAULT_LIGHT_MODEL,
     hasKey: (typeof window !== "undefined" && localStorage.getItem("friday_glm_has_key") === "true") || false,
     dailySpendCapUsd: (typeof window !== "undefined" && Number(localStorage.getItem("friday_glm_spend_cap"))) || 5.0,
     currentSpendUsd: 0.14,
@@ -585,7 +671,18 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
   closeBar: () => set({ barOpen: false, paletteOpen: false, query: "" }),
   setPalette: (paletteOpen) => set({ paletteOpen }),
   setQuery: (query) => set({ query }),
-  toggleMic: () => set((s) => ({ micMuted: !s.micMuted })),
+  toggleMic: () => {
+    const nextMuted = !useFriday.getState().micMuted
+    set({ micMuted: nextMuted })
+    if (nextMuted) {
+      stopWebSpeechRecognition()
+      stopFridayVoice()
+      set({ orb: "idle", utterance: EMPTY_UTTERANCE })
+      invokeCommand("stop_mic_capture").catch(() => {})
+      invokeCommand("stop_listening").catch(() => {})
+      invokeCommand("barge_in").catch(() => {})
+    }
+  },
   toggleListening: () => {
     const s = useFriday.getState()
     if (s.orb === "listening") {
@@ -730,7 +827,13 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
       return { chatHistoryOpen: next }
     })
   },
-  setSpatialHudActive: (active: boolean) => set({ spatialHudActive: active }),
+  setSpatialHudActive: (active: boolean) => {
+    set({ spatialHudActive: active })
+    void import("./window-mode").then(async ({ useWindowMode }) => {
+      if (active) await useWindowMode.getState().enterSpatial()
+      else await useWindowMode.getState().exitSpatial()
+    })
+  },
   hydrateThreadsFromBackend: async () => {
     try {
       const [backendThreads, activeId] = await Promise.all([
@@ -834,7 +937,7 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
 
   appendAudit: (e) => set((s) => ({ audit: [e, ...s.audit].slice(0, 200) })),
 
-  pushMessage: (threadId, msg) => {
+  pushMessage: (threadId, msg, persist = true) => {
     set((s) => ({
       threads: s.threads.map((t) =>
         t.id === threadId
@@ -847,7 +950,7 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
           : t
       ),
     }))
-    ipcAddMessage(threadId, msg.role, msg.say, msg.show || msg.content).catch(() => {})
+    if (persist) ipcAddMessage(threadId, msg.role, msg.say, msg.show || msg.content).catch(() => {})
   },
 
   patchLastMessage: (threadId, patch) =>
@@ -865,8 +968,9 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
       facts: s.facts.map((f) => (f.id === id ? { ...f, pinned: !f.pinned } : f)),
     })),
 
-  deleteFact: (id) => {
-    deleteBackendFact(id).catch(() => {})
+  deleteFact: async (id) => {
+    const deleted = await deleteBackendFact(id)
+    if (!deleted) throw new Error("The memory was not deleted. Reload and try again.")
     set((s) => ({ facts: s.facts.filter((f) => f.id !== id) }))
   },
 
@@ -874,108 +978,60 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
   setFacts: (facts) => set({ facts }),
 
   loadFactsFromBackend: async () => {
-    try {
-      const dbFacts = await getBackendFacts()
-      if (dbFacts && dbFacts.length > 0) {
-        const parsed: Fact[] = dbFacts.map((db, idx) => {
-          let subject = "Personal fact"
-          let value = db.content
-          if (db.content.includes("—")) {
-            const parts = db.content.split("—")
-            subject = parts[0].trim()
-            value = parts.slice(1).join("—").trim()
-          } else if (db.content.includes(":")) {
-            const parts = db.content.split(":")
-            subject = parts[0].trim()
-            value = parts.slice(1).join(":").trim()
-          }
-
-          let tier: Fact["tier"] = "semantic"
-          const lower = db.content.toLowerCase()
-          if (lower.includes("like") || lower.includes("prefer") || lower.includes("rule") || lower.includes("always")) {
-            tier = "procedural"
-          } else if (lower.includes("yesterday") || lower.includes("meeting") || lower.includes("at ") || lower.includes("on ")) {
-            tier = "episodic"
-          } else if (lower.includes("doc") || lower.includes("file") || lower.includes("readme")) {
-            tier = "document"
-          }
-
-          return {
-            id: db.id,
-            subject,
-            value,
-            tier,
-            confidence: db.confidence || 0.95,
-            source_message_id: db.source_message_id || "sqlite",
-            created_at: new Date(db.created_at * 1000).toISOString(),
-            pinned: idx === 0,
-          }
-        })
-
-        set((s) => {
-          const existingIds = new Set(parsed.map((p) => p.id))
-          const unmerged = s.facts.filter((f) => !existingIds.has(f.id))
-          return { facts: [...parsed, ...unmerged] }
-        })
+    const dbFacts = await getBackendFacts()
+    const parsed: Fact[] = (dbFacts ?? []).map((db) => {
+      const separator = db.content.includes("—") ? "—" : ":"
+      const parts = db.content.split(separator)
+      return {
+        id: db.id, subject: parts.length > 1 ? parts[0].trim() : "Saved fact",
+        value: parts.length > 1 ? parts.slice(1).join(separator).trim() : db.content,
+        tier: "semantic", confidence: db.confidence,
+        source_message_id: db.source_message_id ?? "Saved context",
+        created_at: new Date(db.created_at * 1000).toISOString(), pinned: false,
       }
-    } catch {
-      // Browser fallback
-    }
+    })
+    set({ facts: parsed })
   },
 
   addFactToBackend: async (subject: string, value: string, tier: Fact["tier"] = "semantic") => {
-    const content = `${subject} — ${value}`
-    let backendId = `fact-${Date.now()}`
-    try {
-      const res = await addBackendFact(content, 0.95)
-      if (res && res.id) {
-        backendId = res.id
-      }
-    } catch {
-      // Fallback
+    if (!subject.trim() || !value.trim()) throw new Error("Enter a subject and a memory.")
+    const saved = await addBackendFact(subject.trim() + " — " + value.trim(), 1)
+    if (!saved?.id) throw new Error("The memory was not saved.")
+    const fact: Fact = {
+      id: saved.id, subject: subject.trim(), value: value.trim(), tier,
+      confidence: saved.confidence, source_message_id: saved.source_message_id ?? "user-direct",
+      created_at: new Date(saved.created_at * 1000).toISOString(), pinned: false,
     }
-    const newFact: Fact = {
-      id: backendId,
-      subject,
-      value,
-      tier,
-      confidence: 0.95,
-      source_message_id: "user-direct",
-      created_at: new Date().toISOString(),
-      pinned: false,
-    }
-    set((s) => ({ facts: [newFact, ...s.facts] }))
-    return newFact
+    set((s) => ({ facts: [fact, ...s.facts] }))
+    return fact
   },
 
-  toggleAutomation: (id) =>
-    set((s) => ({
-      automations: s.automations.map((a) =>
-        a.id === id ? { ...a, enabled: !a.enabled } : a
-      ),
-    })),
-
-  addAutomation: (auto) => {
-    const newAuto: Automation = {
-      ...auto,
-      id: `auto-${Date.now()}`,
-      history: ["ok"],
-    }
-    set((s) => ({ automations: [newAuto, ...s.automations] }))
-    return newAuto
+  loadAutomationsFromBackend: async () => {
+    const saved = await invokeCommand<SavedAutomation[]>("get_automations")
+    set({ automations: (saved ?? []).map(automationFromSaved) })
   },
-
-  runAutomationNow: (id) =>
-    set((s) => ({
-      automations: s.automations.map((a) => {
-        if (a.id !== id) return a
-        return {
-          ...a,
-          last_run: new Date().toISOString(),
-          history: [...a.history.slice(1), "ok"],
-        }
-      }),
-    })),
+  toggleAutomation: async (id) => {
+    const enabled = await invokeCommand<boolean>("toggle_automation", { id })
+    set((s) => ({ automations: s.automations.map((auto) => auto.id === id ? { ...auto, enabled, next_run: undefined } : auto) }))
+  },
+  addAutomation: async (auto) => {
+    if (auto.trigger.type !== "cron") throw new Error("Choose a recurring schedule.")
+    const saved = await invokeCommand<SavedAutomation>("create_automation", { name: auto.name, expr: auto.trigger.expr, tool: auto.actionTool, args: auto.actionArgs ?? "{}" })
+    if (!saved?.id) throw new Error("The automation was not saved.")
+    const created = automationFromSaved(saved)
+    set((s) => ({ automations: [created, ...s.automations] }))
+    return created
+  },
+  deleteAutomation: async (id) => {
+    const deleted = await invokeCommand<boolean>("delete_automation", { id })
+    if (!deleted) throw new Error("The automation was not deleted. Reload and try again.")
+    set((s) => ({ automations: s.automations.filter((auto) => auto.id !== id) }))
+  },
+  runAutomationNow: async (id) => {
+    const result = await invokeCommand<string>("trigger_automation", { id })
+    await useFriday.getState().loadAutomationsFromBackend()
+    return result
+  },
 
   toggleSkill: (id) =>
     set((s) => ({
@@ -988,12 +1044,13 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
 
   /* AI Models & Modular Router */
   aiModels: seed.initialAiModels,
-  activeModelId: seed.initialAiModels.find((m) => m.is_active)?.id || "friday-1b-operator",
+  activeModelId: seed.initialAiModels.find((m) => m.is_active)?.id || DEFAULT_HEAVY_MODEL,
   testingModelId: null,
 
   loadAiModels: async () => {
     try {
-      const models = await invokeCommand<AiModel[]>("get_ai_models")
+      const loaded = await invokeCommand<AiModel[]>("get_ai_models")
+      const models = loaded?.filter((m) => validateProviderConfig(m.base_url, m.name) === null)
       if (models && models.length > 0) {
         const active = models.find((m) => m.is_active)?.id || models[0].id
         set({ aiModels: models, activeModelId: active })
@@ -1004,14 +1061,32 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
   },
 
   setActiveModel: async (id: string) => {
+    const targetModel = useFriday.getState().aiModels.find((m) => m.id === id)
+    if (!targetModel) throw new Error("Model not found")
+    if (targetModel.provider.startsWith("profile:")) {
+      const { useSettings, profilesToModels } = await import("./settings")
+      const settings = useSettings.getState()
+      const current = await invokeCommand<import("./settings").DesktopSettings>("activate_provider_profile", { profileId: id })
+      useSettings.setState({ saved: current, draft: { ...settings.draft, activeProfileId: id, revision: current.revision } })
+      const profile = current.profiles.find((item) => item.id === id)
+      if (profile) useFriday.getState().updateGlmSettings({ baseUrl: profile.baseUrl, heavyModel: profile.model, lightModel: profile.lightModel, hasKey: profile.hasKey })
+      set({ aiModels: profilesToModels(current), activeModelId: id })
+      return
+    }
+    const error = validateProviderConfig(targetModel.base_url, targetModel.name)
+    if (error) throw new Error(error)
+    await invokeCommand("set_active_model", { modelId: id })
     set((s) => ({
       activeModelId: id,
       aiModels: s.aiModels.map((m) => ({ ...m, is_active: m.id === id })),
+      glmSettings: { ...s.glmSettings, heavyModel: targetModel.provider === "local_edge" ? targetModel.id : targetModel.name, lightModel: targetModel.provider === "local_edge" ? targetModel.id : targetModel.name, baseUrl: targetModel.base_url },
     }))
-    try {
-      await invokeCommand("set_active_model", { modelId: id })
-    } catch (e) {
-      console.warn("Failed to set active model via IPC:", e)
+    if (typeof window !== "undefined") {
+      const modelTag = targetModel.provider === "local_edge" ? targetModel.id : targetModel.name
+      localStorage.setItem("friday_glm_heavy_model", modelTag)
+      localStorage.setItem("friday_glm_light_model", modelTag)
+      localStorage.setItem("friday_glm_model", modelTag)
+      localStorage.setItem("friday_glm_base_url", targetModel.base_url)
     }
   },
 
@@ -1019,6 +1094,7 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
     set({ testingModelId: id })
     try {
       const updated = await invokeCommand<AiModel>("test_model_connection", { modelId: id })
+      if (!updated) throw new Error("Model connection testing requires the desktop app")
       if (updated) {
         set((s) => ({
           aiModels: s.aiModels.map((m) => (m.id === id ? updated : m)),
@@ -1034,10 +1110,10 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
           const lat = Math.round(m.telemetry.avg_latency_ms || 1800)
           const newBlock = {
             key: `tb-${Date.now()}`,
-            color: "bg-emerald-500",
-            status: "200 OK",
-            latency_ms: lat,
-            tooltip: `${time} · ${lat}ms · 200 OK`,
+            color: "bg-red-500",
+            status: "Connection failed",
+            latency_ms: 0,
+            tooltip: `${time} · Connection failed`,
           }
           const history = [...m.telemetry.tracker_history.slice(-49), newBlock]
           return {
@@ -1080,6 +1156,8 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
   },
 
   addModel: async (model: AiModel) => {
+    const configError = validateProviderConfig(model.base_url, model.name)
+    if (configError) throw new Error(configError)
     set((s) => ({
       aiModels: [...s.aiModels.filter((m) => m.id !== model.id), model],
     }))
@@ -1199,18 +1277,29 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
   setActiveConsoleTab: (t) => set({ tab: t }),
   setPaletteOpen: (o) => set({ paletteOpen: o }),
   startVoiceCapture: () => {
-    useFriday.setState({ orb: "listening", utterance: EMPTY_UTTERANCE });
-    startWebSpeechRecognition();
-    return invokeCommand("start_mic_capture").catch(() => invokeCommand("start_listening").catch(() => {}));
+    if (!isDesktop) return Promise.resolve()
+    stopFridayVoice()
+    useFriday.setState({ orb: "idle", micMuted: false, utterance: EMPTY_UTTERANCE });
+    const acknowledged=performance.now()
+    playInstantAcousticCue()
+    window.dispatchEvent(new CustomEvent("friday:voice-acknowledged", { detail: { acknowledgement_ms: performance.now()-acknowledged } }))
+    return invokeCommand<void>("start_mic_capture").then(() => {
+      if (!useFriday.getState().micMuted) useFriday.setState({ orb: "listening" })
+    }).catch((error: unknown) => {
+      useFriday.setState({ orb: "idle", micMuted: true });
+      window.dispatchEvent(new CustomEvent("friday:voice-error", { detail: String(error) }))
+    });
   },
   stopVoiceCapture: () => {
     stopWebSpeechRecognition();
-    useFriday.setState((s) => ({ orb: s.orb === "listening" ? "idle" : s.orb }));
-    return invokeCommand("stop_mic_capture").catch(() => invokeCommand("stop_listening").catch(() => {}));
+    return invokeCommand<void>("finish_mic_capture").catch((error:unknown)=>{
+      useFriday.setState({orb:"idle"});
+      window.dispatchEvent(new CustomEvent("friday:voice-error",{detail:String(error)}))
+    });
   },
-  bargeIn: () => invokeCommand("barge_in").catch(() => {}),
+  bargeIn: cancelActiveExecution,
   updateAudioRms: (v) => set({ level: v }),
-  loadBackendData: () => useFriday.getState().loadFactsFromBackend(),
+  loadBackendData: async () => { if (isDesktop) await useFriday.getState().loadFactsFromBackend().catch((error: unknown) => console.warn("Saved context unavailable", error)) },
   get orbState() { return useFriday.getState().orb },
   setOrbState: (s) => set({ orb: s }),
   get inputMode() { return useFriday.getState().mode },
@@ -1235,7 +1324,7 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
     if (targetId) {
       try {
         store.setOrb("thinking")
-        const confirmed = await invokeCommand<PendingPlanBackend>("confirm_plan", { planId: targetId })
+        const confirmed = await invokeCommand<PendingPlanBackend>("confirm_plan", { planId: targetId, confirmation: "confirm" })
         store.resetUtterance()
         store.setOrb("idle")
 
@@ -1265,6 +1354,7 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
         playInstantAcousticCue()
       } catch (e) {
         console.warn("Failed to confirm plan:", e)
+        store.setResult({ say: String(e instanceof Error ? e.message : e), show: "The plan was not completed. Review its run history before retrying.", delivery: { emotion: "calm-concerned", pace: 1, energy: 0.6, pause_before_ms: 0, emphasis: [] } })
         store.setOrb("idle")
       }
     }
@@ -1278,6 +1368,7 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
     const targetId = planId || lastMsgWithPlan?.pending_plan?.id || lastMsgWithPlan?.pendingPlan?.id
 
     if (targetId) {
+      if (isDesktop) void invokeCommand("cancel_plan", { planId: targetId }).catch((error: unknown) => store.setResult({ say: String(error), delivery: { emotion: "calm-concerned", pace: 1, energy: 0.6, pause_before_ms: 0, emphasis: [] } }))
       set((s) => ({
         threads: s.threads.map((t) => {
           const hasMatchingMsg = t.messages.some((m) => m.pending_plan?.id === targetId || m.pendingPlan?.id === targetId)
@@ -1300,8 +1391,8 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
       }))
     }
   },
-  undoLastAction: () => {
-    invokeCommand("undo_last").catch(() => {});
+  undoLastAction: async () => {
+    await invokeCommand("undo_last");
   },
   get activeConsoleTab() { return useFriday.getState().tab },
   setActiveThreadId: (id) => set({ activeThreadId: id }),
@@ -1334,8 +1425,8 @@ export function formatAutoThreadTitle(prompt: string): string {
   return sliceZone.slice(0, 38).trim() + "…"
 }
 
-/** Dispatches a real message turn into the active thread and queries backend GLM. */
-export async function sendChatMessage(text: string, expandedMode: boolean = false) {
+/** Dispatches a real message turn into the active thread and queries the configured provider. */
+export async function sendChatMessage(text: string, expandedMode: boolean = false, context: { projectId?: string; providerProfileId?: string; threadId?: string } = {}) {
   const clean = text.trim()
   if (!clean) return
 
@@ -1343,7 +1434,11 @@ export async function sendChatMessage(text: string, expandedMode: boolean = fals
   playInstantAcousticCue()
 
   const store = useFriday.getState()
-  const threadId = store.activeThreadId || store.threads[0]?.id || "t-1"
+  const threadId = context.threadId || store.activeThreadId || store.threads[0]?.id || store.createThread()
+  const providerProfileId=context.providerProfileId || store.activeModelId
+  const request: PendingRequest = { id: crypto.randomUUID(), threadId, cancelled: false }
+  pendingRequests.set(request.id, request)
+  visibleRequestId = request.id
 
   const userMsgId = `m-${Date.now()}-u`
   const asstMsgId = `m-${Date.now()}-a`
@@ -1366,9 +1461,13 @@ export async function sendChatMessage(text: string, expandedMode: boolean = fals
     content: clean,
     say: clean,
     created_at: new Date().toISOString(),
-  })
+  }, !isDesktop)
 
-  // 2. Set thinking state
+  // Every turn starts the same visible contract, including ordinary chat replies.
+  store.resetUtterance()
+  store.setHeard(clean)
+  store.setPlan([{ id: `${userMsgId}-respond`, label: "Work through your instruction", tier: "green", status: "active" }])
+  store.setDoing(0)
   store.setOrb("thinking")
 
   try {
@@ -1377,7 +1476,11 @@ export async function sendChatMessage(text: string, expandedMode: boolean = fals
       content: m.content,
     }))
 
-    const aiRes = await executeAiTurn(clean, recentMessages, expandedMode ? "expanded" : "command")
+    await flushWorkspaceWrites()
+    const aiRes = await executeAiTurn(clean, recentMessages, expandedMode ? "expanded" : "command", { ...context, providerProfileId, threadId, requestId: request.id })
+    request.runId = aiRes.runId
+    recordLatency("ttft",aiRes.ttftMs)
+    if (request.cancelled) return
 
     store.pushMessage(threadId, {
       id: asstMsgId,
@@ -1403,7 +1506,49 @@ export async function sendChatMessage(text: string, expandedMode: boolean = fals
         emphasis: [],
       },
       created_at: new Date().toISOString(),
+    }, !isDesktop)
+
+    if (visibleRequestId !== request.id || useFriday.getState().activeThreadId !== threadId) return
+
+    // Actuate client-side UI navigations if requested by on-device or SLM tools
+    if (aiRes.toolCalls?.some((tc) => tc.name === "os.settings" || tc.name === "settings" || tc.name === "windows_settings")) {
+      store.setTab("settings")
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("friday:os-mode", { detail: "console" }))
+      }
+    }
+    if (aiRes.toolCalls?.some((tc) => tc.name === "os.godseye")) {
+      store.setSpatialHudActive(true)
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("friday:os-mode", { detail: "godseye" }))
+      }
+    }
+    if (aiRes.toolCalls?.some((tc) => tc.name === "os.split")) {
+      store.setSpatialHudActive(true)
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("friday:os-mode", { detail: "unified" }))
+      }
+    }
+    if (aiRes.toolCalls?.some((tc) => tc.name === "os.legion")) {
+      store.setSpatialHudActive(true)
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("friday:os-mode", { detail: "legion" }))
+      }
+    }
+    if (aiRes.toolCalls?.some((tc) => tc.name === "os.grid")) {
+      store.setSpatialHudActive(true)
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("friday:os-mode", { detail: "unified" }))
+      }
+    }
+
+    store.setResult({
+      say: aiRes.say,
+      show: aiRes.show,
+      delivery: { emotion: aiRes.emotion, pace: 1, energy: 0.6, pause_before_ms: 0, emphasis: [] },
     })
+    store.setDoing(null)
+    store.setPlan([{ id: `${userMsgId}-respond`, label: "Work through your instruction", tier: "green", status: aiRes.failed ? "failed" : "done" }])
 
     if (aiRes.pendingPlan) {
       const rawTier = String(aiRes.pendingPlan.tier).toLowerCase()
@@ -1421,7 +1566,7 @@ export async function sendChatMessage(text: string, expandedMode: boolean = fals
 
       store.setPlan(planSteps)
       store.setHeard(clean)
-      store.setDoing(0)
+      store.setDoing(null)
       store.setResult({
         say: aiRes.say,
         delivery: {
@@ -1447,16 +1592,25 @@ export async function sendChatMessage(text: string, expandedMode: boolean = fals
     // Synchronize associative memory facts from backend SQLite
     store.loadFactsFromBackend().catch(() => {})
   } catch (err: unknown) {
+    if (request.cancelled) return
     const errMsg = typeof err === "string" ? err : err instanceof Error ? err.message : JSON.stringify(err)
     store.pushMessage(threadId, {
       id: asstMsgId,
       role: "assistant",
-      content: `### Response Notice\n\n${errMsg}\n\nPlease check your GLM endpoint and API key in Settings.`,
+      content: `### Response Notice\n\n${errMsg}\n\nPlease check your provider endpoint and API key in Settings.`,
       say: "There was an issue processing your request. Please check Settings.",
-      show: `### Response Notice\n\n${errMsg}\n\nPlease check your GLM endpoint and API key in Settings.`,
+      show: `### Response Notice\n\n${errMsg}\n\nPlease check your provider endpoint and API key in Settings.`,
       created_at: new Date().toISOString(),
     })
     store.setOrb("idle")
+    store.setDoing(null)
+    store.setPlan([{ id: `${userMsgId}-respond`, label: "Work through your instruction", tier: "green", status: "failed" }])
+    store.setResult({
+      say: "The instruction could not be completed. Check the connection in Settings and try again.",
+      delivery: { emotion: "calm-concerned", pace: 1, energy: 0.6, pause_before_ms: 0, emphasis: [] },
+    })
+  } finally {
+    if (!request.runId || !useFriday.getState().threads.some(thread => thread.messages.some(message => message.pendingPlan?.run_id === request.runId))) pendingRequests.delete(request.id)
   }
 }
 

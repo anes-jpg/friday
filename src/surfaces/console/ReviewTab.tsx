@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils"
 
 export const ReviewTab: React.FC = () => {
   const [activeSubtab, setActiveSubtab] = useState<"diff" | "bundles" | "audit">("diff")
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(false)
   const [files, setFiles] = useState<DiffFile[]>([])
   const [bundles, setBundles] = useState<
@@ -53,36 +54,9 @@ export const ReviewTab: React.FC = () => {
         setSelectedFile(diffRes.files[0])
       }
       setElapsedMs(Math.round(performance.now() - start))
-    } catch {
-      // Fallback workspace review state
-      const mockFiles: DiffFile[] = [
-        {
-          old_path: "src-tauri/src/agent/browser.rs",
-          new_path: "src-tauri/src/agent/browser.rs",
-          status: "Modified",
-          additions: 120,
-          deletions: 14,
-          hunks: [
-            {
-              header: "@@ -1,14 +1,24 @@",
-              old_start: 1,
-              old_lines: 14,
-              new_start: 1,
-              new_lines: 24,
-              lines: [
-                { line_type: "Context", content: "use crate::agent::machine::TurnResult;", new_line_num: 1 },
-                { line_type: "Removed", content: "-pub struct OldOperator;", old_line_num: 2 },
-                { line_type: "Added", content: "+pub struct BrowserOperator {", new_line_num: 2 },
-                { line_type: "Added", content: "+    session_id: Option<String>,", new_line_num: 3 },
-                { line_type: "Added", content: "+}", new_line_num: 4 },
-              ],
-            },
-          ],
-        },
-      ]
-      setFiles(mockFiles)
-      setSelectedFile(mockFiles[0])
-      setElapsedMs(8)
+    } catch (error) {
+      setLoadError(`Review could not load: ${String(error)}`)
+      setFiles([]); setBundles([]); setFindings([]); setSelectedFile(null)
     } finally {
       setLoading(false)
     }
@@ -103,16 +77,17 @@ export const ReviewTab: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[hsl(var(--surface))] text-[hsl(var(--ink))] p-6 overflow-hidden select-none">
-      {/* Standard Page Header */}
+    <div className="legacy-workspace flex-1 flex flex-col h-full bg-[hsl(var(--surface))] text-[hsl(var(--ink))] p-6 overflow-hidden select-none">
+      {loadError && <p role="alert" className="settings-notice is-error mb-4">{loadError}</p>}
+      {/* Workspace heading */}
       <div className="flex items-center justify-between border-b border-black/10 dark:border-white/10 pb-4 mb-4 shrink-0">
         <div>
           <div className="flex items-center gap-2">
-            <FolderGit2 className="size-4 text-[hsl(var(--signal))]" />
-            <h2 className="text-lg font-semibold tracking-tight text-[hsl(var(--ink))]">
+            <FolderGit2 className="size-4 text-[hsl(var(--ink))]" />
+            <h2 className="page-heading">
               Code Review & Diff Inspector
             </h2>
-            <span className="font-instrument text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--signal))]/30 bg-[hsl(var(--signal))]/10 text-[hsl(var(--signal))] uppercase">
+            <span className="font-instrument text-[9px] px-1.5 py-0.5 rounded border border-white/10 bg-[hsl(var(--surface-raised))] text-[hsl(var(--ink))] uppercase">
               GIT AUDITOR
             </span>
           </div>
@@ -147,11 +122,13 @@ export const ReviewTab: React.FC = () => {
             <button
               key={tab.id}
               type="button"
-              onClick={() => setActiveSubtab(tab.id as any)}
+              onClick={() => {
+                if (tab.id === "diff" || tab.id === "bundles" || tab.id === "audit") setActiveSubtab(tab.id)
+              }}
               className={cn(
                 "flex items-center gap-2 px-3 py-1.5 rounded-[var(--radius-control)] font-instrument text-xs transition-all cursor-pointer border",
                 isActive
-                  ? "bg-[hsl(var(--signal))]/10 border-[hsl(var(--signal))]/30 text-[hsl(var(--signal))] font-semibold"
+                  ? "bg-[hsl(var(--surface-raised))] border-white/10 text-[hsl(var(--ink))] font-semibold"
                   : "bg-transparent border-transparent text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))] hover:bg-black/5 dark:hover:bg-white/5"
               )}
             >
@@ -188,7 +165,7 @@ export const ReviewTab: React.FC = () => {
                 >
                   <div className="flex items-center justify-between gap-1 mb-1">
                     <span className="font-instrument text-xs font-semibold text-[hsl(var(--ink))] truncate flex items-center gap-1.5">
-                      <FileCode2 className="size-3 text-[hsl(var(--signal))] shrink-0" />
+                      <FileCode2 className="size-3 text-[hsl(var(--ink))] shrink-0" />
                       {file.new_path.split("/").pop()}
                     </span>
                     <span className="font-instrument text-[9px] px-1 rounded bg-black/5 dark:bg-white/10 text-[hsl(var(--muted))]">
@@ -211,7 +188,7 @@ export const ReviewTab: React.FC = () => {
                 <div className="flex items-center justify-between border-b border-black/10 dark:border-white/10 pb-3 mb-4 sticky top-0 bg-[hsl(var(--surface-raised))] z-10">
                   <div>
                     <h3 className="text-sm font-semibold text-[hsl(var(--ink))] flex items-center gap-2">
-                      <FileCode2 className="size-4 text-[hsl(var(--signal))]" />
+                      <FileCode2 className="size-4 text-[hsl(var(--ink))]" />
                       {selectedFile.new_path}
                     </h3>
                     <div className="text-[10px] text-[hsl(var(--muted))] mt-0.5">
@@ -238,7 +215,7 @@ export const ReviewTab: React.FC = () => {
                           onClick={() => toggleHunk(hIdx)}
                           className="w-full flex items-center justify-between px-3 py-1.5 bg-black/[0.02] dark:bg-white/[0.02] border-b border-black/10 dark:border-white/10 text-xs text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))] transition-colors cursor-pointer"
                         >
-                          <span className="font-instrument text-[hsl(var(--signal))] flex items-center gap-2">
+                          <span className="font-instrument text-[hsl(var(--ink))] flex items-center gap-2">
                             {isOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
                             {hunk.header}
                           </span>
@@ -257,7 +234,7 @@ export const ReviewTab: React.FC = () => {
                                   key={lIdx}
                                   className={cn(
                                     "flex items-start gap-3 px-2 py-0.5 rounded-[2px]",
-                                    isAdd && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-l-2 border-emerald-500",
+                                    isAdd && "bg-[hsl(var(--success))]/10 text-[hsl(var(--success))] dark:text-[hsl(var(--success))] border-l-2 border-[hsl(var(--success))]",
                                     isRem && "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-l-2 border-rose-500",
                                     !isAdd && !isRem && "text-[hsl(var(--muted))]"
                                   )}
@@ -296,7 +273,7 @@ export const ReviewTab: React.FC = () => {
               <div key={idx} className="p-4 border border-black/10 dark:border-white/10 rounded-[var(--radius-panel)] bg-[hsl(var(--surface-raised))] font-instrument">
                 <div className="flex items-center justify-between mb-3 border-b border-black/10 dark:border-white/10 pb-2">
                   <div className="flex items-center gap-2">
-                    <span className="size-6 rounded bg-[hsl(var(--signal))]/10 text-[hsl(var(--signal))] flex items-center justify-center text-xs font-bold">
+                    <span className="size-6 rounded bg-[hsl(var(--surface-raised))] text-[hsl(var(--ink))] flex items-center justify-center text-xs font-bold">
                       #{idx + 1}
                     </span>
                     <span className="text-sm font-semibold text-[hsl(var(--ink))]">

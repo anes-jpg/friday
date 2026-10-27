@@ -1,6 +1,6 @@
 # FRIDAY Interface System — Atmospheric Halftone OS
 
-**Status:** implementation specification  
+**Status:** implementation specification; reference revision 25 October 2026
 **Scope:** FRIDAY desktop bar, console, onboarding, command palette, settings, telemetry, tools, memory, and system states  
 **Design intent:** a precise monochrome operating surface suspended over a quiet atmospheric world—half editorial halftone, half compact instrument panel, never a generic AI dashboard.
 
@@ -61,7 +61,7 @@ All production components must consume semantic tokens from `src/styles/theme.cs
 | `--line` | `rgba(10,10,10,.14)` | `rgba(244,243,239,.14)` | structural separators |
 | `--line-strong` | `rgba(10,10,10,.28)` | `rgba(244,243,239,.28)` | focused divisions |
 | `--signal` | `#7657FF` | `#9B86FF` | active intelligence only |
-| `--success` | `#2F8F63` | `#62C893` | confirmed completion |
+| `--success` | `#525252` | `#D2D1BC` | confirmed completion (neutral; no green) |
 | `--warning` | `#B77418` | `#E4A84D` | caution/confirmation |
 | `--danger` | `#B63C3C` | `#F06A6A` | destructive/failure |
 
@@ -71,9 +71,9 @@ All production components must consume semantic tokens from `src/styles/theme.cs
 
 Use the best locally packaged equivalents after inspecting the repository. Do not add a network font dependency.
 
-- **Display/UI:** `Geist`, `Inter`, `Segoe UI Variable`, system sans.
-- **Instrument/data:** `IBM Plex Mono`, `JetBrains Mono`, `Cascadia Mono`, monospace.
-- **Editorial accent:** optional serif only for a single onboarding headline; never in console data UI.
+- **Display:** locally bundled Archivo Black, used for the FRIDAY poster and boot title.
+- **UI/body:** locally bundled Manrope; no IBM Plex or remote Google Fonts stylesheets.
+- **Instrument/data:** Cascadia Mono / Consolas, with locally bundled Doto for the clock and wordmark.
 
 | Role | Size / line | Weight | Tracking |
 |---|---|---:|---:|

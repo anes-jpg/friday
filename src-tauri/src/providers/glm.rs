@@ -24,6 +24,24 @@ impl Default for GlmConfig {
     }
 }
 
+pub fn validate_provider_config(base_url: &str, model: &str) -> Result<(), String> {
+    let url = reqwest::Url::parse(base_url.trim()).map_err(|_| "Enter a valid OpenAI-compatible endpoint".to_string())?;
+    if url.scheme() != "https" && url.scheme() != "http" {
+        return Err("Use an HTTP or HTTPS OpenAI-compatible endpoint.".to_string());
+    }
+    if model.trim().is_empty() {
+        return Err("Enter a model name for reasoning.".to_string());
+    }
+    Ok(())
+}
+
+pub fn is_local_endpoint(base_url: &str) -> bool {
+    reqwest::Url::parse(base_url).ok().and_then(|url| url.host_str().map(str::to_string)).map(|host| {
+        let host = host.trim_matches(['[', ']']).to_ascii_lowercase();
+        host == "localhost" || host.ends_with(".localhost") || host == "::1" || host.starts_with("127.")
+    }).unwrap_or(false)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum StreamDelta {
     Token(String),
@@ -112,6 +130,9 @@ pub fn normalize_api_url(base_url: &str) -> String {
     if trimmed.ends_with("/chat/completions") {
         return trimmed.to_string();
     }
+    if trimmed.ends_with("/responses") {
+        return trimmed.to_string();
+    }
     if trimmed.contains("/api/paas/v4") {
         return format!("{}/chat/completions", trimmed);
     }
@@ -125,6 +146,7 @@ pub fn normalize_api_url(base_url: &str) -> String {
 pub struct GlmProvider {
     pub config: GlmConfig,
     pub http: reqwest::Client,
+    pub isolated_credentials: bool,
 }
 
 impl GlmProvider {
@@ -139,17 +161,19 @@ impl GlmProvider {
             .build()
             .unwrap_or_default();
 
-        Self { config, http }
+        Self { config, http, isolated_credentials: false }
     }
 
     pub fn with_client(config: GlmConfig, http: reqwest::Client) -> Self {
-        Self { config, http }
+        Self { config, http, isolated_credentials: false }
     }
 
     /// Retrieve effective API key from config, env vars (GLM_API_KEY, DEEPSEEK_API_KEY, ZHIPU_API_KEY), or Windows Credential Manager
     pub fn get_effective_api_key(&self) -> String {
         if !self.config.api_key.trim().is_empty() {
             self.config.api_key.trim().to_string()
+        } else if self.isolated_credentials {
+            String::new()
         } else if let Ok(k) = std::env::var("GLM_API_KEY") {
             k.trim().to_string()
         } else if let Ok(k) = std::env::var("DEEPSEEK_API_KEY") {
@@ -210,13 +234,18 @@ impl GlmProvider {
     ) -> Value {
         let model = self.select_model(needs_reasoning);
         let is_deepseek_reasoner = model.contains("deepseek-reasoner") || model == "deepseek-r1";
+        let is_local_slm = is_local_endpoint(&self.config.base_url);
+        let mut final_messages = messages;
+        if is_local_slm && !tools.is_empty() {
+            final_messages.insert(0, json!({"role": "system", "content": format!("Available tools: {}. To execute an action, return a tool_call object containing name and args in your JSON response.", serde_json::to_string(&tools).unwrap_or_default())}));
+        }
 
         let mut map = serde_json::Map::new();
         map.insert("model".to_string(), json!(model));
-        map.insert("messages".to_string(), json!(messages));
+        map.insert("messages".to_string(), json!(final_messages));
 
-        // DeepSeek Reasoner strictly forbids function calling and temperature parameter
-        if !tools.is_empty() && !is_deepseek_reasoner {
+        // DeepSeek Reasoner and Local SLMs (Ollama) strictly forbid the OpenAI "tools" schema parameter
+        if !tools.is_empty() && !is_deepseek_reasoner && !is_local_slm {
             let mut sanitized_tools = Vec::with_capacity(tools.len());
             for mut t in tools {
                 if let Some(func) = t.get_mut("function") {
@@ -287,10 +316,14 @@ impl GlmProvider {
         F: FnMut(StreamDelta),
     {
         let api_key = self.get_effective_api_key();
-
-        if api_key.is_empty() {
-            return Err("GLM API Key not found. Please set your key in Settings or Windows Credential Manager.".to_string());
+        validate_provider_config(&self.config.base_url, self.select_model(needs_reasoning))?;
+        if self.config.base_url.trim_end_matches('/').ends_with("/responses") {
+            return self.stream_responses(messages, tools, needs_reasoning, on_delta).await;
         }
+        if api_key.trim().is_empty() && !is_local_endpoint(&self.config.base_url) {
+            return Err("Provider API key not found. Please set your key in Settings or Windows Credential Manager.".to_string());
+        }
+        let auth_key = if api_key.trim().is_empty() { "ollama".to_string() } else { api_key };
 
         let payload = self.prepare_payload(messages.clone(), tools.clone(), needs_reasoning);
         let url = normalize_api_url(&self.config.base_url);
@@ -307,7 +340,7 @@ impl GlmProvider {
                     .copied()
                     .unwrap_or(2000);
                 tracing::warn!(
-                    "GLM request attempt {}/{} failed: {}. Retrying in {} ms...",
+                    "Provider request attempt {}/{} failed: {}. Retrying in {} ms...",
                     attempt,
                     MAX_RETRIES,
                     last_error,
@@ -319,7 +352,7 @@ impl GlmProvider {
             let response = match self
                 .http
                 .post(&url)
-                .bearer_auth(&api_key)
+                .bearer_auth(&auth_key)
                 .json(&payload)
                 .send()
                 .await
@@ -337,7 +370,7 @@ impl GlmProvider {
             if !response.status().is_success() {
                 let status = response.status();
                 let err_text = response.text().await.unwrap_or_default();
-                last_error = format!("GLM API returned error {}: {}", status, err_text);
+                last_error = format!("Provider API returned error {}: {}", status, err_text);
 
                 // Only retry on transient/rate-limit errors
                 let is_retryable = matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504);
@@ -367,7 +400,7 @@ impl GlmProvider {
                     &messages,
                     &tools,
                     needs_reasoning,
-                    &api_key,
+                    &auth_key,
                     &url,
                     &mut on_delta,
                 )
@@ -449,6 +482,10 @@ impl GlmProvider {
             }
         }
         on_delta(StreamDelta::Done);
+
+        if finalized_tools.is_empty() {
+            finalized_tools.extend(extract_embedded_tool_calls(&full_text));
+        }
 
         if full_text.trim().is_empty() && finalized_tools.is_empty() {
             return Err("The API returned an empty non-streaming response.".to_string());
@@ -580,6 +617,10 @@ impl GlmProvider {
 
         on_delta(StreamDelta::Done);
 
+        if finalized_tools.is_empty() {
+            finalized_tools.extend(extract_embedded_tool_calls(&full_text));
+        }
+
         if full_text.trim().is_empty() && finalized_tools.is_empty() {
             tracing::info!(
                 "SSE stream was empty, attempting non-streaming request fallback to {}",
@@ -675,9 +716,219 @@ impl GlmProvider {
     }
 }
 
+pub fn extract_embedded_tool_calls(text: &str) -> Vec<Value> {
+    let mut result = Vec::new();
+    let trimmed = text.trim();
+
+    let normalize_tool_name = |name: &str| -> String {
+        let clean = name.trim().to_lowercase();
+        match clean.as_str() {
+            "windows.settings" | "windows_settings" | "windows_setting" | "windows.setting"
+            | "settings" | "system.settings" | "system_settings" | "system_setting"
+            | "operating_system_settings" | "os_settings" => "os.settings".to_string(),
+
+            "windows.godseye" | "windows_godseye" | "godseye" | "god_eye" | "gods_eye"
+            | "gods.eye" | "surveillance" | "camera_feed" | "cameras_feed" => "os.godseye".to_string(),
+
+            "windows.split" | "windows_split" | "split" | "split_view" | "console" => "os.split".to_string(),
+
+            "windows.legion" | "windows_legion" | "legion" | "iron_legion" | "iron.legion" => "os.legion".to_string(),
+
+            "windows.grid" | "windows_grid" | "grid" | "bento" | "bento_grid" => "os.grid".to_string(),
+
+            "windows.media" | "windows_media" | "media" | "media_control" => "media.control".to_string(),
+
+            "windows.gpu" | "windows_gpu" | "gpu" | "gpu_status" => "hardware.gpu".to_string(),
+
+            "windows.ram" | "windows_ram" | "ram" | "memory" => "hardware.ram".to_string(),
+
+            other => other.to_string(),
+        }
+    };
+
+    let mut json_candidates = Vec::new();
+
+    // 1. Line-by-line candidate scan (handles `* Tool call: {"name": ...}`)
+    for line in text.lines() {
+        let line_trim = line.trim();
+        if let Some(start) = line_trim.find('{') {
+            if let Some(end) = line_trim.rfind('}') {
+                if end > start {
+                    json_candidates.push(&line_trim[start..=end]);
+                }
+            }
+        }
+    }
+
+    // 2. Whole-text candidate scan (in case JSON spans multiple lines)
+    if let Some(start) = trimmed.find('{') {
+        if let Some(end) = trimmed.rfind('}') {
+            if end > start {
+                json_candidates.push(&trimmed[start..=end]);
+            }
+        }
+    }
+
+    for cand in json_candidates {
+        if let Ok(val) = serde_json::from_str::<Value>(cand) {
+            if let Some(obj) = val.as_object() {
+                // Direct object format: {"name": "windows_settings", "args": { ... }}
+                if let Some(name) = obj.get("name").and_then(|n| n.as_str()) {
+                    let norm_name = normalize_tool_name(name);
+                    let args = obj
+                        .get("args")
+                        .or_else(|| obj.get("arguments"))
+                        .cloned()
+                        .unwrap_or_else(|| json!({}));
+
+                    if !result.iter().any(|existing: &Value| {
+                        existing
+                            .get("function")
+                            .and_then(|f| f.get("name"))
+                            .and_then(|n| n.as_str())
+                            == Some(&norm_name)
+                    }) {
+                        result.push(json!({
+                            "id": format!("call_embedded_{}", result.len()),
+                            "type": "function",
+                            "function": {
+                                "name": norm_name,
+                                "arguments": args
+                            }
+                        }));
+                    }
+                }
+
+                // Nested in "tool_call": {"tool_call": {"name": ...}}
+                if let Some(tc) = obj.get("tool_call").and_then(|t| t.as_object()) {
+                    if let Some(name) = tc.get("name").and_then(|n| n.as_str()) {
+                        let norm_name = normalize_tool_name(name);
+                        let args = tc
+                            .get("args")
+                            .or_else(|| tc.get("arguments"))
+                            .cloned()
+                            .unwrap_or_else(|| json!({}));
+
+                        if !result.iter().any(|existing: &Value| {
+                            existing
+                                .get("function")
+                                .and_then(|f| f.get("name"))
+                                .and_then(|n| n.as_str())
+                                == Some(&norm_name)
+                        }) {
+                            result.push(json!({
+                                "id": format!("call_embedded_{}", result.len()),
+                                "type": "function",
+                                "function": {
+                                    "name": norm_name,
+                                    "arguments": args
+                                }
+                            }));
+                        }
+                    }
+                }
+
+                // Nested in "tool_calls": [{"name": ...}]
+                if let Some(tcs) = obj.get("tool_calls").and_then(|t| t.as_array()) {
+                    for tc in tcs {
+                        let tc_obj = if let Some(func) = tc.get("function").and_then(|f| f.as_object()) {
+                            Some(func)
+                        } else {
+                            tc.as_object()
+                        };
+
+                        if let Some(o) = tc_obj {
+                            if let Some(name) = o.get("name").and_then(|n| n.as_str()) {
+                                let norm_name = normalize_tool_name(name);
+                                let args = o
+                                    .get("args")
+                                    .or_else(|| o.get("arguments"))
+                                    .cloned()
+                                    .unwrap_or_else(|| json!({}));
+
+                                if !result.iter().any(|existing: &Value| {
+                                    existing
+                                        .get("function")
+                                        .and_then(|f| f.get("name"))
+                                        .and_then(|n| n.as_str())
+                                        == Some(&norm_name)
+                                }) {
+                                    result.push(json!({
+                                        "id": format!("call_embedded_{}", result.len()),
+                                        "type": "function",
+                                        "function": {
+                                            "name": norm_name,
+                                            "arguments": args
+                                        }
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if result.is_empty() {
+        let lower = text.to_lowercase();
+        if lower.contains("windows.settings")
+            || lower.contains("windows_settings")
+            || lower.contains("windows settings")
+            || lower.contains("os.settings")
+            || (lower.contains("settings")
+                && (lower.contains("tool call")
+                    || lower.contains("tool_call")
+                    || lower.contains("action space")
+                    || lower.contains("action:")))
+        {
+            result.push(json!({
+                "id": "call_embedded_fallback",
+                "type": "function",
+                "function": {
+                    "name": "os.settings",
+                    "arguments": {}
+                }
+            }));
+        } else if lower.contains("windows.godseye")
+            || lower.contains("windows_godseye")
+            || lower.contains("os.godseye")
+            || (lower.contains("godseye")
+                && (lower.contains("tool call")
+                    || lower.contains("tool_call")
+                    || lower.contains("action space")
+                    || lower.contains("action:")))
+        {
+            result.push(json!({
+                "id": "call_embedded_fallback",
+                "type": "function",
+                "function": {
+                    "name": "os.godseye",
+                    "arguments": {}
+                }
+            }));
+        }
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accepts_openai_compatible_remote_and_local_models() {
+        let defaults = GlmConfig::default();
+        assert!(validate_provider_config(&defaults.base_url, &defaults.heavy_model).is_ok());
+        for url in ["http://127.0.0.1:11434/v1", "https://localhost/v1", "https://127.0.0.2/v1", "https://[::1]/v1"] {
+            assert!(validate_provider_config(url, "friday-1b-operator").is_ok());
+        }
+        assert!(validate_provider_config("https://api.deepseek.com/v1", "deepseek-chat").is_ok());
+        assert!(validate_provider_config("https://api.openai.com/v1", "gpt-4o").is_ok());
+        assert!(validate_provider_config("file:///tmp/model", "gpt-4o").is_err());
+        assert!(validate_provider_config(&defaults.base_url, "").is_err());
+    }
 
     #[test]
     fn test_model_selection() {
@@ -726,5 +977,22 @@ mod tests {
         // Empty string
         let empty = repair_json_arguments("");
         assert_eq!(empty, json!({}));
+    }
+
+    #[test]
+    fn test_extract_embedded_tool_calls_bullet_format() {
+        let text = r#"* Tool call: {"name": "windows_settings", "args": {"target": "operating system"}}"#;
+        let tools = extract_embedded_tool_calls(text);
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["function"]["name"], "os.settings");
+        assert_eq!(tools[0]["function"]["arguments"]["target"], "operating system");
+    }
+
+    #[test]
+    fn test_extract_embedded_tool_calls_nested_godseye() {
+        let text = r#"Certainly! {"tool_call": {"name": "windows.godseye", "args": {}}}"#;
+        let tools = extract_embedded_tool_calls(text);
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["function"]["name"], "os.godseye");
     }
 }

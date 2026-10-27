@@ -137,7 +137,7 @@ export const PillSidebar: React.FC<PillSidebarProps> = ({
           <div className="text-zinc-400 space-y-0.5">
             <div><span className="text-zinc-600 mr-2">1</span><span className="text-cyan-400">curl</span> -X GET \</div>
             <div><span className="text-zinc-600 mr-2">2</span>  http://127.0.0.1:1420 \</div>
-            <div><span className="text-zinc-600 mr-2">3</span>  -H <span className="text-emerald-400">&quot;X-Friday-Auth&quot;</span></div>
+            <div><span className="text-zinc-600 mr-2">3</span>  -H <span className="text-[hsl(var(--success))]">&quot;X-Friday-Auth&quot;</span></div>
           </div>
         </div>
       </div>

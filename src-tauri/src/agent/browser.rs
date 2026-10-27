@@ -311,20 +311,20 @@ impl BrowserOperator {
 
         match action.to_lowercase().as_str() {
             "click" => Ok(ActionExecutionResult {
-                success: true,
-                action_taken: "CLICK".to_string(),
+                success: false,
+                action_taken: "CLICK_UNAVAILABLE".to_string(),
                 node,
-                message: format!("Clicked [{}] '{}' ({})", node, elem.label, elem.role),
+                message: format!("Browser actuation is unavailable: only a cached node was inspected, not a live page [{}] '{}' ({})", node, elem.label, elem.role),
                 new_value: None,
             }),
             "fill" | "type" => {
                 let fill_text = text.unwrap_or("");
                 elem.value = fill_text.to_string();
                 Ok(ActionExecutionResult {
-                    success: true,
+                    success: false,
                     action_taken: "TYPE_TEXT".to_string(),
                     node,
-                    message: format!("Typed '{}' into [{}] '{}'", fill_text, node, elem.label),
+                    message: format!("Browser actuation is simulated only: cached value updated, but no live page was changed for [{}] '{}'", node, elem.label),
                     new_value: Some(fill_text.to_string()),
                 })
             }
@@ -332,10 +332,10 @@ impl BrowserOperator {
                 let sel_value = text.unwrap_or("");
                 elem.value = sel_value.to_string();
                 Ok(ActionExecutionResult {
-                    success: true,
+                    success: false,
                     action_taken: "SELECT".to_string(),
                     node,
-                    message: format!("Selected '{}' in [{}] '{}'", sel_value, node, elem.label),
+                    message: format!("Browser actuation is simulated only: cached value updated to '{}' but no live page was changed for [{}] '{}'", sel_value, node, elem.label),
                     new_value: Some(sel_value.to_string()),
                 })
             }

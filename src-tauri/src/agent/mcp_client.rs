@@ -6,7 +6,6 @@ use tracing::info;
 
 pub struct AgentMcpClient {
     child: Child,
-    script_path: String,
 }
 
 impl AgentMcpClient {
@@ -50,6 +49,7 @@ impl AgentMcpClient {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
+        cmd.kill_on_drop(true);
 
         #[cfg(target_os = "windows")]
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
@@ -62,7 +62,6 @@ impl AgentMcpClient {
 
         Ok(Self {
             child,
-            script_path: script_path.to_string(),
         })
     }
 
@@ -122,27 +121,8 @@ impl AgentMcpClient {
 
     /// Generic MCP JSON-RPC 2.0 tool caller with auto-respawn resilience
     pub async fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, String> {
-        match self.call_tool_internal(name, arguments.clone()).await {
-            Ok(v) => Ok(v),
-            Err(err)
-                if err.contains("os error 232")
-                    || err.contains("No stdin")
-                    || err.contains("Broken pipe") =>
-            {
-                tracing::warn!(
-                    "MCP bridge pipe broken ({}), attempting automatic restart...",
-                    err
-                );
-                if let Ok(mut restarted) = Self::spawn_process(&self.script_path).await {
-                    if restarted.perform_handshake().await.is_ok() {
-                        *self = restarted;
-                        return self.call_tool_internal(name, arguments).await;
-                    }
-                }
-                Err(err)
-            }
-            Err(e) => Err(e),
-        }
+        tokio::time::timeout(std::time::Duration::from_secs(30), self.call_tool_internal(name,arguments)).await
+            .map_err(|_|"MCP tool timed out; reconcile its outcome before retrying".to_string())?
     }
 
     async fn call_tool_internal(&mut self, name: &str, arguments: Value) -> Result<Value, String> {

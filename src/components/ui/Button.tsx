@@ -8,10 +8,10 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant = "secondary", size = "md", children, disabled, ...props }, ref) => {
-    const base = "inline-flex items-center justify-center font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-acid)] disabled:opacity-50 disabled:pointer-events-none rounded-[var(--radius-control)] cursor-pointer select-none";
+    const base = "inline-flex items-center justify-center font-medium transition-[transform,opacity] duration-160 ease-[var(--ease-friday)] active:scale-[.97] [&_svg]:size-4 [&_svg]:shrink-0 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-acid)] disabled:opacity-50 disabled:pointer-events-none rounded-[var(--radius-control)] cursor-pointer select-none";
 
     const variants = {
-      primary: "bg-[var(--color-acid)] text-[var(--color-void)] hover:brightness-110 active:brightness-95 font-semibold",
+      primary: "bg-[hsl(var(--ink))] text-[hsl(var(--canvas))] font-semibold",
       secondary: "bg-[var(--color-plate)] text-[var(--color-text)] hover:bg-[var(--color-edge)] active:bg-[var(--color-hull)] border border-[var(--color-edge)]",
       ghost: "bg-transparent text-[var(--color-text)] hover:bg-[var(--color-plate)] active:bg-[var(--color-edge)]",
       danger: "bg-[var(--color-fail)] text-white hover:brightness-110 active:brightness-95",

@@ -160,7 +160,7 @@ impl IronLegionSwarm {
             tokio::time::sleep(tokio::time::Duration::from_millis(45)).await;
             (
                 "node-scout",
-                format!("Scout verified 0 external risks for directive: {}", d_scout),
+                format!("Simulation: no external risks were actually checked for directive: {}", d_scout),
                 t0.elapsed().as_millis() as u64,
             )
         });
@@ -172,7 +172,7 @@ impl IronLegionSwarm {
             tokio::time::sleep(tokio::time::Duration::from_millis(60)).await;
             (
                 "node-architect",
-                format!("Architect generated dependency graph for: {}", d_arch),
+                format!("Simulation: generated a placeholder graph for: {}", d_arch),
                 t0.elapsed().as_millis() as u64,
             )
         });
@@ -183,7 +183,7 @@ impl IronLegionSwarm {
             tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
             (
                 "node-sentinel",
-                "Sentinel audit passed: 0 unwraps, strict One-Signal Law preserved".to_string(),
+                "Simulation: Sentinel result is placeholder text, not an actual code audit".to_string(),
                 t0.elapsed().as_millis() as u64,
             )
         });
@@ -195,7 +195,7 @@ impl IronLegionSwarm {
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             (
                 "node-operator",
-                format!("Operator validated desktop state: ready to stage action for {}", d_op),
+                format!("Simulation: no desktop state was staged for: {}", d_op),
                 t0.elapsed().as_millis() as u64,
             )
         });

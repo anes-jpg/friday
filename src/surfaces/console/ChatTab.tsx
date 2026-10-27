@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from "react"
 import { useFriday, useActiveThread, sendChatMessage, stopNativeVoice } from "@/lib/store"
 import { ToolCallCard } from "./ToolCallCard"
-import { FridayEmptyState } from "@/components/ui/empty"
+import { ContourCore } from "@/components/orb/ContourCore"
+import { VoiceContract } from "@/components/voice/VoiceContract"
 import { FridayOrb } from "@/components/orb"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import {
-  Mic, Paperclip, Send, Square, Bot, Sparkles, Terminal, Code2,
+  ArrowUpRight, FolderKanban, Mic, MicOff, Paperclip, Send, Square, Bot, Sparkles, Terminal, Code2,
   Check, ShieldAlert, Layers, FileText, X, Maximize2,
   PanelLeft, Plus, Pencil, Trash2, ChevronDown, Wrench,
   Compass, Calculator, BarChart3, Cpu, Sliders, BookOpen, ShieldCheck, Eye,
@@ -19,6 +20,7 @@ import { IntelligentUIRenderer, isOpenUICode, extractOpenUIFromMarkdown } from "
 import { SmoothScroll, type SmoothScrollHandle } from "@/components/providers/SmoothScroll"
 import { PerspectiveTilt, SpotlightSurface, SpringChip, Magnetic } from "@/components/motion/MouseInteractions"
 import { ChatHistorySidebar } from "@/components/chat/ChatHistorySidebar"
+import { isDesktop } from "@/lib/ipc"
 
 function formatMessageTime(msg: { timestamp?: unknown; created_at?: unknown; time?: unknown }): string {
   const raw = msg.timestamp ?? msg.created_at ?? msg.time
@@ -177,6 +179,7 @@ interface InteractivePlanCardProps {
 
 function InteractivePlanCard({ plan, onConfirm, onCancel }: InteractivePlanCardProps) {
   const isRed = String(plan.tier).toLowerCase() === "red"
+  const [confirmation, setConfirmation] = useState("")
 
   return (
     <div className="mt-3 rounded-2xl border border-black/10 dark:border-white/10 bg-[hsl(var(--surface-raised))] p-4 shadow-[0_20px_40px_-15px_rgba(0,0,0,0.6)] space-y-3.5">
@@ -225,7 +228,7 @@ function InteractivePlanCard({ plan, onConfirm, onCancel }: InteractivePlanCardP
                 ? "bg-rose-500"
                 : stepTier === "amber"
                 ? "bg-amber-400"
-                : "bg-emerald-400"
+                : "bg-[hsl(var(--success))]"
 
             return (
               <div
@@ -266,6 +269,12 @@ function InteractivePlanCard({ plan, onConfirm, onCancel }: InteractivePlanCardP
       )}
 
       {/* Confirmation Actions */}
+      {isRed && (
+        <label className="block space-y-2 text-xs text-[hsl(var(--muted))]">
+          <span>Type confirm to authorize this action.</span>
+          <input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="off" aria-label="Type confirm to authorize" className="w-full rounded-lg border border-red-400/30 bg-[hsl(var(--canvas))] px-3 py-2 text-sm text-[hsl(var(--ink))]" />
+        </label>
+      )}
       <div className="flex items-center justify-between pt-1 border-t border-black/10 dark:border-white/10">
         <div className="text-[11px] text-[hsl(var(--muted))] font-mono">
           {isRed ? "Spoken confirmation: 'confirm'" : "Spoken confirmation: 'go ahead'"}
@@ -284,7 +293,8 @@ function InteractivePlanCard({ plan, onConfirm, onCancel }: InteractivePlanCardP
           <Button
             type="button"
             size="sm"
-            onClick={() => onConfirm(plan.id)}
+            onClick={() => { if (!isRed || confirmation.trim().toLowerCase() === "confirm") onConfirm(plan.id) }}
+            disabled={isRed && confirmation.trim().toLowerCase() !== "confirm"}
             className={`h-8 px-3.5 rounded-lg text-xs font-mono font-medium cursor-pointer transition-colors ${
               isRed
                 ? "bg-rose-600 hover:bg-rose-500 text-white shadow-sm"
@@ -316,6 +326,7 @@ export function FridayComposer({
   onVoice,
   onStop,
   busy,
+  isListening = false,
   expanded = false,
   onToggleExpanded,
   textareaRef,
@@ -326,6 +337,7 @@ export function FridayComposer({
   onVoice: () => void
   onStop: () => void
   busy: boolean
+  isListening?: boolean
   expanded?: boolean
   onToggleExpanded?: () => void
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>
@@ -334,64 +346,21 @@ export function FridayComposer({
   const ref = textareaRef || localRef
 
   return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (value.trim() && !busy) onSubmit()
-      }}
-      className="rounded-[18px] border border-black/10 bg-[hsl(var(--surface-raised))] p-2 shadow-[0_12px_36px_rgba(0,0,0,.10)] dark:border-white/10"
-    >
-      <Textarea
-        ref={ref}
-        value={value}
-        onChange={(event) => onValueChange(event.target.value)}
+    <form className="talk-composer" onSubmit={(event) => { event.preventDefault(); if (value.trim() && !busy) onSubmit() }}>
+      <Textarea ref={ref} value={value} onChange={(event) => onValueChange(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault()
-            if (value.trim() && !busy) onSubmit()
-          }
+          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (value.trim() && !busy) onSubmit() }
           if (event.key === "Escape" && busy) onStop()
         }}
-        rows={1}
-        aria-label="Message FRIDAY"
-        placeholder="Ask FRIDAY or speak with Alt+Shift"
-        className="max-h-36 min-h-10 resize-none border-0 bg-transparent px-2 py-2 shadow-none focus-visible:ring-0 text-sm text-[hsl(var(--ink))] placeholder:text-[hsl(var(--muted))]"
-      />
-      <div className="flex items-center justify-between border-t border-black/10 px-1 pt-2 dark:border-white/10">
-        <div className="flex items-center gap-1.5">
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="Attach file">
-            <Paperclip aria-hidden className="size-4 text-[hsl(var(--muted))]" />
-          </Button>
-          <Button type="button" variant="ghost" size="icon-sm" onClick={onVoice} aria-label="Start voice input">
-            <Mic aria-hidden className="size-4 text-[hsl(var(--muted))]" />
-          </Button>
-          {onToggleExpanded && (
-            <button
-              type="button"
-              onClick={onToggleExpanded}
-              title={expanded ? "Expanded Mode: detailed breakdown with full tables" : "Concise Mode: brief, direct answer"}
-              aria-label={expanded ? "Expanded mode enabled" : "Expanded mode disabled"}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono font-medium border transition-colors cursor-pointer select-none ${
-                expanded
-                  ? "border-[hsl(var(--signal))]/50 bg-[hsl(var(--signal))]/15 text-[hsl(var(--signal))]"
-                  : "border-black/10 dark:border-white/10 bg-transparent text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))] hover:bg-black/5 dark:hover:bg-white/5"
-              }`}
-            >
-              <Maximize2 className="size-3" />
-              <span>Expanded</span>
-              {expanded && <span className="size-1.5 rounded-full bg-[hsl(var(--signal))] animate-pulse" />}
-            </button>
-          )}
+        rows={2} aria-label="Message FRIDAY" placeholder="Say the word…" className="resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 text-[hsl(var(--ink))]" />
+      <div className="talk-composer-footer">
+        <div>
+          <Button type="button" variant="ghost" size="icon-sm" onClick={onVoice} disabled={!isDesktop} aria-label={isListening ? "Stop listening" : "Start voice input"} title={isDesktop ? "Voice input (Alt+Shift)" : "Voice input requires the Windows app"}>{isListening ? <MicOff size={17} /> : <Mic size={17} />}</Button>
+          {onToggleExpanded && <button type="button" className="quiet-action py-1 text-xs" aria-pressed={expanded} onClick={onToggleExpanded}>{expanded ? "Detailed response" : "Concise response"}</button>}
+          <span className="talk-composer-hint">{isListening ? "Listening" : isDesktop ? "↵ send · Shift+↵ newline" : "Voice and desktop tools require Windows"}</span>
         </div>
-        <Button
-          type={busy ? "button" : "submit"}
-          size="icon-sm"
-          onClick={busy ? onStop : undefined}
-          aria-label={busy ? "Stop response" : "Send message"}
-          disabled={!busy && !value.trim()}
-          className="rounded-full bg-black text-white hover:bg-black/85 dark:bg-white dark:text-black cursor-pointer"
-        >
-          {busy ? <Square aria-hidden className="size-3.5 fill-current" /> : <Send aria-hidden className="size-3.5" />}
+        <Button type={busy ? "button" : "submit"} size="icon" onClick={busy ? onStop : undefined} aria-label={busy ? "Stop response" : "Send message"} disabled={!busy && !value.trim()} className="rounded-lg bg-[hsl(var(--ink))] text-[hsl(var(--canvas))] hover:opacity-80">
+          {busy ? <Square size={15} fill="currentColor" /> : <ArrowUpRight size={20} />}
         </Button>
       </div>
     </form>
@@ -402,6 +371,7 @@ export const ChatTab: React.FC = () => {
   const activeThread = useActiveThread()
   const partialText = useFriday((s) => s.utterance?.partial || "")
   const orbState = useFriday((s) => s.orb)
+  const micMuted = useFriday((s) => s.micMuted)
   const chatHistoryOpen = useFriday((s) => s.chatHistoryOpen)
   const toggleChatHistory = useFriday((s) => s.toggleChatHistory)
   const createThread = useFriday((s) => s.createThread)
@@ -409,7 +379,12 @@ export const ChatTab: React.FC = () => {
   const deleteThread = useFriday((s) => s.deleteThread)
   const hydrateThreadsFromBackend = useFriday((s) => s.hydrateThreadsFromBackend)
   const threads = useFriday((s) => s.threads)
+  const aiModels = useFriday((s) => s.aiModels)
+  const activeModelId = useFriday((s) => s.activeModelId)
+  const setActiveModel = useFriday((s) => s.setActiveModel)
 
+  const [clock, setClock] = useState(() => new Date())
+  useEffect(() => { const timer = setInterval(() => setClock(new Date()), 30000); return () => clearInterval(timer) }, [])
   const [inputText, setInputText] = useState("")
   const [expandedMode, setExpandedMode] = useState(false)
   const [isEditingTitle, setIsEditingTitle] = useState(false)
@@ -435,6 +410,7 @@ export const ChatTab: React.FC = () => {
   }, [isEditingTitle])
 
   useEffect(() => {
+    if (!threadMessages.length && !partialText) return
     smoothScrollRef.current?.scrollToBottom()
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [threadMessages.length, busy, partialText])
@@ -488,74 +464,20 @@ export const ChatTab: React.FC = () => {
   const handleVoiceToggle = () => {
     const s = useFriday.getState()
     if (s.orb === "listening") {
-      s.stopVoiceCapture?.()
-      stopNativeVoice()
+      void s.stopVoiceCapture()
     } else {
-      s.startVoiceCapture?.()
+      void s.startVoiceCapture()
     }
   }
 
   const quickPrompts = [
-    {
-      label: "SF Itinerary",
-      desc: "Scenic day route & schedule",
-      icon: Compass,
-      cmd: "I'm in San Francisco for a day, plan a sightseeing route for me with an interactive map and itinerary",
-      tag: "MAP",
-    },
-    {
-      label: "Loan Calculator",
-      desc: "Live payment amortization",
-      icon: Calculator,
-      cmd: "Show an interactive monthly loan payment calculator with live sliders",
-      tag: "SLIDERS",
-    },
-    {
-      label: "Fleet Telemetry",
-      desc: "Token throughput velocity",
-      icon: BarChart3,
-      cmd: "Show an interactive Q4 AI fleet performance dashboard with charts and metrics",
-      tag: "KPI",
-    },
-    {
-      label: "ThinkPad T590",
-      desc: "Hardware spec matrix",
-      icon: Cpu,
-      cmd: "ThinkPad T590 specs",
-      tag: "SPECS",
-    },
-    {
-      label: "Bicycle Gearing",
-      desc: "7-speed transmission ratios",
-      icon: Sliders,
-      cmd: "Show the 7-speed commuter bicycle spec breakdown with gear ratios and interactive calculator",
-      tag: "CALC",
-    },
-    {
-      label: "Rust Flashcards",
-      desc: "Ownership & error laws",
-      icon: BookOpen,
-      cmd: "Interactive tech flashcard: Rust Ownership vs Borrowing",
-      tag: "3D FLIP",
-    },
-    {
-      label: "Audit Constitution",
-      desc: "Diff review for unwrap",
-      icon: ShieldCheck,
-      cmd: "Review git diff for constitution violations and unwrap",
-      tag: "REVIEW",
-    },
-    {
-      label: "Inspect Screen",
-      desc: "Active desktop OCR scan",
-      icon: Eye,
-      cmd: "What is on my screen right now?",
-      tag: "VISION",
-    },
+    { label: "Inspect my desktop", desc: "Read the active window and explain what is on screen", icon: Eye, cmd: "What is on my screen right now?" },
+    { label: "Work on a project", desc: "Open your projects, files, terminal, and review tools", icon: FolderKanban, route: "projects" as const },
+    { label: "Set up my provider", desc: "Choose an endpoint, model, and connection settings", icon: Wrench, route: "settings" as const },
   ]
 
   return (
-    <div className="flex h-full w-full overflow-hidden bg-[hsl(var(--surface))] relative">
+    <div className={cn("talk-surface flex h-full w-full overflow-hidden relative", threadMessages.length === 0 && "is-empty")}>
       {/* Collapsible Chat History Sidebar */}
       <ChatHistorySidebar
         open={chatHistoryOpen}
@@ -565,197 +487,46 @@ export const ChatTab: React.FC = () => {
 
       {/* Main Chat Column */}
       <div className="flex flex-col flex-1 h-full min-w-0 overflow-hidden relative">
-        {/* Top Navigation Bar */}
-        <div className="h-12 px-4 border-b border-black/10 dark:border-white/10 flex items-center justify-between gap-3 bg-[hsl(var(--surface))] shrink-0 z-10 select-none">
-          <div className="flex items-center gap-2 min-w-0">
-            {/* Toggle History Sidebar */}
-            <Button
-              type="button"
-              variant={chatHistoryOpen ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => toggleChatHistory()}
-              title="Toggle conversation history (Ctrl+H)"
-              aria-label="Toggle history panel"
-              className="h-8 px-2.5 gap-2 text-xs font-mono"
-            >
-              <PanelLeft className="size-4 text-[hsl(var(--muted))]" />
-              <span className="hidden sm:inline">History</span>
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-black/5 dark:bg-white/10 text-[hsl(var(--muted))] tabular-nums">
-                {threads.length}
-              </span>
-            </Button>
-
-            {/* + New Chat Button */}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleNewChat}
-              title="Start a new chat (Ctrl+N)"
-              aria-label="Start new chat"
-              className="h-8 px-2.5 gap-1.5 text-xs font-medium group"
-            >
-              <Plus className="size-3.5 text-[hsl(var(--muted))] group-hover:text-[hsl(var(--ink))] transition-colors" />
-              <span className="hidden sm:inline">New Chat</span>
-              <kbd className="hidden md:inline px-1 py-0.5 rounded text-[9px] font-mono bg-black/5 dark:bg-white/10 text-[hsl(var(--muted))]">
-                Ctrl+N
-              </kbd>
-            </Button>
+        <div className="talk-toolbar">
+          <div className="talk-toolbar-start">
+            <Button type="button" variant="ghost" size="icon-sm" onClick={() => toggleChatHistory()} title="Conversation history (Ctrl+H)" aria-label="Toggle history panel"><PanelLeft size={17} /></Button>
+            <Button type="button" variant="ghost" size="sm" onClick={handleNewChat} title="New conversation (Ctrl+N)" aria-label="Start new chat"><Plus size={16} /><span className="hidden sm:inline">New conversation</span></Button>
+            {isEditingTitle ? (
+              <input ref={titleInputRef} value={titleValue} aria-label="Conversation title" onChange={(e) => setTitleValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleCommitTitle(); if (e.key === "Escape") setIsEditingTitle(false) }} onBlur={handleCommitTitle} className="talk-thread-title bg-transparent border-b border-white/20 p-1" />
+            ) : activeThread && threadMessages.length > 0 && <button type="button" className="talk-thread-title" onClick={handleStartEditTitle} title="Rename conversation">{activeThread.title}</button>}
           </div>
-
-          {/* Active Conversation Title & Inline Rename */}
-          <div className="flex-1 flex items-center justify-center min-w-0 px-2">
-            {activeThread && (
-              isEditingTitle ? (
-                <div className="flex items-center gap-1.5 max-w-sm w-full">
-                  <input
-                    ref={titleInputRef}
-                    type="text"
-                    value={titleValue}
-                    onChange={(e) => setTitleValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.stopPropagation()
-                        handleCommitTitle()
-                      }
-                      if (e.key === "Escape") {
-                        e.stopPropagation()
-                        setIsEditingTitle(false)
-                      }
-                    }}
-                    onBlur={handleCommitTitle}
-                    className="flex-1 min-w-0 bg-black/10 dark:bg-black/30 border border-black/20 dark:border-white/20 focus:border-[hsl(var(--signal))]/60 rounded px-2 py-1 text-xs text-[hsl(var(--ink))] font-medium outline-none text-center font-sans"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleCommitTitle}
-                    className="p-1 rounded text-[hsl(var(--signal))] hover:bg-[hsl(var(--signal))]/10 cursor-pointer"
-                    aria-label="Confirm rename"
-                  >
-                    <Check className="size-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsEditingTitle(false)}
-                    className="p-1 rounded text-[hsl(var(--muted))] hover:bg-black/10 dark:hover:bg-white/10 cursor-pointer"
-                    aria-label="Cancel rename"
-                  >
-                    <X className="size-3.5" />
-                  </button>
-                </div>
-              ) : (
-                <div
-                  onClick={handleStartEditTitle}
-                  title="Click to rename session"
-                  className="group flex items-center gap-1.5 max-w-[280px] sm:max-w-md truncate px-2.5 py-1 rounded-md hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-colors"
-                >
-                  <span className="truncate text-xs font-medium text-[hsl(var(--ink))]">
-                    {activeThread.title}
-                  </span>
-                  <Pencil className="size-3 text-[hsl(var(--muted))] opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-                </div>
-              )
-            )}
-          </div>
-
-          {/* Right Action: Delete active thread button with confirmation */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            {activeThread && (
-              isDeletingActive ? (
-                <div className="flex items-center gap-1.5 bg-[hsl(var(--surface-raised))] border border-rose-500/30 rounded-lg px-2 py-1 text-xs shadow-xs animate-in fade-in duration-150">
-                  <span className="text-[11px] font-mono text-rose-400">Delete chat?</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      deleteThread(activeThread.id)
-                      setIsDeletingActive(false)
-                    }}
-                    className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-rose-500 text-white hover:bg-rose-600 transition-colors cursor-pointer"
-                  >
-                    Delete
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsDeletingActive(false)}
-                    className="px-1.5 py-0.5 rounded text-[10px] font-mono text-[hsl(var(--muted))] hover:bg-black/10 dark:hover:bg-white/10 transition-colors cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => setIsDeletingActive(true)}
-                  title="Delete this conversation"
-                  aria-label="Delete conversation"
-                  className="text-[hsl(var(--muted))] hover:text-rose-400 hover:bg-rose-500/10 cursor-pointer"
-                >
-                  <Trash2 className="size-3.5" />
-                </Button>
-              )
-            )}
+          <div className="talk-toolbar-end">
+            <select value={activeModelId} onChange={(event) => { void setActiveModel(event.target.value).catch((error: unknown) => { setInputText(error instanceof Error ? error.message : String(error)) }) }} className="talk-model" aria-label="Active reasoning model">
+              {aiModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
+            </select>
+            {activeThread && threadMessages.length > 0 && (isDeletingActive ? (
+              <div className="flex gap-2 text-xs"><button type="button" className="text-rose-400" onClick={() => { deleteThread(activeThread.id); setIsDeletingActive(false) }}>Delete</button><button type="button" onClick={() => setIsDeletingActive(false)}>Cancel</button></div>
+            ) : <Button type="button" variant="ghost" size="icon-sm" aria-label="Delete conversation" onClick={() => setIsDeletingActive(true)}><Trash2 size={15} /></Button>)}
           </div>
         </div>
       {/* Messages area with editorial column layout & virtual momentum smooth scroll */}
-      <SmoothScroll ref={smoothScrollRef} className="flex-1 px-4 py-6" showScrollbar>
-        <div className="mx-auto max-w-[760px] w-full space-y-6">
-          {/* Subtle Operating Surface Header */}
-          {threadMessages.length > 0 && (
-            <div className="flex items-center gap-2 pb-2 border-b border-black/10 dark:border-white/[0.08] text-[11px] font-mono text-[hsl(var(--muted))] select-none">
-              <FridayOrb size={12} dotSize={1.2} />
-              <span className="tracking-wider uppercase font-semibold text-[hsl(var(--ink))]">OPERATING SURFACE</span>
-              <span>·</span>
-              <span>{threadMessages.length} {threadMessages.length === 1 ? "turn" : "turns"}</span>
-            </div>
-          )}
+      <SmoothScroll ref={smoothScrollRef} className="flex-1 px-6 md:px-10 py-2" showScrollbar>
+        <div className="talk-transcript mx-auto max-w-[880px] w-full space-y-8">
           {threadMessages.length === 0 ? (
-            <FridayEmptyState
-              icon={
-                <div className="relative flex items-center justify-center p-3 rounded-full border border-white/10 bg-white/5 shadow-2xl backdrop-blur-md">
-                  <FridayOrb size={52} dotSize={1.25} />
+            <div>
+              <div className="talk-empty">
+                <div className="talk-poster">
+                  <div className="talk-poster-meta"><span>DESKTOP COMPANION</span><span>{clock.toLocaleDateString([], { day: "2-digit", month: "short" }).toUpperCase()}</span></div>
+                  <h1 aria-label="FRIDAY"><span>FRI</span><span>DAY<span className="talk-poster-stop">.</span></span></h1>
+                  <p>I'm here. What's the move?</p>
                 </div>
-              }
-              title="FRIDAY Operating Surface"
-              description="A calm, private intelligence instrument. Press Alt+Shift to speak or type an instruction."
-              actions={
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 w-full pt-3">
-                  {quickPrompts.map((qp, i) => {
-                    const IconComponent = qp.icon
-                    return (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => {
-                          if (!busy) {
-                            sendChatMessage(qp.cmd, expandedMode)
-                          } else {
-                            setInputText(qp.cmd)
-                          }
-                        }}
-                        className="group relative flex flex-col items-start p-3 rounded-xl border border-black/10 dark:border-white/[0.08] bg-black/[0.02] dark:bg-white/[0.03] hover:bg-black/[0.04] dark:hover:bg-white/[0.06] hover:border-black/20 dark:hover:border-white/20 transition-all duration-150 text-left cursor-pointer focus:outline-none focus:ring-1 focus:ring-[hsl(var(--signal))]/50"
-                      >
-                        <div className="flex items-center justify-between w-full mb-2">
-                          <div className="p-1.5 rounded-lg bg-black/5 dark:bg-white/10 text-[hsl(var(--muted))] group-hover:text-[hsl(var(--signal))] transition-colors">
-                            <IconComponent className="size-3.5" />
-                          </div>
-                          <span className="font-mono text-[9px] uppercase tracking-wider text-[hsl(var(--muted))] px-1 py-0.5 rounded bg-black/5 dark:bg-white/5 group-hover:border group-hover:border-white/10 transition-colors">
-                            {qp.tag}
-                          </span>
-                        </div>
-                        <div className="text-[12px] font-medium text-[hsl(var(--ink))] tracking-tight mb-0.5">
-                          {qp.label}
-                        </div>
-                        <div className="text-[11px] text-[hsl(var(--muted))] leading-tight line-clamp-1">
-                          {qp.desc}
-                        </div>
-                      </button>
-                    )
-                  })}
+                <div className="talk-core-instrument">
+                  <div className="talk-core-caption"><span>VOICE CORE</span><span>{orbState.toUpperCase()}</span></div>
+                  <ContourCore large />
+                  <div className="talk-core-baseline"><time>{clock.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}</time><span>{isDesktop ? micMuted ? "MIC MUTED" : "ALT + SHIFT / TALK" : "DESKTOP PREVIEW"}</span></div>
                 </div>
-              }
-            />
+              </div>
+              <div className="talk-action-list">
+                {quickPrompts.map((prompt) => <button key={prompt.label} type="button" className="talk-action-row" onClick={() => { if (prompt.route) useFriday.getState().setTab(prompt.route); else { setInputText(prompt.cmd ?? ""); composerTextareaRef.current?.focus() } }}>
+                  <prompt.icon size={19} /><span><strong>{prompt.label}</strong><small>{prompt.desc}</small></span><ArrowUpRight size={17} />
+                </button>)}
+              </div>
+            </div>
           ) : (
             threadMessages.map((msg: Message) => {
               if (msg.role === "assistant") {
@@ -778,8 +549,8 @@ export const ChatTab: React.FC = () => {
                   {/* 10px mono role/time header */}
                   <div className="flex items-center justify-between w-full font-instrument text-[10px] uppercase tracking-[.11em] text-[hsl(var(--muted))] select-none">
                     <div className="flex items-center gap-2">
-                      {msg.role !== "user" && <FridayOrb size={13} dotSize={1.2} className="mr-0.5 shrink-0" />}
-                      <span className={msg.role === "user" ? "text-[hsl(var(--ink))]" : "text-[hsl(var(--signal))]"}>
+
+                      <span className="text-[hsl(var(--ink))]">
                         {msg.role === "user" ? "Operator" : "FRIDAY"}
                       </span>
                       <span>·</span>
@@ -795,11 +566,11 @@ export const ChatTab: React.FC = () => {
 
                   {/* Message Body */}
                   {msg.role === "user" ? (
-                    <div className="max-w-[85%] rounded-[14px] bg-[hsl(var(--surface-raised))] border-l-2 border-l-[hsl(var(--signal))] border border-black/10 dark:border-white/10 px-4 py-3 text-sm leading-relaxed text-[hsl(var(--ink))] shadow-xs whitespace-pre-wrap">
+                    <div className="user-entry whitespace-pre-wrap">
                       {msg.content || msg.say}
                     </div>
                   ) : (
-                    <SpotlightSurface className="w-full rounded-2xl border border-white/[0.08] bg-[hsl(var(--surface-raised))]/40 backdrop-blur-sm p-4 md:p-5 shadow-[0_12px_32px_-15px_rgba(0,0,0,0.5)] space-y-3.5">
+                    <div className="assistant-entry w-full space-y-4">
                       {(() => {
                         const { sayText, showContent } = parseMessageDisplay(msg)
                         const calls = msg.toolCalls || msg.tool_calls
@@ -809,9 +580,6 @@ export const ChatTab: React.FC = () => {
                           <>
                             {sayText && (
                               <div className={`flex items-start gap-3 ${showContent ? "pb-3.5 border-b border-white/[0.08]" : ""}`}>
-                                <div className="mt-0.5 shrink-0 p-1 rounded-full bg-[hsl(var(--signal))]/10 border border-[hsl(var(--signal))]/20 text-[hsl(var(--signal))]">
-                                  <FridayOrb size={14} dotSize={1.2} />
-                                </div>
                                 <div className="flex-1 text-[14.5px] leading-relaxed text-[hsl(var(--ink))] font-normal tracking-[-0.005em]">
                                   {sayText}
                                 </div>
@@ -1019,7 +787,7 @@ export const ChatTab: React.FC = () => {
                         />
                       )
                     })()}
-                  </SpotlightSurface>
+                  </div>
                 )}
               </article>
             )})
@@ -1051,19 +819,20 @@ export const ChatTab: React.FC = () => {
             </div>
           )}
 
-          {/* Live Reasoning/Thinking Banner with Animated Twins Orb */}
+          <VoiceContract />
+          {/* Current response state */}
           {busy && (
             <div className="rounded-[14px] border border-[hsl(var(--signal))]/40 bg-[hsl(var(--surface-raised))] p-3.5 flex items-center gap-3 text-xs font-mono shadow-xs">
-              <FridayOrb size={26} state="reasoning" variant="twins" dotSize={1.25} />
+              <ContourCore />
               <div className="flex flex-col min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-semibold uppercase tracking-wider text-[hsl(var(--signal))] text-[11px]">
-                    FRIDAY REASONING
+                    {orbState === "speaking" ? "Speaking" : "Thinking"}
                   </span>
-                  <span className="size-1 rounded-full bg-[hsl(var(--signal))] animate-pulse" />
+
                 </div>
                 <span className="text-[hsl(var(--muted))] text-[11px] font-sans truncate">
-                  Evaluating intent, checking tools, and streaming neural response…
+                  {orbState === "speaking" ? "Press Escape to interrupt." : "Waiting for the current turn. You can stop it below."}
                 </span>
               </div>
             </div>
@@ -1073,8 +842,8 @@ export const ChatTab: React.FC = () => {
       </SmoothScroll>
 
       {/* Composer fixed at bottom with breathing room */}
-      <div className="p-4 border-t border-black/10 dark:border-white/10 bg-[hsl(var(--surface))]">
-        <div className="mx-auto max-w-[760px] w-full">
+      <div className="talk-composer-wrap">
+        <div className="mx-auto max-w-[880px] w-full">
           <FridayComposer
             textareaRef={composerTextareaRef}
             value={inputText}
@@ -1085,6 +854,7 @@ export const ChatTab: React.FC = () => {
               stopNativeVoice()
             }}
             busy={busy}
+            isListening={orbState === "listening" && !micMuted}
             expanded={expandedMode}
             onToggleExpanded={() => setExpandedMode((prev) => !prev)}
           />

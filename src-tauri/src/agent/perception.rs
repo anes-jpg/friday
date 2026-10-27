@@ -179,21 +179,25 @@ impl WindowsPerceptionEngine {
         &self,
         element_id: &str,
         action: &str,
-        val: Option<&str>,
+        _val: Option<&str>,
     ) -> Result<bool, String> {
         if element_id.is_empty() {
             return Err("Element identifier cannot be empty".to_string());
         }
 
-        match action.to_lowercase().as_str() {
-            "click" | "invoke" => Ok(true),
-            "focus" | "set_focus" => Ok(true),
-            "set_text" | "type" => {
-                let _text = val.unwrap_or_default();
-                Ok(true)
+        // UI Automation control-pattern invocation is not implemented yet. Returning
+        // success here would falsely report that a desktop control was actuated, so
+        // report an explicit unavailable state instead of performing or claiming
+        // any mutation.
+        Err(match action.to_lowercase().as_str() {
+            "click" | "invoke" | "focus" | "set_focus" | "set_text" | "type" => {
+                format!(
+                    "UI Automation actuation is unavailable in this build; no Windows control pattern was invoked for '{}'.",
+                    action
+                )
             }
-            other => Err(format!("Unsupported UIA action: {}", other)),
-        }
+            other => format!("Unsupported UIA action: {}", other),
+        })
     }
 
     unsafe fn get_window_meta(hwnd: HWND) -> (String, String, u32) {
@@ -231,5 +235,13 @@ mod tests {
         let snapshot = engine.inspect_focused_app();
         // Result is either Ok(snapshot) or Err(No active window)
         assert!(snapshot.is_ok() || snapshot.is_err());
+    }
+
+    #[test]
+    fn ui_actuation_reports_unavailable() {
+        let engine = WindowsPerceptionEngine::new();
+        assert!(engine.actuate_element("button-1", "click", None).is_err());
+        assert!(engine.actuate_element("button-1", "focus", None).is_err());
+        assert!(engine.actuate_element("button-1", "type", Some("x")).is_err());
     }
 }

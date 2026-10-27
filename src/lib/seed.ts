@@ -520,7 +520,7 @@ function makeBlocks(pattern: string, baseMs: number) {
     let status = "No Traffic"
     let lat = 0
     if (ch === "G") {
-      color = "bg-emerald-500"
+      color = "bg-[hsl(var(--success))]"
       status = "200 OK"
       lat = Math.round(baseMs * (0.85 + (i % 5) * 0.05))
     } else if (ch === "Y") {

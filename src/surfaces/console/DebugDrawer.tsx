@@ -20,15 +20,15 @@ export function DebugDrawer() {
   const latency = useFriday((s) => s.latency)
   const resources = useFriday((s) => s.resources)
 
-  const over = latency.filter((l) => l.value > l.budget).length
+  const over = latency.filter((l) => l.value!=null && l.value > l.budget).length
 
   return (
     <AnimatePresence>
       {open && (
         <motion.div
-          initial={{ height: 0, opacity: 0 }}
-          animate={{ height: "auto", opacity: 1 }}
-          exit={{ height: 0, opacity: 0 }}
+          initial={{ y: -8, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: -8, opacity: 0 }}
           transition={{ duration: DUR.slow, ease: EASE }}
           className="shrink-0 overflow-hidden border-t border-black/10 dark:border-white/10 bg-[hsl(var(--surface-raised))] backdrop-blur-md select-none"
         >
@@ -62,15 +62,15 @@ export function DebugDrawer() {
           <div className="flex flex-wrap items-center gap-5 border-t border-black/10 dark:border-white/10 px-8 py-2 font-instrument text-xs text-[hsl(var(--muted))] tabular-nums">
             <div className="flex items-center gap-1.5">
               <span className="text-[hsl(var(--muted))]/70">CPU</span>
-              <span className="text-[hsl(var(--ink))] font-medium">{resources.cpu_pct.toFixed(1)}%</span>
+              <span className="text-[hsl(var(--ink))] font-medium">{resources.cpu_pct==null ? "Unavailable" : `${resources.cpu_pct.toFixed(1)}%`}</span>
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-[hsl(var(--muted))]/70">RSS</span>
-              <span className="text-[hsl(var(--ink))] font-medium">{resources.rss_mb} MB</span>
+              <span className="text-[hsl(var(--ink))] font-medium">{resources.rss_mb==null ? "Unavailable" : `${resources.rss_mb.toFixed(1)} MB`}</span>
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-[hsl(var(--muted))]/70">Thermal</span>
-              <span className="text-[hsl(var(--ink))] font-medium">{resources.thermal_c}°C</span>
+              <span className="text-[hsl(var(--ink))] font-medium">{resources.thermal_c==null ? "Unavailable" : `${resources.thermal_c}°C`}</span>
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-[hsl(var(--muted))]/70">ASR</span>
@@ -98,8 +98,8 @@ export function DebugDrawer() {
 }
 
 function Stage({ stage }: { stage: LatencyStage }) {
-  const over = stage.value > stage.budget
-  const pct = Math.min(100, (stage.value / stage.budget) * 100)
+  const over = stage.value !=null && stage.value > stage.budget
+  const pct = Math.min(100, ((stage.value ?? 0) / stage.budget) * 100)
 
   return (
     <div className="rounded-[var(--radius-control)] border border-black/10 dark:border-white/10 bg-[hsl(var(--surface))] p-2.5 transition-colors hover:border-black/20 dark:hover:border-white/20">
@@ -108,11 +108,11 @@ function Stage({ stage }: { stage: LatencyStage }) {
         <span
           className={cn("shrink-0 font-instrument text-xs tabular-nums", over ? "text-[hsl(var(--danger))] font-medium" : "text-[hsl(var(--ink))]")}
         >
-          <NumberTicker
+          {stage.value==null ? "Unavailable" : <NumberTicker
             value={stage.value}
             className={over ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--ink))]"}
-          />
-          <span className="text-[hsl(var(--muted))] ml-0.5">ms</span>
+          />}
+          {stage.value!=null && <span className="text-[hsl(var(--muted))] ml-0.5">ms</span>}
         </span>
       </div>
       <Progress
@@ -125,9 +125,9 @@ function Stage({ stage }: { stage: LatencyStage }) {
       <div className="mt-1 flex items-center justify-between text-[10px] font-instrument text-[hsl(var(--muted))] tabular-nums">
         <span>budget {stage.budget}ms</span>
         {over ? (
-          <span className="text-[hsl(var(--danger))] font-semibold">+{stage.value - stage.budget}ms</span>
+          <span className="text-[hsl(var(--danger))] font-semibold">+{(stage.value ?? 0) - stage.budget}ms</span>
         ) : (
-          <span className="text-[hsl(var(--muted))]/60">OK</span>
+          <span className="text-[hsl(var(--muted))]/60">{stage.value==null ? "Not measured" : "Within budget"}</span>
         )}
       </div>
     </div>

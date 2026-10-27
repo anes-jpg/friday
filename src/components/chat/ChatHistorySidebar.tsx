@@ -213,7 +213,7 @@ export const ChatHistorySidebar: React.FC<ChatHistorySidebarProps> = ({
                     {/* One-Signal Law: Accent only signifies active thread */}
                     {isActive ? (
                       <span
-                        className="size-1.5 rounded-full bg-[hsl(var(--signal))] shrink-0"
+                        className="size-1.5 rounded-full bg-[hsl(var(--ink))] shrink-0"
                         aria-hidden="true"
                       />
                     ) : (
@@ -248,7 +248,7 @@ export const ChatHistorySidebar: React.FC<ChatHistorySidebarProps> = ({
                         <button
                           type="button"
                           onClick={() => handleCommitRename(thread.id)}
-                          className="p-1 rounded text-emerald-400 hover:bg-emerald-500/10"
+                          className="p-1 rounded text-[hsl(var(--success))] hover:bg-[hsl(var(--success))]/10"
                           title="Save title"
                           aria-label="Save title"
                         >
@@ -379,15 +379,11 @@ export const ChatHistorySidebar: React.FC<ChatHistorySidebarProps> = ({
           />
           <motion.aside
             key="chat-history-sidebar"
-            initial={prefersReducedMotion ? { opacity: 0 } : { width: 0, opacity: 0 }}
-            animate={prefersReducedMotion ? { opacity: 1 } : { width: 280, opacity: 1 }}
-            exit={prefersReducedMotion ? { opacity: 0 } : { width: 0, opacity: 0 }}
-            transition={
-              prefersReducedMotion
-                ? { duration: 0.15 }
-                : { type: "spring", stiffness: 380, damping: 30, mass: 0.8 }
-            }
-            className={`h-full flex flex-col border-r border-black/10 dark:border-white/10 bg-[hsl(var(--surface))] overflow-hidden shrink-0 select-none z-30 md:relative fixed inset-y-0 left-0 shadow-2xl md:shadow-none ${className}`}
+            initial={prefersReducedMotion ? { opacity: 0 } : { x: -16, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={prefersReducedMotion ? { opacity: 0 } : { x: -16, opacity: 0 }}
+            transition={{ duration: prefersReducedMotion ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}
+            className={`w-[280px] h-full flex flex-col border-r border-black/10 dark:border-white/10 bg-[hsl(var(--surface))] overflow-hidden shrink-0 select-none z-30 md:relative fixed inset-y-0 left-0 shadow-2xl md:shadow-none ${className}`}
           >
             <div className="w-[280px] h-full flex flex-col">
               {/* Header */}

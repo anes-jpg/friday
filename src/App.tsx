@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
-import { useFridayStore, useFriday, sendChatMessage } from "@/lib/store";
+import { useFridayStore, useFriday, sendChatMessage, acceptRunEvent, recordVoiceMetrics, recordLatency } from "@/lib/store";
+import type { RunEvent } from "@/lib/workspace-native";
 import { invokeCommand } from "@/lib/ipc";
 import { playInstantAcousticCue } from "@/lib/phrasebank";
 import { isAudioActive } from "@/lib/kokoro";
@@ -8,7 +9,9 @@ import { Palette } from "@/surfaces/palette/Palette";
 import { Console } from "@/surfaces/console/Console";
 import { FridayOSShell } from "@/surfaces/os/FridayOSShell";
 import { HudBootSequence } from "@/components/hud/HudBootSequence";
-import { ipcToggleOsFullscreen } from "@/lib/telemetry";
+import { FullscreenReveal } from "@/components/hud/FullscreenReveal";
+import { useWindowMode } from "@/lib/window-mode";
+import { useSettings } from "@/lib/settings";
 import { surfaceLabel } from "@/lib/ipc";
 
 const OnboardingModal = React.lazy(() =>
@@ -43,7 +46,7 @@ const getTauriWindowLabel = (): string => {
 
 export const App: React.FC = () => {
   const {
-    activeSurface,
+    tab: activeSurface,
     setActiveSurface,
     setActiveConsoleTab,
     paletteOpen,
@@ -53,18 +56,19 @@ export const App: React.FC = () => {
     bargeIn,
     updateAudioRms,
     loadBackendData,
-    orbState,
+    orb: orbState,
     setOrbState,
-    inputMode,
+    mode: inputMode,
     setInputMode,
     wakeWord,
-    spatialHudActive,
-    setSpatialHudActive,
   } = useFridayStore();
+  const spatialHudActive = useWindowMode((s) => s.spatial);
+  const windowError = useWindowMode((s) => s.error);
 
   const [windowLabel, setWindowLabel] = useState<string>(() => getTauriWindowLabel());
   const [showShowcase, setShowShowcase] = useState<boolean>(false);
   const [isBootingHud, setIsBootingHud] = useState<boolean>(false);
+  const [fullscreenReveal, setFullscreenReveal] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState<boolean>(() => {
     try {
       return localStorage.getItem("friday_onboarded_v1_0") !== "true";
@@ -75,58 +79,73 @@ export const App: React.FC = () => {
   const isHoldingPttRef = useRef<number | null>(null);
 
   useEffect(() => {
+    const revealFullscreen = () => setFullscreenReveal(true);
     const handleTriggerHudBoot = async () => {
-      setIsBootingHud(true);
-      try {
-        await ipcToggleOsFullscreen(true);
-      } catch (e) {
-        console.warn("Fullscreen toggle error:", e);
-      }
+      if (await useWindowMode.getState().enterSpatial()) setIsBootingHud(true);
     };
-
+    const handleFullscreenKey = (event: KeyboardEvent) => {
+      if (event.key !== "F11" || event.repeat) return;
+      event.preventDefault();
+      if (event.ctrlKey && event.shiftKey) {
+        if (useWindowMode.getState().spatial) void useWindowMode.getState().exitSpatial();
+        else void handleTriggerHudBoot();
+      } else void useWindowMode.getState().toggleFullscreen();
+    };
+    const syncFullscreen = () => {
+      const fullscreen = Boolean(document.fullscreenElement);
+      useWindowMode.getState().sync(fullscreen);
+      if (!fullscreen) setFullscreenReveal(false);
+      if (!fullscreen && useWindowMode.getState().spatial) void useWindowMode.getState().exitSpatial();
+    };
+    window.addEventListener("keydown", handleFullscreenKey);
+    document.addEventListener("fullscreenchange", syncFullscreen);
+    let disposed = false;
+    let unlistenResize: (() => void) | undefined;
+    if ("__TAURI_INTERNALS__" in window) {
+      void import("@tauri-apps/api/window").then(async ({ getCurrentWindow }) => {
+        const nativeWindow = getCurrentWindow();
+        const sync = async () => {
+          try { const fullscreen = await nativeWindow.isFullscreen(); if (!disposed) useWindowMode.getState().sync(fullscreen); }
+          catch (error) { console.warn("Window state unavailable", error); }
+        };
+        await sync();
+        const stop = await nativeWindow.onResized(() => { void sync(); });
+        if (disposed) stop(); else unlistenResize = stop;
+      });
+    }
     window.addEventListener("friday:trigger-hud-boot", handleTriggerHudBoot);
-    return () => window.removeEventListener("friday:trigger-hud-boot", handleTriggerHudBoot);
+    window.addEventListener("friday:fullscreen-ready", revealFullscreen);
+    return () => {
+      window.removeEventListener("keydown", handleFullscreenKey);
+      disposed = true;
+      unlistenResize?.();
+      document.removeEventListener("fullscreenchange", syncFullscreen);
+      window.removeEventListener("friday:trigger-hud-boot", handleTriggerHudBoot);
+      window.removeEventListener("friday:fullscreen-ready", revealFullscreen);
+    };
   }, []);
 
   const handleBootComplete = () => {
     setIsBootingHud(false);
-    setSpatialHudActive(true);
   };
 
   const handleExitHud = async () => {
-    try {
-      await ipcToggleOsFullscreen(false);
-    } catch (e) {
-      console.warn("Exit fullscreen error:", e);
-    }
-    setSpatialHudActive(false);
+    await useWindowMode.getState().exitSpatial();
+    setIsBootingHud(false);
   };
 
   useEffect(() => {
     const handleOpenOnboarding = () => setShowOnboarding(true);
     window.addEventListener("friday:open-onboarding", handleOpenOnboarding);
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Toggle voice capture on Alt+Shift or Alt+Space
-      if ((e.altKey && e.shiftKey) || (e.altKey && (e.code === "Space" || e.key === " "))) {
-        e.preventDefault();
-        const s = useFriday.getState();
-        if (s.orb === "listening") {
-          stopVoiceCapture();
-        } else {
-          startVoiceCapture();
-        }
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
 
     return () => {
       window.removeEventListener("friday:open-onboarding", handleOpenOnboarding);
-      window.removeEventListener("keydown", handleKeyDown);
     };
   }, [startVoiceCapture, stopVoiceCapture]);
 
   useEffect(() => {
+    void useSettings.getState().hydrate();
     loadBackendData();
     if (wakeWord.enabled) {
       invokeCommand("start_wake_word", { sensitivity: wakeWord.sensitivity }).catch(() => {});
@@ -182,42 +201,59 @@ export const App: React.FC = () => {
 
   // Global OS-level hotkey and voice event listeners dispatched from Tauri backend
   useEffect(() => {
-    let unlisten: (() => void)[] = [];
+    const unlisten: (() => void)[] = [];
+    let disposed = false;
+    const register = (stop: () => void) => { if (disposed) stop(); else unlisten.push(stop); };
 
     if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
       import("@tauri-apps/api/event").then(({ listen }) => {
+        void listen<RunEvent>("run-event", event => acceptRunEvent(event.payload)).then(register);
+        void listen<{ status: string; error: string | null; rms: number; metrics:Record<string,unknown> | null }>("friday://voice-state", event => {
+          const state=useFriday.getState()
+          state.updateAudioRms(event.payload.rms)
+          useFriday.setState(current=>({resources:{...current.resources,asr_warm:event.payload.status==="ready"}}))
+          if(event.payload.metrics) recordVoiceMetrics(event.payload.metrics)
+          if (["failed", "disabled"].includes(event.payload.status) && state.orb === "listening") state.setOrb("idle")
+          if (event.payload.error) window.dispatchEvent(new CustomEvent("friday:voice-error", { detail: event.payload.error }))
+        }).then(register);
         const handleVoiceToggleShortcut = (state: string) => {
           if (state === "pressed") {
+            isHoldingPttRef.current=performance.now()
             const currentOrb = useFriday.getState().orb;
             if (currentOrb === "listening") {
               stopVoiceCapture();
+              isHoldingPttRef.current=null
             } else {
               startVoiceCapture();
             }
+          } else if(state==="released" && isHoldingPttRef.current!=null) {
+            const duration=performance.now()-isHoldingPttRef.current
+            isHoldingPttRef.current=null
+            if(duration>300) stopVoiceCapture()
           }
         };
 
         listen<string>("global-shortcut-voice-toggle", (event) => {
           handleVoiceToggleShortcut(event.payload);
-        }).then((un) => unlisten.push(un));
+        }).then(register);
 
         listen<string>("global-shortcut-alt-space", (event) => {
           handleVoiceToggleShortcut(event.payload);
-        }).then((un) => unlisten.push(un));
+        }).then(register);
 
         listen<string>("global-shortcut-console", () => {
           // No-op for now, dashboard is always visible
-        }).then((un) => unlisten.push(un));
+        }).then(register);
 
         listen<string>("global-shortcut-dictation", () => {
-          setInputMode(inputMode === "dictation" ? "command" : "dictation");
-        }).then((un) => unlisten.push(un));
+          setInputMode(useFriday.getState().mode === "dictation" ? "command" : "dictation");
+        }).then(register);
 
         listen<string>("switch-console-tab", (event) => {
           if (event.payload) {
             setActiveConsoleTab(event.payload as "chat" | "automations" | "skills" | "memory" | "audit" | "settings");
           }
-        }).then((un) => unlisten.push(un));
+        }).then(register);
 
         listen<{ wake_word: string; timestamp_ms: number } | string>("friday://wake-word-detected", () => {
           playInstantAcousticCue();
@@ -227,23 +263,32 @@ export const App: React.FC = () => {
           // Do NOT force setActiveConsoleTab("chat") here so current view/tab (e.g. Settings) is preserved
           invokeCommand("show_main_window").catch(() => {});
           startVoiceCapture();
-        }).then((un) => unlisten.push(un));
+        }).then(register);
 
         listen<string>("friday://voice-partial", (event) => {
           if (event.payload) {
+            const store = useFriday.getState();
+            if (store.micMuted || (store.orb !== "listening" && store.mode !== "conversation")) {
+              return;
+            }
             const text = event.payload.trim();
             if (text) {
-              const currentOrb = useFriday.getState().orb;
+              const currentOrb = store.orb;
               if (currentOrb !== "speaking") {
-                useFriday.getState().setOrb("listening");
+                store.setOrb("listening");
               }
-              useFriday.getState().setPartial(text);
+              store.setPartial(text);
             }
           }
-        }).then((un) => unlisten.push(un));
+        }).then(register);
 
         listen<string>("friday://voice-command", (event) => {
           if (event.payload) {
+            const store = useFriday.getState();
+            if (store.micMuted) {
+              console.warn("[Voice] Spoken command dropped because microphone is muted.");
+              return;
+            }
             const cmd = event.payload.trim();
             const lower = cmd.toLowerCase().replace(/[.,!?;:]/g, "").trim();
             if (
@@ -253,25 +298,33 @@ export const App: React.FC = () => {
               lower === "computer" ||
               lower === "operator"
             ) {
-              // Standalone wake word: keep microphone alive in listening mode without executing blank turn
-              useFriday.getState().setOrb("listening");
-              useFriday.getState().setPartial("Listening for your command...");
+              // Standalone wake word: activate listening mode
+              store.setOrb("listening");
+              store.setPartial("Listening for your command...");
               return;
             }
+
+            // Reject ambient/background noise unless user explicitly opened voice listening
+            if (store.orb !== "listening" && store.mode !== "conversation") {
+              console.warn("[Voice] Spoken audio ignored (not in active listening mode):", cmd);
+              return;
+            }
+
             if (cmd.length > 0) {
-              useFriday.getState().setOrb("thinking");
-              useFriday.getState().setPartial("");
+              store.setOrb("thinking");
+              store.setPartial("");
               sendChatMessage(cmd);
             }
           }
-        }).then((un) => unlisten.push(un));
+        }).then(register);
       });
     }
 
     return () => {
+      disposed = true;
       unlisten.forEach((fn) => fn());
     };
-  }, [windowLabel, orbState, inputMode, setActiveConsoleTab, setInputMode, setOrbState, startVoiceCapture, stopVoiceCapture]);
+  }, [windowLabel, setActiveConsoleTab, setInputMode, setOrbState, startVoiceCapture, stopVoiceCapture]);
 
   useEffect(() => {
     const handleOpenConsole = () => setActiveConsoleTab("chat");
@@ -292,7 +345,7 @@ export const App: React.FC = () => {
       }
 
       // Instant Voice Barge-In / Interrupt on Escape
-      if (e.key === "Escape" && (orbState === "speaking" || orbState === "listening")) {
+      if (e.key === "Escape" && orbState !== "idle") {
         e.preventDefault();
         bargeIn();
         return;
@@ -332,6 +385,7 @@ export const App: React.FC = () => {
       if (isAltShiftPress || isAltSpacePress) {
         e.preventDefault();
         e.stopPropagation();
+        if (windowLabel!=="browser") return
         if (!isHoldingPttRef.current) {
           isHoldingPttRef.current = Date.now();
           const currentOrb = useFriday.getState().orb;
@@ -372,7 +426,7 @@ export const App: React.FC = () => {
     };
 
     const handleContextMenu = (e: MouseEvent) => {
-      if (windowLabel === "main" || activeSurface === "bar") {
+      if (windowLabel === "main" || windowLabel === "bar") {
         e.preventDefault();
       }
     };
@@ -396,12 +450,14 @@ export const App: React.FC = () => {
         <Console />
       )}
 
-      {isBootingHud && (
+      {isBootingHud && spatialHudActive && (
         <HudBootSequence
           onComplete={handleBootComplete}
-          onSkip={handleBootComplete}
+          onSkip={() => void handleExitHud()}
         />
       )}
+      {fullscreenReveal && !spatialHudActive && <FullscreenReveal onComplete={() => setFullscreenReveal(false)} />}
+      {windowError && <div className="window-error" role="alert">Window mode could not change: {windowError}</div>}
 
       <Palette />
       <React.Suspense fallback={null}>

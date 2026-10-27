@@ -29,6 +29,10 @@ pub struct ToolDefinition {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolExecutionResult {
+    #[serde(default)]
+    pub receipt_id: Option<String>,
+    #[serde(default)]
+    pub undoable: bool,
     pub tool_name: String,
     pub output: Value,
     pub duration_ms: u64,
@@ -821,6 +825,14 @@ pub mod win32 {
 
 /// Resolves user folder aliases ('Desktop', 'Downloads', '~', '%USERPROFILE%') to full filesystem paths.
 pub fn resolve_user_path(raw: &str) -> std::path::PathBuf {
+    if let Some(context)=crate::agent::runs::current() {
+        if let Some(root)=&context.project_root {
+            let path=std::path::Path::new(raw.trim());
+            if path.is_relative() && !raw.starts_with('~') && !raw.starts_with('%') {
+                return root.join(path);
+            }
+        }
+    }
     let trimmed = raw.trim().trim_matches('"').trim_matches('\'').trim();
 
     let home = std::env::var("USERPROFILE")
@@ -1118,7 +1130,7 @@ impl ToolRegistry {
         self.register(ToolDefinition {
             name: "fs.write".to_string(),
             description: "Create, write, or save a complete file on disk (e.g. HTML web page, scripts, notes, code) at specified path with text content. Automatically creates parent directories if needed. For code, HTML, and documents, content MUST be the full, complete, production-ready code with zero placeholders.".to_string(),
-            tier: RiskTier::Green,
+            tier: RiskTier::Amber,
             schema: json!({
                 "type": "object",
                 "properties": {
@@ -1442,8 +1454,8 @@ impl ToolRegistry {
 
         self.register(ToolDefinition {
             name: "code.sandbox".to_string(),
-            description: "Execute Python code in a safe sandbox or microVM and return standard output, error logs, and return status (E2B sandbox)".to_string(),
-            tier: RiskTier::Green,
+            description: "Run Python code locally after explicit confirmation. Local Python has access to the current user account; inspect the complete code before confirming.".to_string(),
+            tier: RiskTier::Red,
             schema: json!({
                 "type": "object",
                 "properties": {
@@ -1534,6 +1546,63 @@ impl ToolRegistry {
                 "required": ["archetype", "project_name"]
             }),
         });
+
+        self.register(ToolDefinition {
+            name: "os.settings".to_string(),
+            description: "Open system or application settings surface".to_string(),
+            tier: RiskTier::Green,
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "target": { "type": "string" }
+                },
+                "required": []
+            }),
+        });
+
+        self.register(ToolDefinition {
+            name: "os.godseye".to_string(),
+            description: "Switch active viewport to God's Eye planetary surveillance and camera feeds".to_string(),
+            tier: RiskTier::Green,
+            schema: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        });
+
+        self.register(ToolDefinition {
+            name: "os.split".to_string(),
+            description: "Switch active viewport to split console view".to_string(),
+            tier: RiskTier::Green,
+            schema: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        });
+
+        self.register(ToolDefinition {
+            name: "os.legion".to_string(),
+            description: "Switch active viewport to Iron Legion swarm view".to_string(),
+            tier: RiskTier::Green,
+            schema: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        });
+
+        self.register(ToolDefinition {
+            name: "os.grid".to_string(),
+            description: "Switch active viewport to Bento desktop grid view".to_string(),
+            tier: RiskTier::Green,
+            schema: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        });
     }
 
 
@@ -1559,6 +1628,24 @@ impl ToolRegistry {
 
     /// Invokes tool with risk-tier verification and duration measurement (§06 Capability Catalog)
     pub async fn invoke(&self, name: &str, args: Value) -> Result<ToolExecutionResult, String> {
+        let definition = self.get(name).ok_or_else(|| format!("Unknown tool: {name}"))?;
+        validate_tool_args(&definition.schema, &args).map_err(|e|e.to_string())?;
+        if let Some(context) = crate::agent::runs::current() {
+            let id = context.before_tool(definition, &args)?;
+            let receipt = context.db.lock().map_err(|e|e.to_string())?.prepare_inverse(&context.run.id,&id,&definition.name,&args)?;
+            let mut result = self.invoke_unchecked(name, args).await;
+            if let Some(receipt) = receipt {
+                context.db.lock().map_err(|e|e.to_string())?.finish_inverse(&receipt,result.is_ok())?;
+                if let Ok(result)=&mut result {result.receipt_id=Some(receipt);result.undoable=true;}
+            }
+            context.after_tool(&id, &result)?;
+            result
+        } else {
+            self.invoke_unchecked(name, args).await
+        }
+    }
+
+    async fn invoke_unchecked(&self, name: &str, args: Value) -> Result<ToolExecutionResult, String> {
         let tool = self
             .get(name)
             .ok_or_else(|| format!("Unknown tool: {}", name))?;
@@ -1566,6 +1653,50 @@ impl ToolRegistry {
         let start = Instant::now();
 
         let output = match canonical_name.as_str() {
+            "os.settings" => {
+                #[cfg(target_os = "windows")]
+                {
+                    use std::os::windows::process::CommandExt;
+                    let _ = std::process::Command::new("cmd")
+                        .args(["/c", "start", "ms-settings:"])
+                        .creation_flags(0x08000000)
+                        .spawn();
+                }
+                json!({
+                    "status": "opened",
+                    "action": "settings",
+                    "target": "operating_system"
+                })
+            }
+
+            "os.godseye" => {
+                json!({
+                    "status": "switched",
+                    "view": "godseye"
+                })
+            }
+
+            "os.split" => {
+                json!({
+                    "status": "switched",
+                    "view": "split"
+                })
+            }
+
+            "os.legion" => {
+                json!({
+                    "status": "switched",
+                    "view": "legion"
+                })
+            }
+
+            "os.grid" => {
+                json!({
+                    "status": "switched",
+                    "view": "grid"
+                })
+            }
+
             "notify.toast" => {
                 let msg = args
                     .get("message")
@@ -1802,7 +1933,7 @@ impl ToolRegistry {
                     std::fs::rename(&src_path, &dst_path).map_err(|e| e.to_string())?;
                     json!({ "status": "moved", "source": src, "destination": dst })
                 } else {
-                    json!({ "status": "simulated_moved", "source": src, "destination": dst })
+                    return Err("Move source does not exist; nothing was moved".into());
                 }
             }
 
@@ -1928,7 +2059,11 @@ impl ToolRegistry {
                     ));
                 }
 
-                let mut cmd = std::process::Command::new(binary);
+                let mut cmd = tokio::process::Command::new(binary);
+                cmd.kill_on_drop(true);
+                #[cfg(target_os="windows")]
+                cmd.creation_flags(0x08000000);
+                if let Some(root)=crate::agent::runs::current().and_then(|c|c.project_root.clone()) {cmd.current_dir(root);}
                 for arg in raw_args {
                     if let Some(arg_str) = arg.as_str() {
                         cmd.arg(arg_str);
@@ -1937,13 +2072,14 @@ impl ToolRegistry {
 
                 let output_res = cmd
                     .output()
+                    .await
                     .map_err(|e| format!("Failed to spawn {}: {}", binary, e))?;
                 let stdout_full = String::from_utf8_lossy(&output_res.stdout);
                 let stderr_full = String::from_utf8_lossy(&output_res.stderr);
 
                 // Cap output at 10KB
                 let stdout = if stdout_full.len() > 10_000 {
-                    format!("{}... [truncated]", &stdout_full[..10_000])
+                    format!("{}... [truncated]", stdout_full.chars().take(10_000).collect::<String>())
                 } else {
                     stdout_full.to_string()
                 };
@@ -2323,7 +2459,7 @@ impl ToolRegistry {
             }
 
             "review.diff" => {
-                let output_bytes = std::process::Command::new("git")
+                let output_bytes = crate::hidden_cmd("git")
                     .args(["diff", "HEAD"])
                     .output()
                     .map(|o| o.stdout)
@@ -2339,7 +2475,7 @@ impl ToolRegistry {
             }
 
             "review.scan" => {
-                let output_bytes = std::process::Command::new("git")
+                let output_bytes = crate::hidden_cmd("git")
                     .args(["diff", "HEAD"])
                     .output()
                     .map(|o| o.stdout)
@@ -2635,6 +2771,8 @@ impl ToolRegistry {
         let duration_ms = start.elapsed().as_millis() as u64;
 
         Ok(ToolExecutionResult {
+            receipt_id: None,
+            undoable: false,
             tool_name: canonical_name,
             output,
             duration_ms,
@@ -2695,15 +2833,13 @@ async fn execute_python_locally(code: &str) -> serde_json::Value {
 
     let script_str = temp_script.to_string_lossy().to_string();
 
-    let candidates: Vec<(&str, Vec<&str>)> = vec![
-        ("py", vec!["-3", &script_str]),
-        (r"C:\Users\anesx\AppData\Local\Programs\Python\Python312\python.exe", vec![&script_str]),
-        ("python", vec![&script_str]),
-    ];
+    let runtime=crate::voice::discovery::python_runtime();
+    let candidates: Vec<(std::path::PathBuf, Vec<&str>)> = runtime.into_iter().map(|path|(path,vec![script_str.as_str()])).collect();
 
     let mut final_res = None;
     for (bin, args) in candidates {
         let mut cmd = tokio::process::Command::new(bin);
+        cmd.kill_on_drop(true);
         cmd.args(&args);
         #[cfg(target_os = "windows")]
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW

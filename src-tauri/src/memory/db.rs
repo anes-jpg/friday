@@ -68,7 +68,15 @@ pub struct DbAutomation {
     pub enabled: bool,
     pub last_run: Option<i64>,
     pub next_run: Option<i64>,
+    #[serde(default)]
+    pub last_result: Option<String>,
+    #[serde(default = "utc_timezone")]
+    pub timezone: String,
+    #[serde(default)]
+    pub schedule: Option<serde_json::Value>,
 }
+
+fn utc_timezone() -> String { "UTC".into() }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DbSkill {
@@ -94,12 +102,12 @@ pub struct DbSemanticCacheEntry {
 }
 
 pub struct Database {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 impl Database {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let conn = Connection::open(path)?;
+        let conn = Connection::open(&path)?;
         let _ = conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
@@ -110,7 +118,14 @@ impl Database {
              PRAGMA foreign_keys = ON;",
         );
         let db = Self { conn };
+        db.backup_before_workspace_migration(path.as_ref())?;
         db.init_schema()?;
+        db.init_workspace_schema()?;
+        db.init_run_schema()?;
+        db.init_schedule_schema()?;
+        db.init_place_cache()?;
+        db.recover_unfinished_runs()?;
+        db.migrate_model_credentials()?;
         db.seed_defaults_if_empty()?;
         Ok(db)
     }
@@ -124,6 +139,10 @@ impl Database {
         );
         let db = Self { conn };
         db.init_schema()?;
+        db.init_workspace_schema()?;
+        db.init_run_schema()?;
+        db.init_schedule_schema()?;
+        db.init_place_cache()?;
         db.seed_defaults_if_empty()?;
         Ok(db)
     }
@@ -138,6 +157,7 @@ impl Database {
     }
 
     fn get_app_db_path() -> PathBuf {
+        if let Some(directory)=std::env::var_os("FRIDAY_DATA_DIR") {return PathBuf::from(directory).join("friday.db");}
         if let Ok(appdata) = std::env::var("APPDATA") {
             PathBuf::from(appdata).join("FRIDAY").join("friday.db")
         } else {
@@ -272,131 +292,48 @@ impl Database {
         let _ = self
             .conn
             .execute("ALTER TABLE threads ADD COLUMN pinned INTEGER DEFAULT 0", []);
+        let columns: Vec<String> = self.conn.prepare("PRAGMA table_info(automations)")?
+            .query_map([], |row| row.get(1))?.collect::<Result<Vec<_>>>()?;
+        if !columns.iter().any(|column| column == "last_result") {
+            self.conn.execute("ALTER TABLE automations ADD COLUMN last_result TEXT", [])?;
+        }
         Ok(())
     }
 
     fn seed_defaults_if_empty(&self) -> Result<()> {
-        let skill_count: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM skills", [], |r| r.get(0))
-            .unwrap_or(0);
-
-        if skill_count == 0 {
-            self.insert_skill(&DbSkill {
-                id: "standup-digest".to_string(),
-                name: "Standup Digest".to_string(),
-                version: "1.0.0".to_string(),
-                description:
-                    "Summarize yesterday's commits and task changes into a clean standup note."
-                        .to_string(),
-                permissions: vec![
-                    "notion.read".to_string(),
-                    "web.fetch:api.github.com".to_string(),
-                    "notify.toast".to_string(),
-                ],
-                enabled: true,
-            })?;
-
-            self.insert_skill(&DbSkill {
-                id: "notion-operator".to_string(),
-                name: "Notion Workspace Bridge".to_string(),
-                version: "1.2.0".to_string(),
-                description:
-                    "Direct bi-directional search and task mutations across AN STUDIO Notion pages."
-                        .to_string(),
-                permissions: vec!["notion.read".to_string(), "notion.write".to_string()],
-                enabled: true,
-            })?;
-        }
-
-        let auto_count: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM automations", [], |r| r.get(0))
-            .unwrap_or(0);
-
-        if auto_count == 0 {
-            self.insert_automation(&DbAutomation {
-                id: "auto-1".to_string(),
-                name: "Morning brief".to_string(),
-                trigger_type: "cron".to_string(),
-                trigger_expr: "0 9 * * 1-5".to_string(),
-                action_tool: "notify.toast".to_string(),
-                action_args:
-                    r#"{"title":"Morning brief","body":"Check calendar and unread emails"}"#
-                        .to_string(),
-                enabled: true,
-                last_run: None,
-                next_run: None,
-            })?;
-
-            self.insert_automation(&DbAutomation {
-                id: "auto-2".to_string(),
-                name: "Archive downloads older than 30 days".to_string(),
-                trigger_type: "cron".to_string(),
-                trigger_expr: "0 0 * * 0".to_string(),
-                action_tool: "fs.archive".to_string(),
-                action_args: r#"{"path":"~/Downloads","days":30}"#.to_string(),
-                enabled: true,
-                last_run: None,
-                next_run: None,
-            })?;
-        }
-
-        let fact_count: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM facts", [], |r| r.get(0))
-            .unwrap_or(0);
-
-        if fact_count == 0 {
-            self.insert_fact(&DbFact {
-                id: "fact-init-1".to_string(),
-                content: "Kwame prefers WhatsApp over email".to_string(),
-                confidence: 0.95,
-                source_message_id: None,
-                created_at: 1000,
-            })?;
-        }
-
-        let model_count: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM ai_models", [], |r| r.get(0))
-            .unwrap_or(0);
-
-        if model_count == 0 {
-            for model in crate::providers::models::get_default_models_fleet() {
-                let _ = self.save_ai_model(&model);
+        // Preserve configured providers and seed missing built-in model choices.
+        let existing_active: i64 = self.conn.query_row("SELECT COUNT(*) FROM ai_models WHERE is_active = 1", [], |r| r.get(0))?;
+        for mut model in crate::providers::models::get_default_models_fleet() {
+            if self.get_ai_model(&model.id)?.is_none() {
+                model.is_active = existing_active == 0 && model.is_active;
+                self.save_ai_model(&model)?;
             }
-        } else {
-            // Synchronize with user's Agent Router fleet:
-            // gpt-6-astra is Normal and ACTIVE
-            // glm-5.3, claude-fable-5, gpt-5.6-sol have No traffic
-            let _ = self.conn.execute(
-                "UPDATE ai_models SET status = 'No traffic', is_active = 0 WHERE id IN ('glm-5.3', 'claude-fable-5', 'gpt-5.6-sol')",
-                [],
-            );
-            let _ = self.conn.execute(
-                "UPDATE ai_models SET status = 'Normal', is_active = 1 WHERE id = 'gpt-6-astra'",
-                [],
-            );
-            let _ = self.conn.execute(
-                "UPDATE ai_models SET status = 'Demote' WHERE id IN ('deepseek-v4-flash', 'claude-opus-5', 'claude-opus-4-8')",
-                [],
-            );
-            let _ = self.conn.execute(
-                "INSERT OR REPLACE INTO settings (key, value) VALUES ('glm_heavy_model', 'gpt-6-astra')",
-                [],
-            );
-            let _ = self.conn.execute(
-                "INSERT OR REPLACE INTO settings (key, value) VALUES ('glm_light_model', 'deepseek-v4-flash')",
-                [],
-            );
-            let _ = self.conn.execute(
-                "INSERT OR REPLACE INTO settings (key, value) VALUES ('glm_base_url', 'https://agentrouter.org/v1')",
-                [],
-            );
+        }
+        let active_count: i64 = self.conn.query_row("SELECT COUNT(*) FROM ai_models WHERE is_active = 1", [], |r| r.get(0))?;
+        if active_count != 1 {
+            self.conn.execute("UPDATE ai_models SET is_active = 0", [])?;
+            self.conn.execute("UPDATE ai_models SET is_active = 1 WHERE id = 'friday-1b-operator'", [])?;
+        }
+        let defaults = crate::providers::glm::GlmConfig { base_url: "http://127.0.0.1:11434/v1".into(), heavy_model: "friday-1b-operator".into(), light_model: "friday-1b-operator".into(), api_key: String::new() };
+        for (key, value) in [("glm_heavy_model", defaults.heavy_model), ("glm_light_model", defaults.light_model), ("glm_base_url", defaults.base_url)] {
+            self.conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?1, ?2)", params![key, value])?;
         }
 
         Ok(())
+    }
+
+    fn migrate_model_credentials(&self) -> Result<()> {
+        let keys: Vec<(String, String)> = self.conn.prepare("SELECT id, api_key FROM ai_models WHERE api_key IS NOT NULL AND api_key != ''")?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?.collect::<Result<Vec<_>>>()?;
+        for (id, key) in keys {
+            crate::settings::credential(&id).map_err(rusqlite::Error::InvalidParameterName)?
+                .set_password(&key).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+            self.conn.execute("UPDATE ai_models SET api_key = NULL WHERE id = ?1", params![id])?;
+        }
+        Ok(())
+    }
+    fn model_key(&self, id: &str) -> Result<Option<String>> {
+        crate::settings::read_key(id).map_err(rusqlite::Error::InvalidParameterName)
     }
 
     // --- AI Model Operations ---
@@ -437,6 +374,7 @@ impl Database {
             let (id, name, provider, base_url, api_key, capabilities, status, priority, is_active) =
                 res?;
 
+            let api_key = api_key.or(self.model_key(&id)?);
             let telemetry = self.get_model_telemetry(&id).unwrap_or_else(|_| {
                 crate::providers::models::ModelTelemetry {
                     availability_pct: 0.0,
@@ -488,6 +426,9 @@ impl Database {
     }
 
     pub fn save_ai_model(&self, model: &crate::providers::models::AiModel) -> Result<()> {
+        if let Some(key) = model.api_key.as_deref().filter(|key| !key.trim().is_empty()) {
+            crate::settings::credential(&model.id).map_err(rusqlite::Error::InvalidParameterName)?.set_password(key).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+        }
         let caps_json =
             serde_json::to_string(&model.capabilities).unwrap_or_else(|_| "[]".to_string());
         let status_str = model.status.as_str();
@@ -511,7 +452,7 @@ impl Database {
                 model.name,
                 model.provider,
                 model.base_url,
-                model.api_key,
+                Option::<String>::None,
                 caps_json,
                 status_str,
                 model.priority,
@@ -523,13 +464,61 @@ impl Database {
         Ok(())
     }
 
-    pub fn set_active_ai_model(&self, id: &str) -> Result<()> {
-        self.conn
-            .execute("UPDATE ai_models SET is_active = 0", [])?;
-        self.conn.execute(
-            "UPDATE ai_models SET is_active = 1 WHERE id = ?1",
-            params![id],
+    pub fn get_ai_model(&self, id: &str) -> Result<Option<crate::providers::models::AiModel>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, provider, base_url, api_key, capabilities, status, priority, is_active FROM ai_models WHERE id = ?1",
         )?;
+        let mut rows = stmt.query(params![id])?;
+        if let Some(row) = rows.next()? {
+            let id: String = row.get(0)?;
+            let name: String = row.get(1)?;
+            let provider: String = row.get(2)?;
+            let base_url: String = row.get(3)?;
+            let api_key: Option<String> = row.get(4)?;
+            let api_key = api_key.or(self.model_key(&id)?);
+            let caps_str: String = row.get(5)?;
+            let status_str: String = row.get(6)?;
+            let priority: u32 = row.get(7)?;
+            let is_active_int: i64 = row.get(8)?;
+
+            let capabilities: Vec<String> = serde_json::from_str(&caps_str).unwrap_or_default();
+            let status = crate::providers::models::ModelStatus::from_str(&status_str);
+            let telemetry = self.get_model_telemetry(&id).unwrap_or_else(|_| {
+                crate::providers::models::ModelTelemetry {
+                    availability_pct: 100.0,
+                    ttft_p90_ms: 60,
+                    avg_latency_ms: 210,
+                    tracker_history: Vec::new(),
+                }
+            });
+
+            Ok(Some(crate::providers::models::AiModel {
+                id,
+                name,
+                provider,
+                base_url,
+                api_key,
+                capabilities,
+                status,
+                priority,
+                is_active: is_active_int != 0,
+                telemetry,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn set_active_ai_model(&self, id: &str) -> Result<()> {
+        let model = self.get_ai_model(id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+        crate::providers::glm::validate_provider_config(&model.base_url, &model.name).map_err(rusqlite::Error::InvalidParameterName)?;
+        let transaction = self.conn.unchecked_transaction()?;
+        transaction.execute("UPDATE ai_models SET is_active = 0", [])?;
+        transaction.execute("UPDATE ai_models SET is_active = 1 WHERE id = ?1", params![id])?;
+        for (key, value) in [("glm_heavy_model", &model.name), ("glm_light_model", &model.name), ("glm_base_url", &model.base_url)] {
+            transaction.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)", params![key, value])?;
+        }
+        transaction.commit()?;
         Ok(())
     }
 
@@ -860,7 +849,7 @@ impl Database {
     // --- Automations Operations ---
     pub fn get_automations(&self) -> Result<Vec<DbAutomation>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, trigger_type, trigger_expr, action_tool, action_args, enabled, last_run, next_run
+            "SELECT id, name, trigger_type, trigger_expr, action_tool, action_args, enabled, last_run, next_run, last_result, timezone, schedule_json
              FROM automations ORDER BY name ASC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -875,6 +864,9 @@ impl Database {
                 enabled: enabled_int != 0,
                 last_run: row.get(7)?,
                 next_run: row.get(8)?,
+                last_result: row.get(9)?,
+                timezone: row.get(10)?,
+                schedule: row.get::<_,Option<String>>(11)?.map(|raw|serde_json::from_str(&raw).map_err(|e|rusqlite::Error::FromSqlConversionFailure(11,rusqlite::types::Type::Text,Box::new(e)))).transpose()?,
             })
         })?;
 
@@ -887,8 +879,8 @@ impl Database {
 
     pub fn insert_automation(&self, auto: &DbAutomation) -> Result<()> {
         self.conn.execute(
-            "INSERT OR REPLACE INTO automations (id, name, trigger_type, trigger_expr, action_tool, action_args, enabled, last_run, next_run)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT OR REPLACE INTO automations (id, name, trigger_type, trigger_expr, action_tool, action_args, enabled, last_run, next_run, last_result, timezone, schedule_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 auto.id,
                 auto.name,
@@ -898,10 +890,41 @@ impl Database {
                 auto.action_args,
                 if auto.enabled { 1 } else { 0 },
                 auto.last_run,
-                auto.next_run
+                auto.next_run,
+                auto.last_result,
+                auto.timezone,
+                auto.schedule.as_ref().map(serde_json::Value::to_string),
             ],
         )?;
         Ok(())
+    }
+
+    pub fn set_automation_enabled(&self, id: &str, enabled: bool, next: Option<i64>) -> Result<bool> {
+        let count = self.conn.execute("UPDATE automations SET enabled = ?1, next_run = ?2 WHERE id = ?3", params![enabled, next, id])?;
+        if count == 0 { return Err(rusqlite::Error::QueryReturnedNoRows); }
+        Ok(enabled)
+    }
+
+    pub fn initialize_automation_schedule(&self, id: &str, next: i64) -> Result<()> {
+        self.conn.execute("UPDATE automations SET next_run = ?1 WHERE id = ?2 AND next_run IS NULL AND enabled = 1", params![next, id])?;
+        Ok(())
+    }
+
+    pub fn claim_automation_run(&self, id: &str, next: i64, scheduled: bool, now: i64) -> Result<bool> {
+        let count = self.conn.execute(
+            "UPDATE automations SET next_run = ?1, last_result = 'Running'
+             WHERE id = ?2 AND (?3 = 0 OR (enabled = 1 AND next_run <= ?4))",
+            params![next, id, scheduled, now],
+        )?;
+        Ok(count == 1)
+    }
+
+    pub fn finish_automation_run(&self, id: &str, now: i64, result: &str, audit: &DbAuditEntry) -> Result<()> {
+        let transaction = self.conn.unchecked_transaction()?;
+        transaction.execute("UPDATE automations SET last_run = ?1, last_result = ?2 WHERE id = ?3", params![now, result, id])?;
+        transaction.execute("INSERT INTO audit_log (id, tool_name, args_hash, tier, decision, duration_ms, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![audit.id, audit.tool_name, audit.args_hash, audit.tier, audit.decision, audit.duration_ms, audit.created_at])?;
+        transaction.commit()
     }
 
     pub fn toggle_automation(&self, id: &str) -> Result<bool> {
@@ -1004,6 +1027,18 @@ impl Database {
             "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
             params![key, value],
         )?;
+        Ok(())
+    }
+
+    pub fn save_settings_batch(&self, values: &[(&str, &str)], remove: &[&str]) -> Result<()> {
+        let transaction = self.conn.unchecked_transaction()?;
+        for (key, value) in values {
+            transaction.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)", params![key, value])?;
+        }
+        for key in remove {
+            transaction.execute("DELETE FROM settings WHERE key = ?1", params![key])?;
+        }
+        transaction.commit()?;
         Ok(())
     }
 
@@ -1296,10 +1331,10 @@ mod tests {
         assert!(db.delete_fact("fact-test").unwrap());
 
         let automations = db.get_automations().unwrap();
-        assert!(!automations.is_empty());
+        assert!(automations.is_empty());
 
         let skills = db.get_skills().unwrap();
-        assert!(!skills.is_empty());
+        assert!(skills.is_empty());
 
         // Test settings persistence
         db.save_setting("glm_base_url", "https://agentrouter.org/")

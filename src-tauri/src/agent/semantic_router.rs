@@ -21,7 +21,12 @@ impl SemanticRouter {
         }
 
         let lower = clean.to_lowercase();
-        let trimmed = lower.trim_end_matches(['.', '!', '?', ',', ';', ':']).trim();
+        let trimmed_punct = lower.trim_end_matches(['.', '!', '?', ',', ';', ':']).trim();
+        let trimmed_please = trimmed_punct
+            .strip_suffix("please")
+            .map(|s| s.trim_end_matches([',', ' ']).trim())
+            .unwrap_or(trimmed_punct);
+        let trimmed = Self::strip_conversational_prefix(trimmed_please);
 
         // Guardrails: Never route complex reasoning, code generation, tutorials, or open-ended questions locally
         if Self::is_guarded_query(trimmed) {
@@ -59,6 +64,47 @@ impl SemanticRouter {
         }
 
         None
+    }
+
+    /// Recursively strips leading conversational fillers and wake-words
+    pub fn strip_conversational_prefix(input: &str) -> &str {
+        let mut s = input.trim();
+        let prefixes = [
+            "hey friday,", "hey friday:", "hey friday",
+            "hi friday,", "hi friday:", "hi friday",
+            "ok friday,", "ok friday:", "ok friday",
+            "okay friday,", "okay friday:", "okay friday",
+            "friday,", "friday:", "friday",
+            "yo friday,", "yo friday:", "yo friday",
+            "hey,", "hey:", "hey",
+            "hi,", "hi:", "hi",
+            "yo,", "yo:", "yo",
+            "please",
+            "can you please",
+            "could you please",
+            "would you please",
+            "can you",
+            "could you",
+            "would you",
+            "go ahead and",
+            "i need you to",
+        ];
+
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for prefix in &prefixes {
+                if s.starts_with(prefix) {
+                    let next = s[prefix.len()..].trim_start_matches([',', ':', ';', ' ']).trim();
+                    if !next.is_empty() {
+                        s = next;
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+        s
     }
 
     fn is_guarded_query(s: &str) -> bool {
@@ -266,6 +312,20 @@ impl SemanticRouter {
             || s == "show god's eye"
             || s == "telemetry canvas"
             || s == "god eye"
+            || s == "boot up gods eye"
+            || s == "boot up god's eye"
+            || s == "bring up gods eye"
+            || s == "bring up god's eye"
+            || s == "launch gods eye"
+            || s == "launch god's eye"
+            || s == "open the gods eye"
+            || s == "open the god's eye"
+            || s == "map feed"
+            || s == "cameras feed"
+            || s == "camera feed"
+            || s == "surveillance"
+            || s == "surveillance matrix"
+            || s == "open surveillance"
         {
             return Some("godseye".to_string());
         }
@@ -278,6 +338,8 @@ impl SemanticRouter {
             || s == "switch to split"
             || s == "switch to console"
             || s == "show split view"
+            || s == "open split view"
+            || s == "open console"
         {
             return Some("split".to_string());
         }
@@ -290,6 +352,7 @@ impl SemanticRouter {
             || s == "show iron legion"
             || s == "legion swarm"
             || s == "iron legion swarm"
+            || s == "open legion"
         {
             return Some("legion".to_string());
         }
@@ -301,8 +364,42 @@ impl SemanticRouter {
             || s == "switch to grid"
             || s == "show bento grid"
             || s == "bento"
+            || s == "open grid"
         {
             return Some("grid".to_string());
+        }
+
+        if s == "open settings"
+            || s == "show settings"
+            || s == "show the settings"
+            || s == "settings"
+            || s == "boot up settings"
+            || s == "boot up the settings"
+            || s == "open the settings"
+            || s == "launch settings"
+            || s == "go to settings"
+            || s == "take me to settings"
+            || s == "switch to settings"
+            || s == "bring up settings"
+            || s == "bring up the settings"
+            || s == "preferences"
+            || s == "open preferences"
+            || s == "system settings"
+            || s == "open system settings"
+            || s == "boot up system settings"
+            || s == "boot up windows settings"
+            || s == "open windows settings"
+            || s == "open windows setting"
+            || s == "windows settings"
+            || s == "windows setting"
+            || s == "launch windows settings"
+            || s == "bring up windows settings"
+            || s == "show windows settings"
+            || s == "show windows setting"
+            || s == "settings app"
+            || s == "open settings app"
+        {
+            return Some("settings".to_string());
         }
 
         None
@@ -367,9 +464,16 @@ mod tests {
     fn test_route_hud_intents() {
         assert_eq!(SemanticRouter::route("fullscreen"), Some(LocalIntent::SpatialHud("fullscreen".into())));
         assert_eq!(SemanticRouter::route("open gods eye"), Some(LocalIntent::SpatialHud("godseye".into())));
+        assert_eq!(SemanticRouter::route("hey open gods eye"), Some(LocalIntent::SpatialHud("godseye".into())));
         assert_eq!(SemanticRouter::route("split view"), Some(LocalIntent::SpatialHud("split".into())));
         assert_eq!(SemanticRouter::route("iron legion"), Some(LocalIntent::SpatialHud("legion".into())));
         assert_eq!(SemanticRouter::route("bento grid"), Some(LocalIntent::SpatialHud("grid".into())));
+        assert_eq!(SemanticRouter::route("hey boot up the settings"), Some(LocalIntent::SpatialHud("settings".into())));
+        assert_eq!(SemanticRouter::route("please open settings"), Some(LocalIntent::SpatialHud("settings".into())));
+        assert_eq!(SemanticRouter::route("hey friday, boot up the settings"), Some(LocalIntent::SpatialHud("settings".into())));
+        assert_eq!(SemanticRouter::route("boot up windows settings"), Some(LocalIntent::SpatialHud("settings".into())));
+        assert_eq!(SemanticRouter::route("windows settings"), Some(LocalIntent::SpatialHud("settings".into())));
+        assert_eq!(SemanticRouter::route("can you please open windows settings?"), Some(LocalIntent::SpatialHud("settings".into())));
     }
 
     #[test]

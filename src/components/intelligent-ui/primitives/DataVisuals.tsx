@@ -718,7 +718,7 @@ export const MetricPrimitive: React.FC<{
               isNeutral
                 ? "bg-white/10 text-[hsl(var(--muted))]"
                 : isUp
-                ? "bg-emerald-500/10 text-emerald-400"
+                ? "bg-[hsl(var(--success))]/10 text-[hsl(var(--success))]"
                 : "bg-rose-500/10 text-rose-400"
             }`}
           >

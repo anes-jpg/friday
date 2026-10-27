@@ -15,7 +15,7 @@ export type TrackerSegment = {
 const toneClass: Record<SegmentTone, string> = {
   idle: "bg-white/15",
   active: "bg-[hsl(var(--signal))]",
-  success: "bg-[hsl(var(--signal))]",
+  success: "bg-[hsl(var(--success))]",
   warning: "bg-[hsl(var(--warning))]",
   danger: "bg-[hsl(var(--danger))]",
 }
@@ -75,7 +75,7 @@ export const Tracker = React.forwardRef<HTMLDivElement, TrackerProps>(
       let tone: SegmentTone = "idle"
       if (d.color?.includes("acid") || d.color?.includes("cyan") || d.color?.includes("signal")) {
         tone = "active"
-      } else if (d.color?.includes("emerald") || d.color?.includes("green")) {
+      } else if (d.color?.includes("emerald") || d.color?.includes("green") || d.color?.includes("--success")) {
         tone = "success"
       } else if (d.color?.includes("warn") || d.color?.includes("amber")) {
         tone = "warning"

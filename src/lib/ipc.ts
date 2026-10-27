@@ -34,6 +34,17 @@ export async function invokeCommand<T>(cmd: string, args?: Record<string, unknow
     return await invoke<T>(cmd, normalized)
   }
 
+  if (typeof window !== "undefined" && !import.meta.env.MODE.includes("test") && [
+    "get_facts", "add_fact", "delete_fact", "get_automations", "create_automation", "delete_automation", "toggle_automation", "trigger_automation", "undo_last",
+    "search_code", "rrf_search", "find_symbols", "code_chunk", "review_diff", "review_scan",
+    "get_hardware_vitals", "get_network_telemetry", "get_orbital_telemetry", "get_maritime_telemetry",
+    "capture_screen", "screen_ocr", "list_windows", "focus_window",
+    "get_episodic_timeline", "search_episodic_timeline", "get_overwatch_interjections",
+    "inspect_cursor_element", "inspect_focused_app", "dispatch_legion_swarm",
+  ].includes(cmd)) {
+    throw new Error("This operation requires the Windows app. Native data is unavailable in browser preview.")
+  }
+
   console.log(`[IPC:BrowserFallback] invoke("${cmd}")`, normalized)
 
   if (cmd === "capture_screen") {
@@ -245,6 +256,7 @@ export async function invokeCommand<T>(cmd: string, args?: Record<string, unknow
     } as unknown as T
   }
   if (cmd === "submit_utterance") {
+    if (typeof window !== "undefined") return null as unknown as T
     const utt = String(args?.utterance || "").toLowerCase().trim()
     if (utt === "mute" || utt.includes("volume") || utt.includes("play")) {
       return {
@@ -280,13 +292,8 @@ export async function invokeCommand<T>(cmd: string, args?: Record<string, unknow
       } as unknown as T
     }
     return {
-      say: "Processed successfully.",
-      show: "### Operation Completed",
-      pending_plan: null,
-      tool_calls: [],
-      latency_ms: 120,
-      ttft_ms: 80,
-      tokens: 45,
+      say: "Processed successfully.", show: "### Operation Completed", pending_plan: null,
+      tool_calls: [], latency_ms: 120, ttft_ms: 80, tokens: 45,
     } as unknown as T
   }
 

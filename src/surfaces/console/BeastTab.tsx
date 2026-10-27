@@ -23,10 +23,10 @@ import {
 } from "lucide-react";
 
 export const BeastTab: React.FC = () => {
-  const [tabMode, setTabMode] = useState<"search" | "chunker" | "symbols">("chunker");
+  const [tabMode, setTabMode] = useState<"search" | "chunker" | "symbols">("search");
 
   // Search state
-  const [query, setQuery] = useState<string>("AgentCore");
+  const [query, setQuery] = useState<string>("");
   const [searchAlgo, setSearchAlgo] = useState<"rrf" | "bm25">("rrf");
   const [searchResults, setSearchResults] = useState<CodeHit[]>([]);
   const [symbols, setSymbols] = useState<SymbolHit[]>([]);
@@ -37,6 +37,7 @@ export const BeastTab: React.FC = () => {
   const [chunks, setChunks] = useState<CodeChunk[]>([]);
   const [selectedChunk, setSelectedChunk] = useState<CodeChunk | null>(null);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [elapsedMs, setElapsedMs] = useState<number>(0);
@@ -44,6 +45,7 @@ export const BeastTab: React.FC = () => {
   const handleSearch = async () => {
     if (!query.trim()) return;
     setLoading(true);
+    setLoadError(null);
     const start = performance.now();
     try {
       if (tabMode === "symbols") {
@@ -58,30 +60,9 @@ export const BeastTab: React.FC = () => {
         setSearchResults(res);
         if (res.length > 0) setSelectedResult(res[0]);
       }
-    } catch {
-      // High-fidelity fallback
-      const fallbackHits: CodeHit[] = [
-        {
-          file: "src-tauri/src/agent/loop.rs",
-          line: 46,
-          span: [46, 56],
-          score: 0.98,
-          why: "exact token match 'AgentCore' inside struct definition",
-          symbol: "struct AgentCore",
-          content: "pub struct AgentCore {\n    pub tools: Arc<ToolRegistry>,\n    pub db: Arc<Mutex<Database>>,\n}",
-        },
-        {
-          file: "src-tauri/src/agent/beast.rs",
-          line: 12,
-          span: [12, 35],
-          score: 0.94,
-          why: "AST semantic chunker module implementation",
-          symbol: "struct BeastSearcher",
-          content: "pub struct BeastSearcher {\n    pub workspace_root: PathBuf,\n}",
-        },
-      ];
-      setSearchResults(fallbackHits);
-      setSelectedResult(fallbackHits[0]);
+    } catch (error) {
+      setLoadError(`Search could not run: ${String(error)}`);
+      setSearchResults([]); setSymbols([]); setSelectedResult(null);
     } finally {
       setElapsedMs(Math.round(performance.now() - start));
       setLoading(false);
@@ -91,31 +72,15 @@ export const BeastTab: React.FC = () => {
   const handleChunkFile = async (target = chunkPath) => {
     if (!target.trim()) return;
     setLoading(true);
+    setLoadError(null);
     const start = performance.now();
     try {
       const res = await codeChunk(target.trim());
       setChunks(res);
       if (res.length > 0) setSelectedChunk(res[0]);
-    } catch {
-      // High-fidelity fallback AST chunks
-      const fallbackChunks: CodeChunk[] = [
-        {
-          file: target,
-          start_line: 1,
-          end_line: 35,
-          text: `use crate::memory::db::{Database, DbMessage};\nuse crate::providers::glm::{GlmConfig, GlmProvider};\nuse crate::tools::{RiskTier, ToolExecutionResult, ToolRegistry};\n\npub struct PlanStep {\n    pub description: String,\n    pub tier: RiskTier,\n    pub completed: bool,\n}`,
-          tokens: ["use", "crate", "memory", "db", "Database", "DbMessage", "providers", "glm", "GlmConfig", "GlmProvider", "PlanStep", "RiskTier"],
-        },
-        {
-          file: target,
-          start_line: 36,
-          end_line: 70,
-          text: `pub struct AgentCore {\n    pub tools: Arc<ToolRegistry>,\n    pub db: Arc<Mutex<Database>>,\n    pub glm: Arc<Mutex<GlmProvider>>,\n}\n\nimpl AgentCore {\n    pub fn new(db: Arc<Mutex<Database>>, glm_config: GlmConfig) -> Self {\n        // ...\n    }\n}`,
-          tokens: ["pub", "struct", "AgentCore", "tools", "Arc", "ToolRegistry", "db", "Mutex", "Database", "glm", "GlmProvider", "new"],
-        },
-      ];
-      setChunks(fallbackChunks);
-      setSelectedChunk(fallbackChunks[0]);
+    } catch (error) {
+      setLoadError(`File could not be read: ${String(error)}`);
+      setChunks([]); setSelectedChunk(null);
     } finally {
       setElapsedMs(Math.round(performance.now() - start));
       setLoading(false);
@@ -129,7 +94,7 @@ export const BeastTab: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[hsl(var(--surface))] text-[hsl(var(--ink))] p-6 overflow-y-auto">
+    <div className="legacy-workspace flex-1 flex flex-col h-full bg-[hsl(var(--surface))] text-[hsl(var(--ink))] p-6 overflow-y-auto">
       {/* Standard Tab Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[hsl(var(--line))] pb-5 mb-6 shrink-0">
         <div>
@@ -141,15 +106,16 @@ export const BeastTab: React.FC = () => {
               BEAST V3
             </span>
           </div>
-          <h1 className="text-xl font-medium tracking-tight text-[hsl(var(--ink))] mt-1">
-            Beast Code Intelligence
+          <h1 className="page-heading mt-4">
+            Code search
           </h1>
           <p className="text-xs text-[hsl(var(--muted))] mt-1 font-instrument">
-            AST Semantic Chunker · Sub-Token Identifier Tokenizer · Reciprocal Rank Fusion
+            Find code, inspect symbols, and read file sections.
           </p>
         </div>
 
-        {/* Subtab Selector */}
+        {loadError && <p role="alert" className="settings-notice is-error">{loadError}</p>}
+        {/* Search views */}
         <div className="flex items-center gap-1.5 rounded-[var(--radius-control)] border border-[hsl(var(--line))] bg-[hsl(var(--surface-raised))] p-1">
           {[
             { id: "chunker", label: "AST Chunker", icon: <Layers className="w-3.5 h-3.5" /> },
@@ -182,7 +148,7 @@ export const BeastTab: React.FC = () => {
           {/* File Input Bar */}
           <div className="flex items-center gap-3 mb-6 rounded-[var(--radius-control)] border border-[hsl(var(--line))] bg-[hsl(var(--surface-raised))] p-2 font-instrument">
             <div className="flex items-center gap-2 px-3 text-xs text-[hsl(var(--muted))]">
-              <Layers className="w-4 h-4 text-[hsl(var(--signal))]" />
+              <Layers className="w-4 h-4 text-[hsl(var(--ink))]" />
               <span>SOURCE_FILE:</span>
             </div>
             <input
@@ -223,7 +189,7 @@ export const BeastTab: React.FC = () => {
                   >
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-xs font-medium text-[hsl(var(--ink))] flex items-center gap-1.5">
-                        <Hash className="w-3.5 h-3.5 text-[hsl(var(--signal))]" />
+                        <Hash className="w-3.5 h-3.5 text-[hsl(var(--ink))]" />
                         Chunk #{idx + 1}
                       </span>
                       <span className="text-[10px] text-[hsl(var(--muted))] px-1.5 py-0.5 rounded bg-black/[.04] dark:bg-white/[.06]">
@@ -245,7 +211,7 @@ export const BeastTab: React.FC = () => {
                   <div className="flex items-center justify-between border-b border-[hsl(var(--line))] pb-3 mb-4">
                     <div>
                       <h3 className="text-sm font-medium text-[hsl(var(--ink))] flex items-center gap-2">
-                        <Layers className="w-4 h-4 text-[hsl(var(--signal))]" />
+                        <Layers className="w-4 h-4 text-[hsl(var(--ink))]" />
                         Lines {selectedChunk.start_line} - {selectedChunk.end_line} ({selectedChunk.file})
                       </h3>
                       <div className="text-[10px] text-[hsl(var(--muted))] mt-0.5">
@@ -300,7 +266,7 @@ export const BeastTab: React.FC = () => {
           {/* Hero Search Input */}
           <div className="flex items-center gap-3 mb-6 rounded-[var(--radius-control)] border border-[hsl(var(--line))] bg-[hsl(var(--surface-raised))] p-2 font-instrument">
             <div className="flex items-center gap-2 px-3 text-xs text-[hsl(var(--muted))]">
-              <Search className="w-4 h-4 text-[hsl(var(--signal))]" />
+              <Search className="w-4 h-4 text-[hsl(var(--ink))]" />
               <span>SEARCH_QUERY:</span>
             </div>
             <input
@@ -356,7 +322,7 @@ export const BeastTab: React.FC = () => {
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs font-semibold text-[hsl(var(--ink))] truncate">{res.file.split("/").pop()}</span>
-                    <span className="text-[10px] font-instrument text-[hsl(var(--signal))]">Score: {Math.round(res.score * 100)}%</span>
+                    <span className="text-[10px] font-instrument text-[hsl(var(--ink))]">Score: {Math.round(res.score * 100)}%</span>
                   </div>
                   <div className="text-[10px] font-instrument text-[hsl(var(--muted))] truncate">{res.file}:{res.line}</div>
                   {res.symbol && (

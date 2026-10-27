@@ -53,7 +53,16 @@ pub fn normalize_for_speech(raw: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ");
 
-    text.trim().to_string()
+    let mut sentences=0;
+    let mut end=text.len();
+    let chars:Vec<(usize,char)>=text.char_indices().collect();
+    for (index,(offset,ch)) in chars.iter().enumerate() {
+        if ['.','?','!'].contains(ch) && chars.get(index+1).is_none_or(|(_,next)|next.is_whitespace()) {
+            sentences+=1;
+            if sentences==2 {end=offset+ch.len_utf8();break;}
+        }
+    }
+    text[..end].trim().to_string()
 }
 
 fn regex_replace_urls(text: &str) -> String {

@@ -8,6 +8,7 @@
  */
 
 import { invokeCommand, isDesktop } from "./ipc"
+import { DEFAULT_AI_URL, DEFAULT_HEAVY_MODEL, validateProviderConfig, isLocalAiEndpoint } from "./ai-config"
 import type { Emotion, ToolCall, PendingPlanBackend } from "./types"
 import {
   SF_ITINERARY_OPENUI,
@@ -19,6 +20,7 @@ import {
 } from "@/components/intelligent-ui/examples"
 
 export interface AiTurnResult {
+  runId?: string
   say: string
   show: string
   emotion: Emotion
@@ -29,22 +31,39 @@ export interface AiTurnResult {
   toolCalls: ToolCall[]
   pendingPlan?: PendingPlanBackend | null
   needsKey?: boolean
+  failed?: boolean
 }
 
 export function getAiConfig() {
   if (typeof window === "undefined") {
     return {
-      baseUrl: "https://api.deepseek.com/v1",
-      model: "deepseek-chat",
+      baseUrl: DEFAULT_AI_URL,
+      model: DEFAULT_HEAVY_MODEL,
       apiKey: "",
     }
   }
 
-  const baseUrl = localStorage.getItem("friday_glm_base_url") || "https://api.deepseek.com/v1"
-  const model = localStorage.getItem("friday_glm_heavy_model") || localStorage.getItem("friday_glm_model") || "deepseek-chat"
+  const baseUrl = localStorage.getItem("friday_glm_base_url") || DEFAULT_AI_URL
+  const model = localStorage.getItem("friday_glm_heavy_model") || localStorage.getItem("friday_glm_model") || DEFAULT_HEAVY_MODEL
   const apiKey = localStorage.getItem("friday_glm_api_key") || ""
 
   return { baseUrl, model, apiKey }
+}
+
+export function normalizeSay(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/(?:https?|ftp):\/\/\S+/gi, (match) => /[.!?]$/.test(match) ? match.slice(-1) : " ")
+    .replace(/\b[A-Za-z]:[\\/][^\s]+/g, (match) => /[.!?]$/.test(match) ? match.slice(-1) : " ")
+    .replace(/(?:^|\s)(?:~?\/)[^\s]+/g, (match) => /[.!?]$/.test(match) ? match.slice(-1) : " ")
+    .replace(/^[\s>*#-]+/gm, "")
+    .replace(/[*_`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(/(?<=[.!?])\s+/)
+    .slice(0, 2)
+    .join(" ") || "The details are on your screen."
 }
 
 const FRIDAY_SYSTEM_PROMPT = `You are FRIDAY (Female Replacement Intelligent Digital Assistant Youth), an intelligent desktop AI operator with the persona of Kerry Condon from the Marvel Cinematic Universe: composed, articulate, warm yet dryly witty, razor-sharp, and exceptionally competent.
@@ -53,7 +72,7 @@ OPERATOR FIRST PRINCIPLE:
 You are an active desktop operator, NOT a passive chatbot. When asked to inspect files, check if an icon/shortcut/app exists, read the screen, look at open windows, or execute actions, DO NOT guess, speculate, or say 'I will look' without calling tools.
 
 You communicate across two synchronized channels:
-1. Spoken Channel ('say'): What you speak aloud to the user. Speak naturally, articulately, and warmly in 2 to 3 engaging sentences. Provide real conversational depth, your key insight or recommendation, and address the user like a trusted partner in the room. Don't be excessively clipped or terse. NEVER include URLs, file paths, bullet points, asterisks, or markdown in 'say'.
+1. Spoken Channel ('say'): What you speak aloud to the user. Use a maximum of 2 natural spoken sentences. NEVER include URLs, file paths, bullet points, asterisks, or markdown in 'say'.
 2. Visual Channel ('show'): What you display on screen. Use rich GitHub-flavored markdown, code blocks, clean tables, structured lists, and formatted data.
 
 INTELLIGENT UI (OpenUI Lang 1.0):
@@ -80,7 +99,8 @@ Do not wrap the JSON in backticks or markdown code blocks if possible, or provid
 export async function executeAiTurn(
   userPrompt: string,
   history: Array<{ role: string; content: string }> = [],
-  mode: string = "command"
+  mode: string = "command",
+  context: { requestId?: string; threadId?: string; projectId?: string; providerProfileId?: string } = {},
 ): Promise<AiTurnResult> {
   const startTime = performance.now()
   const cleanPrompt = userPrompt.trim()
@@ -88,6 +108,7 @@ export async function executeAiTurn(
   // 1. Try Desktop Tauri IPC Backend (or test mock runner)
   try {
     interface BackendTurnRes {
+      run_id?: string
       say: string
       show: string
       latency_ms?: number
@@ -101,15 +122,17 @@ export async function executeAiTurn(
     const res = await invokeCommand<BackendTurnRes>("submit_utterance", {
       utterance: cleanPrompt,
       mode,
+      ...context,
     })
 
       if (res && (res.say || res.show)) {
         const totalMs = Math.round(performance.now() - startTime)
         return {
-          say: res.say || "All set.",
+          runId: res.run_id,
+          say: normalizeSay(res.say || "All set."),
           show: res.show || res.say,
           emotion: "focused",
-          model: res.model || (res.tokens === 0 ? "on-device-engine" : "glm-5.3"),
+          model: res.model || (res.tokens === 0 ? "on-device-engine" : getAiConfig().model),
           tokens: typeof res.tokens === "number" ? res.tokens : 60,
           ttftMs: typeof res.ttft_ms === "number" ? res.ttft_ms : 250,
           totalMs,
@@ -128,16 +151,22 @@ export async function executeAiTurn(
               output: outputStr,
               duration_ms: typeof tc.duration_ms === "number" ? tc.duration_ms : 120,
               started_at: String(tc.started_at || new Date().toISOString()),
+              undoable: tc.undoable === true,
             }
           }),
         }
       }
     } catch (e) {
+      if (isDesktop) throw e
       console.warn("[FRIDAY AI] Native IPC failed, falling back to direct HTTP:", e)
     }
 
   // 2. Direct HTTP / Browser Execution
   const config = getAiConfig()
+  const configError = validateProviderConfig(config.baseUrl, config.model)
+  if (configError) {
+    return { say: "Update the reasoning settings before trying again.", show: configError, emotion: "calm-concerned", model: config.model, tokens: 0, ttftMs: 0, totalMs: Math.round(performance.now() - startTime), toolCalls: [], failed: true }
+  }
   const cleanUrl = config.baseUrl.trim().replace(/\/+$/, "")
   const effectiveUrl = cleanUrl.endsWith("/chat/completions")
     ? cleanUrl
@@ -147,7 +176,7 @@ export async function executeAiTurn(
         ? `${cleanUrl}/chat/completions`
         : `${cleanUrl}/v1/chat/completions`
 
-  if (!config.apiKey || config.apiKey.trim() === "") {
+  if (!isLocalAiEndpoint(config.baseUrl) && (!config.apiKey || config.apiKey.trim() === "")) {
     const lower = cleanPrompt.toLowerCase()
     const totalMs = Math.round(performance.now() - startTime)
 
@@ -228,7 +257,7 @@ export async function executeAiTurn(
     // Default intelligent guidance when API key is missing
     return {
       say: "I'm right here, but my AI reasoning engine needs an API key. Please open Settings and enter your key so we can get to work.",
-      show: `### FRIDAY · AI Fleet Idle\n\nI'm ready to assist you, but the reasoning fleet is offline because no API key is configured.\n\nTo activate live AI reasoning:\n1. Open **Settings** (click the gear icon or \`Alt+Shift+Space\`).\n2. In the **Reasoning** section, paste your API key (e.g. from DeepSeek, AgentRouter, Zhipu AI, or OpenAI).\n3. Click **Save Settings** and **Test Connection**.\n\nYour key is stored securely in your local environment and never sent anywhere except your configured endpoint.`,
+      show: "### Reasoning needs an API key\n\nOpen **Settings**, enter your provider API key, then save and test the connection.",
       emotion: "warm",
       model: config.model,
       tokens: 0,
@@ -236,6 +265,7 @@ export async function executeAiTurn(
       totalMs,
       toolCalls: [],
       needsKey: true,
+      failed: true,
     }
   }
 
@@ -245,26 +275,28 @@ export async function executeAiTurn(
     { role: "user", content: cleanPrompt },
   ]
 
-  const isDeepseekReasoner = config.model.includes("deepseek-reasoner") || config.model === "deepseek-r1"
   const requestBody: Record<string, unknown> = {
     model: config.model,
     messages: messagesPayload,
     max_tokens: 2048,
   }
-  if (!isDeepseekReasoner) {
-    requestBody.temperature = 0.3
-  }
+  requestBody.temperature = 0.3
 
   let ttftMs = 0
   const fetchStart = performance.now()
 
   try {
+    const effectiveToken = config.apiKey.trim() || (isLocalAiEndpoint(config.baseUrl) ? "ollama" : "")
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    }
+    if (effectiveToken) {
+      headers["Authorization"] = `Bearer ${effectiveToken}`
+    }
+
     const res = await fetch(effectiveUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.apiKey.trim()}`,
-      },
+      headers,
       body: JSON.stringify(requestBody),
     })
 
@@ -282,11 +314,13 @@ export async function executeAiTurn(
         ttftMs,
         totalMs,
         toolCalls: [],
+        failed: true,
       }
     }
 
-    const data = await res.json()
+    const data: { model?: string; choices?: { message?: { content?: string } }[]; usage?: { total_tokens?: number } } = await res.json()
     const rawContent = data.choices?.[0]?.message?.content || ""
+    if (!rawContent.trim()) throw new Error("The model returned an empty response")
     const tokens = data.usage?.total_tokens || rawContent.split(/\s+/).length
 
     // Parse two-channel output
@@ -331,7 +365,7 @@ export async function executeAiTurn(
         .replace(/```[\s\S]*?```/g, "")
         .replace(/[*_#`[\]]/g, "")
         .split(/(?<=[.!?])\s+/)
-        .slice(0, 4)
+        .slice(0, 2)
         .join(" ")
         .trim()
 
@@ -345,7 +379,7 @@ export async function executeAiTurn(
     const totalMs = Math.round(performance.now() - startTime)
 
     return {
-      say,
+      say: normalizeSay(say),
       show,
       emotion,
       model: data.model || config.model,
@@ -366,6 +400,7 @@ export async function executeAiTurn(
       ttftMs,
       totalMs,
       toolCalls: [],
+      failed: true,
     }
   }
 }

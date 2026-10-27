@@ -90,7 +90,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
 
         <p className="mt-6 text-base sm:text-lg text-[var(--color-mute)] max-w-2xl font-normal leading-relaxed">
           Not a chatbot in a window. A deterministic, voice-first Windows operator running your professional workflows
-          locally on your CPU. Pure GLM-4 cloud intelligence with zero audio ever leaving your laptop.
+          locally on your CPU. Configurable OpenAI-compatible intelligence with speech processed on your laptop.
         </p>
 
         <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
@@ -264,7 +264,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
           </div>
           <p className="text-xs text-[var(--color-mute)] max-w-2xl leading-relaxed">
             Wake word detection, Silero VAD, streaming ASR, and speech synthesis all run on your CPU.
-            The network is exactly one thing: GLM-4 reasoning over TLS. API keys are safely held in the Windows Credential Manager via DPAPI.
+            Connect local or remote OpenAI-compatible model providers. API keys are held in the Windows Credential Manager via DPAPI.
           </p>
         </div>
 

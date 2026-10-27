@@ -345,6 +345,10 @@ mod tests {
     #[test]
     fn test_fact_retriever() {
         let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+        db.lock().expect("test DB lock").insert_fact(&crate::memory::db::DbFact {
+            id: "retriever-fixture".into(), content: "Kwame prefers WhatsApp over email".into(),
+            confidence: 0.95, source_message_id: None, created_at: 1000,
+        }).expect("save test fact");
         let retriever = FactRetriever::new(db.clone());
 
         let facts = retriever.retrieve_context("Does Kwame prefer WhatsApp?");

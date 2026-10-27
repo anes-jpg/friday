@@ -14,7 +14,7 @@ This document is non-negotiable. Every change must adhere to these laws and qual
    - Ambient glow: Use subtle drop shadows `0 20px 40px -15px rgba(0,0,0,0.6)` on prominent dashboard cards.
 
 2. **One-Signal Law**:
-   - A single accent — `--color-acid: oklch(78% 0.19 152)` — appears at most twice per viewport.
+   - Preserve the existing violet accent — `--color-acid: oklch(68.5% 0.205 285.5)` — and the Atmospheric Halftone OS design in `DESIGN.md`. Do not introduce green activity styling or redesign working UI without an explicit request.
    - It only ever signifies that **FRIDAY is actively doing something**: listening, thinking, streaming, or an active state change.
    - Never use `--color-acid` for decorative branding or static chrome.
 
@@ -59,5 +59,5 @@ This document is non-negotiable. Every change must adhere to these laws and qual
 - ❌ No `unwrap()` in Rust code outside `#[cfg(test)]`. Use `?` or explicit error handling.
 - ❌ No `any` in TypeScript.
 - ❌ No inline styles (`style={{ ... }}`) — use Tailwind tokens and utility classes.
-- ❌ No local LLM or speech cloud endpoints (GLM is the sole brain over the network).
+- FRIDAY supports configurable OpenAI-compatible model endpoints and model names, including local and remote providers. Do not restrict it to GLM. Speech remains local.
 - ❌ The 2D Canvas Orb must burn 0% CPU in Idle state (never spin `requestAnimationFrame` when idle).

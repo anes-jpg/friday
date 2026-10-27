@@ -123,7 +123,7 @@ export const DelphiTab: React.FC = () => {
   );
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[hsl(var(--surface))] text-[hsl(var(--ink))] p-6 overflow-y-auto">
+    <div className="legacy-workspace flex-1 flex flex-col h-full bg-[hsl(var(--surface))] text-[hsl(var(--ink))] p-6 overflow-y-auto">
       {/* Standard Tab Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[hsl(var(--line))] pb-5 mb-6 shrink-0">
         <div>
@@ -135,7 +135,7 @@ export const DelphiTab: React.FC = () => {
               DELPHI
             </span>
           </div>
-          <h1 className="text-xl font-medium tracking-tight text-[hsl(var(--ink))] mt-1">
+          <h1 className="page-heading mt-4">
             Delphi Developer Studio
           </h1>
           <p className="text-xs text-[hsl(var(--muted))] mt-1 font-instrument">
@@ -211,7 +211,7 @@ export const DelphiTab: React.FC = () => {
                 </span>
                 <span
                   className={`text-[9px] font-instrument px-1.5 py-0.5 rounded ${
-                    jsonError ? "bg-red-500/10 text-[hsl(var(--danger))]" : "bg-emerald-500/10 text-[hsl(var(--success))]"
+                    jsonError ? "bg-red-500/10 text-[hsl(var(--danger))]" : "bg-[hsl(var(--success))]/10 text-[hsl(var(--success))]"
                   }`}
                 >
                   {jsonError ? "SYNTAX ERROR" : "VALID JSON"}
@@ -262,7 +262,7 @@ export const DelphiTab: React.FC = () => {
                 type="text"
                 value={regexFlags}
                 onChange={(e) => setRegexFlags(e.target.value)}
-                className="w-12 bg-transparent border-none text-[hsl(var(--signal))] focus:outline-none font-semibold"
+                className="w-12 bg-transparent border-none text-[hsl(var(--ink))] focus:outline-none font-semibold"
                 placeholder="gims"
               />
             </div>
@@ -306,7 +306,7 @@ export const DelphiTab: React.FC = () => {
                 regexMatches.matches.map((m, i) => (
                   <div key={i} className="p-2.5 rounded bg-white/5 border border-white/10">
                     <div className="flex items-center justify-between text-white font-medium">
-                      <span className="text-[hsl(var(--signal))]">Match {i + 1}: "{m.match}"</span>
+                      <span className="text-[hsl(var(--ink))]">Match {i + 1}: "{m.match}"</span>
                       <span className="text-[10px] text-white/50">Index {m.index}</span>
                     </div>
                     {m.groups.length > 0 && (

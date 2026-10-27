@@ -1,196 +1,64 @@
-import React, { useState } from "react"
-import { useFridayStore } from "@/lib/store"
-import { MemoryGlobe } from "@/components/memory/MemoryGlobe"
-import { BrainCircuit, Search, Trash2, Pin, List, Globe2 } from "lucide-react"
-import { toast } from "sonner"
+import { lazy, Suspense, useEffect, useState } from "react"
+import { useFriday } from "@/lib/store"
+import { isDesktop } from "@/lib/ipc"
+import { Search, Plus, Trash2, X, List, Globe2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Fact } from "@/lib/types"
 
-export const MemoryTab: React.FC = () => {
-  const { facts, deleteFact, loadFactsFromBackend } = useFridayStore()
-  const [searchTerm, setSearchTerm] = useState("")
-  const [selectedFactId, setSelectedFactId] = useState<string | null>(null)
-  const [viewMode, setViewMode] = useState<"split" | "list">("split")
+const MemoryGlobe = lazy(() => import("@/components/memory/MemoryGlobe").then((module) => ({ default: module.MemoryGlobe })))
 
-  React.useEffect(() => {
-    loadFactsFromBackend?.()
-  }, [loadFactsFromBackend])
-
-  const filteredFacts = facts.filter((f) =>
-    f.value.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    f.subject.toLowerCase().includes(searchTerm.toLowerCase())
-  )
-
-  const selectedFact = facts.find((f) => f.id === selectedFactId) || filteredFacts[0]
-
-  const handleDelete = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    deleteFact(id)
-    toast.success("Fact deleted from associative memory")
-    if (selectedFactId === id) setSelectedFactId(null)
+export function MemoryTab() {
+  const facts = useFriday((state) => state.facts)
+  const [query, setQuery] = useState("")
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [view, setView] = useState<"list" | "globe">("list")
+  const [loading, setLoading] = useState(isDesktop)
+  const [error, setError] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [subject, setSubject] = useState("")
+  const [value, setValue] = useState("")
+  useEffect(() => {
+    if (!isDesktop) return
+    let disposed = false
+    useFriday.getState().loadFactsFromBackend().catch((reason: unknown) => {
+      if (!disposed) setError(String(reason))
+    }).finally(() => { if (!disposed) setLoading(false) })
+    return () => { disposed = true }
+  }, [])
+  const filtered = facts.filter((fact) => (fact.subject + " " + fact.value).toLowerCase().includes(query.toLowerCase()))
+  const selected = filtered.find((fact) => fact.id === selectedId) ?? filtered[0]
+  const add = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setBusy(true); setError(null)
+    try {
+      const fact = await useFriday.getState().addFactToBackend(subject.trim(), value.trim())
+      setSelectedId(fact.id); setSubject(""); setValue(""); setAdding(false)
+    } catch (reason) { setError(String(reason)) }
+    finally { setBusy(false) }
   }
-
+  const remove = async () => {
+    if (!selected) return
+    setBusy(true); setError(null)
+    try { await useFriday.getState().deleteFact(selected.id); setDeleting(false); setSelectedId(null) }
+    catch (reason) { setError(String(reason)) }
+    finally { setBusy(false) }
+  }
   return (
-    <div className="flex-1 flex flex-col h-full bg-[hsl(var(--surface))] text-[hsl(var(--ink))] p-6 overflow-hidden select-none">
-      {/* Standard Page Header */}
-      <div className="flex items-center justify-between border-b border-black/10 dark:border-white/10 pb-4 mb-4 shrink-0">
-        <div>
-          <div className="flex items-center gap-2">
-            <BrainCircuit className="size-4 text-[hsl(var(--signal))]" />
-            <h2 className="text-lg font-semibold tracking-tight text-[hsl(var(--ink))]">
-              Associative Memory Map
-            </h2>
-            <span className="font-instrument text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--signal))]/30 bg-[hsl(var(--signal))]/10 text-[hsl(var(--signal))] uppercase">
-              SQLCIPHER · BGE-SMALL
-            </span>
-          </div>
-          <p className="font-instrument text-[11px] text-[hsl(var(--muted))] mt-1">
-            Auditable memory facts recalled through dense embedding vector space.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* View Mode Toggle */}
-          <div className="flex items-center rounded-[var(--radius-control)] border border-black/10 dark:border-white/10 bg-[hsl(var(--surface-raised))] p-0.5">
-            <button
-              type="button"
-              onClick={() => setViewMode("split")}
-              aria-label="Globe view"
-              className={cn(
-                "p-1.5 rounded-[calc(var(--radius-control)-2px)] transition-colors cursor-pointer",
-                viewMode === "split"
-                  ? "bg-black/10 dark:bg-white/15 text-[hsl(var(--ink))]"
-                  : "text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))]"
-              )}
-            >
-              <Globe2 className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("list")}
-              aria-label="List view"
-              className={cn(
-                "p-1.5 rounded-[calc(var(--radius-control)-2px)] transition-colors cursor-pointer",
-                viewMode === "list"
-                  ? "bg-black/10 dark:bg-white/15 text-[hsl(var(--ink))]"
-                  : "text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))]"
-              )}
-            >
-              <List className="size-3.5" />
-            </button>
-          </div>
-
-          <div className="relative w-56">
-            <Search className="absolute left-2.5 top-2.5 size-3.5 text-[hsl(var(--muted))]" />
-            <input
-              type="text"
-              placeholder="Search facts..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-[hsl(var(--surface-raised))] border border-black/10 dark:border-white/10 rounded-[var(--radius-control)] pl-8 pr-3 py-1.5 text-xs text-[hsl(var(--ink))] placeholder-[hsl(var(--muted))] focus:outline-none focus:border-[hsl(var(--signal))] font-instrument"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Main Workspace Area */}
-      <div className="flex-1 flex gap-4 min-h-0 overflow-hidden">
-        {/* Left: Singular Hero Object (MemoryGlobe) */}
-        {viewMode === "split" && (
-          <div className="flex-1 relative flex flex-col rounded-[var(--radius-panel)] border border-black/10 dark:border-white/10 bg-[hsl(var(--surface-raised))] overflow-hidden min-h-0">
-            <div className="absolute top-3 left-3 z-10 font-instrument text-[10px] uppercase tracking-wider text-[hsl(var(--muted))] pointer-events-none">
-              3D Knowledge Topology
-            </div>
-            <div className="flex-1 w-full h-full min-h-[300px]">
-              <MemoryGlobe
-                facts={filteredFacts}
-                selectedFactId={selectedFactId}
-                onSelectFact={(f: Fact) => setSelectedFactId(f.id)}
-                searchQuery={searchTerm}
-                className="w-full h-full"
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Right / Secondary: Searchable Facts List & Detail Inspector */}
-        <div
-          className={cn(
-            "flex flex-col gap-3 min-h-0",
-            viewMode === "split" ? "w-[380px] shrink-0" : "flex-1"
-          )}
-        >
-          {/* Selected Fact Inspector Detail Card */}
-          {selectedFact && (
-            <div className="p-3.5 rounded-[var(--radius-panel)] border border-black/10 dark:border-white/10 bg-[hsl(var(--surface-raised))] font-instrument text-xs space-y-2 shrink-0">
-              <div className="flex items-center justify-between text-[10px] text-[hsl(var(--muted))]">
-                <span className="font-semibold uppercase tracking-wider text-[hsl(var(--signal))]">
-                  ACTIVE FACT RECORD
-                </span>
-                <span>{(selectedFact.confidence * 100).toFixed(0)}% CONFIDENCE</span>
-              </div>
-              <p className="font-sans text-sm text-[hsl(var(--ink))] font-medium leading-snug">
-                {selectedFact.value}
-              </p>
-              <div className="flex items-center justify-between text-[10px] text-[hsl(var(--muted))] pt-1 border-t border-black/5 dark:border-white/5">
-                <span>Subject: {selectedFact.subject}</span>
-                <span>Tier: {selectedFact.tier}</span>
-              </div>
-            </div>
-          )}
-
-          {/* Searchable Facts List */}
-          <div className="flex-1 rounded-[var(--radius-panel)] border border-black/10 dark:border-white/10 bg-[hsl(var(--surface-raised))] overflow-y-auto p-2 space-y-1.5 custom-scrollbar">
-            {filteredFacts.length === 0 ? (
-              <div className="py-12 text-center text-xs font-instrument text-[hsl(var(--muted))]">
-                No matching memory facts found.
-              </div>
-            ) : (
-              filteredFacts.map((fact) => {
-                const isSelected = selectedFact?.id === fact.id
-                return (
-                  <div
-                    key={fact.id}
-                    onClick={() => setSelectedFactId(fact.id)}
-                    className={cn(
-                      "p-3 rounded-[var(--radius-control)] border transition-all cursor-pointer flex items-start justify-between gap-2",
-                      isSelected
-                        ? "border-[hsl(var(--signal))] bg-[hsl(var(--signal))]/5 shadow-xs"
-                        : "border-black/5 dark:border-white/5 bg-[hsl(var(--surface))] hover:border-black/20"
-                    )}
-                  >
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex items-center gap-1.5 font-instrument text-[10px] text-[hsl(var(--muted))]">
-                        {fact.pinned && <Pin className="size-2.5 text-[hsl(var(--signal))] shrink-0" />}
-                        <span className="truncate">{fact.subject}</span>
-                        <span>·</span>
-                        <span className="text-[hsl(var(--signal))]">
-                          {(fact.confidence * 100).toFixed(0)}%
-                        </span>
-                      </div>
-                      <p className="text-xs text-[hsl(var(--ink))] line-clamp-2 leading-relaxed font-sans">
-                        {fact.value}
-                      </p>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={(e) => handleDelete(fact.id, e)}
-                      title="Delete fact"
-                      aria-label="Delete fact"
-                      className="p-1 rounded text-[hsl(var(--muted))] hover:text-[hsl(var(--danger))] hover:bg-black/5 dark:hover:bg-white/10 transition-colors shrink-0 cursor-pointer"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
-                  </div>
-                )
-              })
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
+    <section className="records-workspace">
+      <header className="records-heading"><div><span className="instrument-label">Saved context</span><h1 className="page-heading">Memory</h1><p>What FRIDAY remembers about your work.</p></div><button type="button" className="primary-action" disabled={!isDesktop} onClick={() => { setError(null); setAdding(true) }}><Plus size={16} />Add memory</button></header>
+      <div className="records-toolbar"><label className="records-search"><Search size={16} /><input aria-label="Search memory" placeholder="Find a fact or preference" value={query} onChange={(event) => setQuery(event.target.value)} /></label><div className="records-view"><button type="button" aria-label="List view" aria-pressed={view === "list"} className={cn(view === "list" && "is-selected")} onClick={() => setView("list")}><List size={16} /></button><button type="button" aria-label="Globe view" aria-pressed={view === "globe"} className={cn(view === "globe" && "is-selected")} onClick={() => setView("globe")}><Globe2 size={16} /></button></div><span className="instrument-label">{filtered.length} {filtered.length === 1 ? "record" : "records"}</span></div>
+      {error && !adding && !deleting && <p className="settings-notice is-error" role="alert">{error}</p>}
+      {!isDesktop && <p className="records-note">Saved memory is available in the Windows app.</p>}
+      {loading ? <p className="records-note" role="status">Reading saved memory…</p> : filtered.length === 0 ? <div className="records-empty"><span className="instrument-label">{query ? "No matches" : "A clean slate"}</span><h2>{query ? "Try another search." : "Keep the useful details."}</h2><p>{query ? "Search by subject or by the saved text." : "Save a preference here, or ask FRIDAY to remember it during a conversation."}</p></div> : <div className={cn("memory-composition", view === "globe" && "has-globe")}>
+        {view === "globe" && <div className="memory-globe"><Suspense fallback={<p className="records-note">Opening memory view…</p>}><MemoryGlobe facts={filtered} selectedFactId={selected?.id ?? null} onSelectFact={(fact: Fact) => setSelectedId(fact.id)} searchQuery={query} className="w-full h-full" /></Suspense></div>}
+        <div className="memory-list" role="list" aria-label="Memory records">{filtered.map((fact) => <div role="listitem" key={fact.id}><button type="button" className={cn("memory-row", selected?.id === fact.id && "is-selected")} onClick={() => setSelectedId(fact.id)}><span>{fact.subject}</span><p>{fact.value}</p><small>{new Date(fact.created_at).toLocaleDateString()}</small></button></div>)}</div>
+        {selected && <aside className="memory-detail"><span className="instrument-label">Selected record</span><h2>{selected.subject}</h2><p>{selected.value}</p><dl><div><dt>Saved</dt><dd>{new Date(selected.created_at).toLocaleString()}</dd></div><div><dt>Source</dt><dd>{selected.source_message_id === "user-direct" ? "Added by you" : selected.source_message_id || "Saved context"}</dd></div><div><dt>Confidence</dt><dd>{Math.round(selected.confidence * 100)}%</dd></div></dl><button type="button" className="quiet-action" disabled={!isDesktop} onClick={() => { setError(null); setDeleting(true) }}><Trash2 size={14} />Delete memory</button></aside>}
+      </div>}
+      {adding && <div className="monitor-modal" role="dialog" aria-modal="true" aria-labelledby="memory-add-title"><form onSubmit={(event) => void add(event)}><header><h2 id="memory-add-title" className="page-heading">Add memory</h2><button type="button" aria-label="Close" disabled={busy} onClick={() => setAdding(false)} autoFocus><X size={20} /></button></header><label className="settings-field">Subject<input required maxLength={160} value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="Writing preferences" /></label><label className="settings-field">Remember<textarea className="records-textarea" required maxLength={8000} rows={4} value={value} onChange={(event) => setValue(event.target.value)} placeholder="Use short paragraphs and plain language." /></label>{error && <p className="settings-notice is-error" role="alert">{error}</p>}<div className="records-modal-actions"><button type="button" className="quiet-action" disabled={busy} onClick={() => setAdding(false)}>Cancel</button><button type="submit" className="primary-action" disabled={busy || !subject.trim() || !value.trim()}>{busy ? "Saving…" : "Save memory"}</button></div></form></div>}
+      {deleting && selected && <div className="monitor-modal" role="dialog" aria-modal="true" aria-labelledby="memory-delete-title"><div className="records-dialog"><h2 id="memory-delete-title" className="page-heading">Delete this memory?</h2><p>{selected.value}</p><p className="records-note">This removes the saved fact. It cannot be undone.</p>{error && <p className="settings-notice is-error" role="alert">{error}</p>}<div className="records-modal-actions"><button type="button" className="quiet-action" disabled={busy} onClick={() => setDeleting(false)} autoFocus>Keep memory</button><button type="button" className="primary-action" disabled={busy} onClick={() => void remove()}>{busy ? "Deleting…" : "Delete memory"}</button></div></div></div>}
+    </section>
   )
 }
-
 export default MemoryTab

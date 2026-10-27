@@ -328,7 +328,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
                       <Mic className="w-4 h-4 text-[hsl(var(--signal))]" />
                       Hardware Microphone Telemetry
                     </span>
-                    <span className="text-[10px] font-mono text-emerald-400">
+                    <span className="text-[10px] font-mono text-[hsl(var(--success))]">
                       {micTesting ? "Listening" : "Ready"}
                     </span>
                   </div>
@@ -408,13 +408,13 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
                 <div className="p-3 rounded-[12px] border border-white/10 bg-white/[0.04]">
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="font-medium text-white flex items-center gap-2">
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                      <ShieldCheck className="w-3.5 h-3.5 text-[hsl(var(--success))]" />
                       Utterance Contract Safety Tiers
                     </span>
                   </div>
                   <div className="space-y-1 font-mono text-[10px]">
                     <div className="flex items-center justify-between p-1.5 rounded-[6px] bg-white/[0.02] border border-white/5">
-                      <span className="font-semibold text-emerald-400">GREEN</span>
+                      <span className="font-semibold text-[hsl(var(--success))]">GREEN</span>
                       <span className="text-white/50">Read-only actions execute silently</span>
                     </div>
                     <div className="flex items-center justify-between p-1.5 rounded-[6px] bg-white/[0.02] border border-white/5">
@@ -448,7 +448,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
                         : "text-white/60 hover:text-white"
                     }`}
                   >
-                    <Sparkles className="w-3.5 h-3.5 text-emerald-500" /> 🔥 Better-T-Stack (Flagship)
+                    <Sparkles className="w-3.5 h-3.5 text-[hsl(var(--success))]" /> 🔥 Better-T-Stack (Flagship)
                   </button>
                   <button
                     type="button"
@@ -475,11 +475,11 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
                 </div>
 
                 {scaffoldSuccess && (
-                  <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-white space-y-2.5 font-sans shadow-lg shadow-black/40">
+                  <div className="p-3.5 rounded-2xl bg-[hsl(var(--success))]/10 border border-[hsl(var(--success))]/30 text-white space-y-2.5 font-sans shadow-lg shadow-black/40">
                     <div className="flex items-center gap-2">
-                      <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                      <CheckCircle2 className="w-5 h-5 text-[hsl(var(--success))] shrink-0" />
                       <div>
-                        <h3 className="font-semibold text-emerald-400 text-xs">Better-T-Stack Initialized!</h3>
+                        <h3 className="font-semibold text-[hsl(var(--success))] text-xs">Better-T-Stack Initialized!</h3>
                         <p className="text-[10px] font-mono text-white/50">{scaffoldSuccess}</p>
                       </div>
                     </div>
@@ -516,7 +516,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
                             🔥 Flagship Stack
                           </span>
                         </div>
-                        <span className="text-[9px] font-mono text-emerald-400">0 Tokens Burned</span>
+                        <span className="text-[9px] font-mono text-[hsl(var(--success))]">0 Tokens Burned</span>
                       </div>
                       <p className="text-[10.5px] text-white/70 leading-tight">
                         End-to-end type-safe monorepo. Clean foundation scaffolded instantly. The rest is left for FRIDAY to autonomously construct upon your spoken or typed command.
@@ -631,7 +631,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
                             </>
                           ) : (
                             <>
-                              <Sparkles className="w-3.5 h-3.5 text-emerald-500" /> Scaffold Better-T-Stack Workspace
+                              <Sparkles className="w-3.5 h-3.5 text-[hsl(var(--success))]" /> Scaffold Better-T-Stack Workspace
                             </>
                           )}
                         </Button>
@@ -817,7 +817,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
                     )}
 
                     {bargeInTested && (
-                      <div className="p-2.5 rounded-[8px] bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-400 text-center font-mono">
+                      <div className="p-2.5 rounded-[8px] bg-[hsl(var(--success))]/10 border border-[hsl(var(--success))]/20 text-xs text-[hsl(var(--success))] text-center font-mono">
                         <CheckCircle2 className="w-4 h-4 mx-auto mb-1" />
                         Interrupted in {bargeInTimerMs ?? 14}ms. Buffer flushed.
                       </div>

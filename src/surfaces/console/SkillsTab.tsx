@@ -34,16 +34,16 @@ export const SkillsTab: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[hsl(var(--surface))] text-[hsl(var(--ink))] p-6 overflow-y-auto select-none">
+    <div className="legacy-workspace flex-1 flex flex-col h-full bg-[hsl(var(--surface))] text-[hsl(var(--ink))] p-6 overflow-y-auto select-none">
       {/* Standard Page Header */}
       <div className="flex items-center justify-between border-b border-black/10 dark:border-white/10 pb-4 mb-6 shrink-0">
         <div>
           <div className="flex items-center gap-2">
-            <Sparkles className="size-4 text-[hsl(var(--signal))]" />
-            <h2 className="text-lg font-semibold tracking-tight text-[hsl(var(--ink))]">
-              Installed Skills & Capabilities
+            <Sparkles className="size-4 text-[hsl(var(--ink))]" />
+            <h2 className="page-heading">
+              Installed skills
             </h2>
-            <span className="font-instrument text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--signal))]/30 bg-[hsl(var(--signal))]/10 text-[hsl(var(--signal))] uppercase">
+            <span className="font-instrument text-[9px] px-1.5 py-0.5 rounded border border-white/10 bg-[hsl(var(--surface-raised))] text-[hsl(var(--ink))] uppercase">
               SDK EXTENSIONS
             </span>
           </div>
@@ -94,7 +94,7 @@ export const SkillsTab: React.FC = () => {
 
                 {/* Origin & Permissions summary */}
                 <div className="hidden sm:flex items-center gap-2 font-instrument text-xs text-[hsl(var(--muted))] shrink-0">
-                  <ShieldCheck className="size-3.5 text-[hsl(var(--signal))]" />
+                  <ShieldCheck className="size-3.5 text-[hsl(var(--ink))]" />
                   <span>{skill.permissions.length} permissions</span>
                 </div>
 
@@ -102,14 +102,14 @@ export const SkillsTab: React.FC = () => {
                 <div className="flex items-center gap-2.5 shrink-0">
                   <span className={cn(
                     "font-instrument text-xs font-semibold uppercase",
-                    skill.enabled ? "text-[hsl(var(--signal))]" : "text-[hsl(var(--muted))]"
+                    skill.enabled ? "text-[hsl(var(--ink))]" : "text-[hsl(var(--muted))]"
                   )}>
                     {skill.enabled ? "ENABLED" : "DISABLED"}
                   </span>
                   <LiquidToggle
                     checked={skill.enabled}
                     onChange={() => toggleSkill(skill.id)}
-                    activeColor="#8b5cf6"
+                    activeColor="hsl(var(--ink))"
                   />
                 </div>
               </div>

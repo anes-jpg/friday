@@ -137,6 +137,8 @@ export interface PlanStepBackend {
 
 export interface PendingPlanBackend {
   id: string
+  run_id?: string | null
+  expires_at?: number | null
   heard: string
   steps: PlanStepBackend[]
   current_step_index: number
@@ -219,6 +221,9 @@ export interface Automation {
   trigger: { type: "cron"; expr: string; tz: string } | { type: "event"; on: string }
   triggerExpr?: string
   actionSummary?: string
+  actionTool?: string
+  actionArgs?: string
+  lastResult?: string | null
   enabled: boolean
   last_run?: string
   lastRun?: string | null
@@ -248,7 +253,7 @@ export interface LatencyStage {
   key: string
   label: string
   /** Measured p95, milliseconds. */
-  value: number
+  value: number | null
   /** The §04 budget for this stage. Over budget renders in --color-fail. */
   budget: number
   /** Local stages are free and offline-safe; `network` is the one GLM hop. */
@@ -257,13 +262,13 @@ export interface LatencyStage {
 
 /** §12 gates that are resource rather than latency shaped. */
 export interface ResourceSample {
-  cpu_pct: number
-  rss_mb: number
+  cpu_pct: number | null
+  rss_mb: number | null
   /** §03 — recogniser warm 10 min after last use, voice 5. */
   asr_warm: boolean
   tts_warm: boolean
   /** Sustained clocks under load. A thin chassis fails at minute 25. */
-  thermal_c: number
+  thermal_c: number | null
 }
 
 /** §04 aside — offline she is not a degraded assistant, she is a different one.

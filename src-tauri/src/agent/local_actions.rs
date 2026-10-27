@@ -54,99 +54,16 @@ impl LocalActionEngine {
         })
     }
 
-    /// Queries real-time hardware telemetry and thermals locally (<5ms)
     pub fn handle_vitals(target: &str) -> Result<LocalActionResult, String> {
-        let engine = crate::tools::hardware::HardwareTelemetryEngine::new();
-        let vitals = engine.get_telemetry();
-
-        match target.to_lowercase().as_str() {
-            "gpu" | "gpu_temp" | "thermals" => {
-                let say = format!(
-                    "Your {} is currently running at {:.0} degrees Celsius with {:.0} percent utilization.",
-                    vitals.gpu.name, vitals.gpu.temperature_c, vitals.gpu.utilization_percent
-                );
-                let show = format!(
-                    "### GPU Telemetry · On-Device Sensor\n\
-                    | Metric | Value |\n\
-                    | :--- | :--- |\n\
-                    | **GPU Model** | {} |\n\
-                    | **Core Temp** | **{:.1}°C** |\n\
-                    | **Utilization** | **{:.1}%** |\n\
-                    | **VRAM Allocated** | **{} MB / {} MB** |\n\
-                    | **Board Power** | **{:.1} W** |\n\n\
-                    *Zero cloud API tokens used · Retrieved in 3ms.*",
-                    vitals.gpu.name,
-                    vitals.gpu.temperature_c,
-                    vitals.gpu.utilization_percent,
-                    vitals.gpu.vram_used_mb,
-                    vitals.gpu.vram_total_mb,
-                    vitals.gpu.power_watts
-                );
-                Ok(LocalActionResult {
-                    say,
-                    show,
-                    tool_name: "hardware.gpu".to_string(),
-                    latency_ms: 3,
-                })
-            }
-            "ram" | "memory" => {
-                let free_mb = vitals.ram_total_mb.saturating_sub(vitals.ram_used_mb);
-                let say = format!(
-                    "You have {} gigabytes of memory used, with {} gigabytes remaining free.",
-                    vitals.ram_used_mb / 1024,
-                    free_mb / 1024
-                );
-                let show = format!(
-                    "### Host Memory Telemetry\n\
-                    | Metric | Value |\n\
-                    | :--- | :--- |\n\
-                    | **RAM Used** | **{} MB** ({:.1} GB) |\n\
-                    | **RAM Free** | **{} MB** ({:.1} GB) |\n\
-                    | **Total Physical** | **{} MB** ({:.1} GB) |\n\
-                    | **Host Footprint** | CPU {:.1}% |\n\n\
-                    *Polled via Windows sysinfo.*",
-                    vitals.ram_used_mb,
-                    vitals.ram_used_mb as f32 / 1024.0,
-                    free_mb,
-                    free_mb as f32 / 1024.0,
-                    vitals.ram_total_mb,
-                    vitals.ram_total_mb as f32 / 1024.0,
-                    vitals.cpu_percent
-                );
-                Ok(LocalActionResult {
-                    say,
-                    show,
-                    tool_name: "hardware.ram".to_string(),
-                    latency_ms: 3,
-                })
-            }
-            _ => {
-                let say = format!(
-                    "CPU utilization is at {:.0} percent, with {} gigabytes of RAM in use.",
-                    vitals.cpu_percent,
-                    vitals.ram_used_mb / 1024
-                );
-                let show = format!(
-                    "### System Diagnostics Overview\n\
-                    - **CPU Usage**: **{:.1}%**\n\
-                    - **RAM Usage**: **{} MB** / **{} MB**\n\
-                    - **GPU Temperature**: **{:.1}°C**\n\
-                    - **Local Subnet Devices**: **{} active hosts**\n\n\
-                    *Zero cloud API tokens used.*",
-                    vitals.cpu_percent,
-                    vitals.ram_used_mb,
-                    vitals.ram_total_mb,
-                    vitals.gpu.temperature_c,
-                    vitals.lan_devices.len()
-                );
-                Ok(LocalActionResult {
-                    say,
-                    show,
-                    tool_name: "hardware.system".to_string(),
-                    latency_ms: 4,
-                })
-            }
-        }
+        let started=std::time::Instant::now();
+        let vitals=crate::tools::hardware::HardwareTelemetryEngine::new().get_telemetry();
+        let (tool,say)=match target.to_lowercase().as_str() {
+            "gpu"|"gpu_temp"|"thermals"=>("hardware.gpu","GPU sensor readings are unavailable.".to_string()),
+            "ram"|"memory"=>("hardware.ram",match (vitals.ram_used_mb,vitals.ram_total_mb) {(Some(used),Some(total))=>format!("Memory usage is {:.1} of {:.1} gigabytes.",used as f64/1024.0,total as f64/1024.0),_=>"Memory readings are unavailable.".into()}),
+            _=>("hardware.system",vitals.cpu_percent.map(|cpu|format!("System CPU usage is {cpu:.1} percent.")).unwrap_or_else(||"CPU readings are unavailable until a second sample is collected.".into())),
+        };
+        let show=format!("### Hardware readings\n\nMissing sensor values are unavailable.\n\n\x60\x60\x60json\n{}\n\x60\x60\x60",serde_json::to_string_pretty(&vitals).map_err(|e|e.to_string())?);
+        Ok(LocalActionResult {say,show,tool_name:tool.into(),latency_ms:started.elapsed().as_millis() as u64})
     }
 
     /// Queries local Git repository status and branch directly using git2 (<10ms)
@@ -364,6 +281,22 @@ impl LocalActionEngine {
                     latency_ms: 1,
                 })
             }
+            "settings" => {
+                #[cfg(target_os = "windows")]
+                {
+                    use std::os::windows::process::CommandExt;
+                    let _ = std::process::Command::new("cmd")
+                        .args(["/c", "start", "ms-settings:"])
+                        .creation_flags(0x08000000)
+                        .spawn();
+                }
+                Ok(LocalActionResult {
+                    say: "Opening settings.".to_string(),
+                    show: "### Settings Console\nSwitched to FRIDAY Settings surface (`Ctrl+,`) and opened Windows Settings (`ms-settings:`).".to_string(),
+                    tool_name: "os.settings".to_string(),
+                    latency_ms: 1,
+                })
+            }
             _ => Err(format!("Unsupported HUD action: {}", action)),
         }
     }
@@ -388,7 +321,7 @@ mod tests {
         assert!(res.is_ok());
         let val = res.unwrap();
         assert_eq!(val.tool_name, "hardware.gpu");
-        assert!(val.say.contains("Celsius"));
+        assert!(val.say.contains("unavailable"));
     }
 
     #[test]

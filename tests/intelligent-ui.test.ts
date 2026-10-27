@@ -498,7 +498,7 @@ Let me know if you would like to compare with other models.`
       expect(html).toContain("bg-white/10")
     })
 
-    it("renders BadgePrimitive with variant='success' in emerald styling instead of signal violet", () => {
+    it("renders BadgePrimitive with variant='success' using the neutral completion token", () => {
       const code = `
         root = Card("Status", [b1])
         b1 = Badge("Operational", "success")
@@ -507,8 +507,8 @@ Let me know if you would like to compare with other models.`
         React.createElement(IntelligentUIRenderer, { code })
       )
       expect(html).toContain("Operational")
-      expect(html).toContain("bg-emerald-500/10")
-      expect(html).toContain("text-emerald-400")
+      expect(html).toContain("bg-[hsl(var(--success))]/10")
+      expect(html).toContain("text-[hsl(var(--success))]")
       expect(html).not.toContain("border-[hsl(var(--signal))]/25")
     })
 

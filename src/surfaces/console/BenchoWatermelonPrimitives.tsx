@@ -59,9 +59,10 @@ export function formatAuditTimestamp(raw: unknown): string {
 }
 
 export function normalizeAuditEntry(
-  entry: Record<string, any>,
+  source: object,
   index: number
 ): NormalizedAuditRow {
+  const entry = source as Record<string, unknown>;
   const rawTime =
     entry.created_at ??
     entry.timestamp ??
@@ -279,7 +280,7 @@ export function WatermelonKpiCard({
   label,
   value,
   badgeText,
-  badgeTone = "violet",
+  badgeTone = "zinc",
 }: {
   label: string;
   value: string | number;
@@ -288,12 +289,12 @@ export function WatermelonKpiCard({
 }) {
   const toneClass =
     badgeTone === "emerald"
-      ? "text-emerald-400"
+      ? "text-[hsl(var(--success))]"
       : badgeTone === "amber"
       ? "text-amber-400"
       : badgeTone === "zinc"
       ? "text-zinc-400"
-      : "text-violet-400";
+      : "text-[hsl(var(--ink))]";
 
   return (
     <WatermelonBentoCard className="p-4">
@@ -374,21 +375,21 @@ export function WatermelonCollapsibleDrawer({
  */
 export function WatermelonStatusBadge({
   children,
-  tone = "violet",
+  tone = "zinc",
 }: {
   children: React.ReactNode;
   tone?: "violet" | "emerald" | "amber" | "rose" | "zinc";
 }) {
   const styles =
     tone === "emerald"
-      ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+      ? "bg-[hsl(var(--success))]/15 text-[hsl(var(--success))] border-[hsl(var(--success))]/30"
       : tone === "amber"
       ? "bg-amber-500/15 text-amber-300 border-amber-500/30"
       : tone === "rose"
       ? "bg-rose-500/15 text-rose-300 border-rose-500/30"
       : tone === "zinc"
       ? "bg-zinc-800/80 text-zinc-300 border-zinc-700/70"
-      : "bg-violet-500/15 text-violet-300 border-violet-500/30";
+      : "bg-[hsl(var(--surface-raised))] text-[hsl(var(--ink))] border-[hsl(var(--line))]";
 
   return (
     <span
@@ -409,7 +410,7 @@ export function LiquidToggle({
   checked,
   onChange,
   size = "sm",
-  activeColor = "#8b5cf6",
+  activeColor = "hsl(var(--ink))",
   disabled = false,
 }: {
   checked: boolean;
@@ -488,7 +489,7 @@ export function MagneticSelect<T extends string = string>({
   options,
   value,
   onChange,
-  accent = "violet",
+  accent = "white",
 }: {
   options: (T | MagneticOption<T>)[];
   value: T;
@@ -504,8 +505,8 @@ export function MagneticSelect<T extends string = string>({
     accent === "white"
       ? "bg-zinc-100 text-zinc-950 border-zinc-100 shadow-sm"
       : accent === "emerald"
-      ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-sm"
-      : "bg-violet-500/20 text-violet-200 border-violet-500/60 shadow-sm";
+      ? "bg-[hsl(var(--success))]/20 text-[hsl(var(--success))] border-[hsl(var(--success))]/50 shadow-sm"
+      : "bg-[hsl(var(--ink))] text-[hsl(var(--canvas))] border-[hsl(var(--line))] shadow-sm";
 
   return (
     <div className="inline-flex flex-wrap items-center gap-2 select-none">
@@ -592,7 +593,7 @@ export function SloshSlider({
         <motion.div
           animate={{ width: `${percentage}%` }}
           transition={{ type: "spring", stiffness: 360, damping: 28 }}
-          className="h-full bg-violet-500/75 rounded-lg"
+          className="h-full bg-[hsl(var(--ink))] rounded-lg"
         />
         <input
           type="range"
@@ -648,7 +649,7 @@ export function SlideConfirm({
     >
       <motion.div
         style={{ width: fillWidth }}
-        className="absolute left-1 top-1 bottom-1 rounded-full bg-emerald-500/20 pointer-events-none"
+        className="absolute left-1 top-1 bottom-1 rounded-full bg-[hsl(var(--success))]/20 pointer-events-none"
       />
       <motion.span
         style={{ opacity: confirmed ? 0 : labelOpacity }}
@@ -660,7 +661,7 @@ export function SlideConfirm({
         <motion.span
           initial={{ opacity: 0, y: 5 }}
           animate={{ opacity: 1, y: 0 }}
-          className="absolute inset-0 flex items-center justify-center text-xs font-semibold text-emerald-400 pointer-events-none"
+          className="absolute inset-0 flex items-center justify-center text-xs font-semibold text-[hsl(var(--success))] pointer-events-none"
         >
           {confirmedLabel}
         </motion.span>
@@ -675,7 +676,7 @@ export function SlideConfirm({
         className="relative z-10 flex items-center justify-center rounded-full bg-zinc-100 text-zinc-950 shadow-md cursor-grab active:cursor-grabbing"
       >
         {confirmed ? (
-          <Check className="w-4 h-4 text-emerald-600" />
+          <Check className="w-4 h-4 text-[hsl(var(--success))]" />
         ) : (
           <ArrowRight className="w-4 h-4" />
         )}
@@ -710,7 +711,7 @@ export function ProgressTicks({
             stiffness: 420,
             damping: 26,
           }}
-          className="h-2 rounded-[2px] bg-violet-400/90"
+          className="h-2 rounded-[2px] bg-[hsl(var(--ink))]"
         />
       ))}
     </div>
@@ -738,8 +739,8 @@ export function AnimatedTaskRow({
       <motion.div
         animate={{
           scale: done ? [1, 1.22, 1] : 1,
-          backgroundColor: done ? "#8b5cf6" : "transparent",
-          borderColor: done ? "#8b5cf6" : "#52525b",
+          backgroundColor: done ? "hsl(var(--ink))" : "transparent",
+          borderColor: done ? "hsl(var(--ink))" : "#52525b",
         }}
         transition={{ type: "spring", stiffness: 500, damping: 25 }}
         className="w-4 h-4 rounded-[5px] border flex items-center justify-center shrink-0"

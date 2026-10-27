@@ -45,7 +45,7 @@ function getFileIcon(filename: string) {
     return <FileJson className="size-3.5 text-amber-400" />
   }
   if (lower.endsWith(".md") || lower.endsWith(".txt")) {
-    return <FileText className="size-3.5 text-emerald-400" />
+    return <FileText className="size-3.5 text-[hsl(var(--success))]" />
   }
   return <File className="size-3.5 text-white/50" />
 }
@@ -282,9 +282,9 @@ export const InAppCodeStudio: React.FC<InAppCodeStudioProps> = ({
   const linesCount = fileContent.split("\n").length
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-[#141517] shadow-[0_20px_40px_-15px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col h-[680px]">
+    <div className="rounded-2xl border border-white/10 bg-[hsl(var(--canvas))] shadow-[0_20px_40px_-15px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col h-full min-h-[360px]">
       {/* ── Studio Top Toolbar ─────────────────────────────────────────── */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.08] bg-[#161719]">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.08] bg-[hsl(var(--canvas))]">
         <div className="flex items-center gap-2">
           <Code2 className="size-4 text-[hsl(var(--signal))]" />
           <span className="font-mono text-xs font-semibold text-white">In-App Code Studio</span>
@@ -320,7 +320,7 @@ export const InAppCodeStudio: React.FC<InAppCodeStudioProps> = ({
       {/* ── Studio Body: 2 Columns ─────────────────────────────────────── */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Column: File Tree Explorer */}
-        <div className="w-64 sm:w-72 border-r border-white/[0.08] bg-[#121315] flex flex-col overflow-hidden">
+        <div className="w-48 border-r border-white/[0.08] bg-[hsl(var(--canvas))] flex flex-col overflow-hidden">
           <div className="p-3 border-b border-white/[0.04] flex items-center justify-between">
             <span className="font-mono text-[10px] uppercase tracking-wider text-white/40 font-semibold">
               Project Explorer
@@ -340,11 +340,11 @@ export const InAppCodeStudio: React.FC<InAppCodeStudioProps> = ({
         </div>
 
         {/* Right Column: Code Editor & Viewer */}
-        <div className="flex-1 flex flex-col bg-[#161719] overflow-hidden">
+        <div className="flex-1 flex flex-col bg-[hsl(var(--canvas))] overflow-hidden">
           {selectedFilePath ? (
             <>
               {/* Active File Tab Bar */}
-              <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.08] bg-[#18191B]">
+              <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.08] bg-[hsl(var(--canvas))]">
                 <div className="flex items-center gap-2 min-w-0">
                   {getFileIcon(selectedFileName)}
                   <span className="font-mono text-xs font-semibold text-white truncate">
@@ -405,7 +405,7 @@ export const InAppCodeStudio: React.FC<InAppCodeStudioProps> = ({
                     animate={{ opacity: 1, height: "auto" }}
                     exit={{ opacity: 0, height: 0 }}
                     onSubmit={handleSendPromptToFriday}
-                    className="p-3 border-b border-white/[0.08] bg-[#141517] flex items-center gap-2"
+                    className="p-3 border-b border-white/[0.08] bg-[hsl(var(--canvas))] flex items-center gap-2"
                   >
                     <Sparkles className="size-4 text-[hsl(var(--signal))] flex-shrink-0" />
                     <input
@@ -434,9 +434,9 @@ export const InAppCodeStudio: React.FC<InAppCodeStudioProps> = ({
               </AnimatePresence>
 
               {/* Monospace Code Editor Area */}
-              <div className="flex-1 flex overflow-hidden font-mono text-[12px] bg-[#141517]">
+              <div className="flex-1 flex overflow-hidden font-mono text-[12px] bg-[hsl(var(--canvas))]">
                 {/* Line Numbers Gutter */}
-                <div className="w-12 py-3 select-none text-right pr-3 font-mono text-white/20 bg-[#121315] border-r border-white/[0.06] overflow-hidden leading-[20px]">
+                <div className="w-12 py-3 select-none text-right pr-3 font-mono text-white/20 bg-[hsl(var(--canvas))] border-r border-white/[0.06] overflow-hidden leading-[20px]">
                   {Array.from({ length: linesCount }, (_, i) => (
                     <div key={i + 1}>{i + 1}</div>
                   ))}
@@ -474,7 +474,7 @@ export const InAppCodeStudio: React.FC<InAppCodeStudioProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <form
             onSubmit={handleCreateItem}
-            className="w-full max-w-sm rounded-2xl border border-white/20 bg-[#18191B] p-5 shadow-2xl space-y-4"
+            className="w-full max-w-sm rounded-2xl border border-white/20 bg-[hsl(var(--canvas))] p-5 shadow-2xl space-y-4"
           >
             <div className="flex items-center justify-between">
               <span className="font-semibold text-white text-sm">

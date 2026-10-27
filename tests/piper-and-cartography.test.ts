@@ -35,9 +35,9 @@ describe("FRIDAY Native Piper TTS & Cartography Engine (§03, §04)", () => {
 
   it("exports valid MapLibre Style Specification for Carbon basemap", () => {
     expect(FRIDAY_CARBON_STYLE.version).toBe(8)
-    expect(FRIDAY_CARBON_STYLE.sources.carto_dark).toBeDefined()
+    expect(FRIDAY_CARBON_STYLE.sources.openfreemap?.type).toBe("vector")
     expect(FRIDAY_CARBON_STYLE.layers.some((l) => l.id === "background")).toBe(true)
-    expect(FRIDAY_CARBON_STYLE.layers.some((l) => l.id === "carto-dark-tiles")).toBe(true)
+    expect(FRIDAY_CARBON_STYLE.layers.some((l) => l.id === "streets")).toBe(true)
   })
 
   it("exports valid MapLibre Style Specification for Vector basemap", () => {

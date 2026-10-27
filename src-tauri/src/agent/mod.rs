@@ -9,6 +9,7 @@ pub mod overwatch;
 pub mod perception;
 pub mod review;
 pub mod semantic_router;
+pub mod runs;
 
 pub use beast::*;
 pub use browser::*;

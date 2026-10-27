@@ -56,7 +56,7 @@ pub struct AiModel {
     pub name: String,
     pub provider: String,
     pub base_url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing)]
     pub api_key: Option<String>,
     pub capabilities: Vec<String>,
     pub status: ModelStatus,
@@ -86,7 +86,7 @@ impl AiModel {
             if latency_ms > 10000 {
                 ("bg-amber-500", "200 Slow")
             } else {
-                ("bg-emerald-500", "200 OK")
+                ("bg-[hsl(var(--success))]", "200 OK")
             }
         } else {
             ("bg-rose-500", "500 Error")
@@ -152,7 +152,6 @@ impl AiModel {
     }
 }
 
-/// Helper to build synthetic tracker history matching the user's dashboard
 fn build_synthetic_tracker(
     pattern: &str, // 'G': green, 'Y': yellow, 'O': orange, 'R': red, '.': edge/gray
     base_latency: u64,
@@ -175,7 +174,7 @@ fn build_synthetic_tracker(
             let time_str = format!("{:02}:{:02}", hours, mins);
 
             let (color, status, mult) = match c {
-                'G' => ("bg-emerald-500", "200 OK", 1.0),
+                'G' => ("bg-[hsl(var(--success))]", "200 OK", 1.0),
                 'Y' => ("bg-amber-500", "200 High TTFT", 1.8),
                 'O' => ("bg-orange-500", "200 Degraded", 2.6),
                 'R' => ("bg-rose-500", "502 Gateway Timeout", 5.0),
@@ -184,9 +183,9 @@ fn build_synthetic_tracker(
 
             let lat = (base_latency as f64 * mult) as u64;
             let tooltip = if c == '.' {
-                format!("{} · Idle", time_str)
+                format!("{} Â· Idle", time_str)
             } else {
-                format!("{} · {}ms · {}", time_str, lat, status)
+                format!("{} Â· {}ms Â· {}", time_str, lat, status)
             };
 
             TrackerBlock {
@@ -206,7 +205,7 @@ pub fn get_default_models_fleet() -> Vec<AiModel> {
     vec![
         AiModel {
             id: "smollm2-1.7b".to_string(),
-            name: "SmolLM2-1.7B-Instruct (4-bit · 1.05GB VRAM)".to_string(),
+            name: "SmolLM2-1.7B-Instruct (4-bit Â· 1.05GB VRAM)".to_string(),
             provider: "local_edge".to_string(),
             base_url: "http://127.0.0.1:11434/v1".to_string(),
             api_key: None,
@@ -232,7 +231,7 @@ pub fn get_default_models_fleet() -> Vec<AiModel> {
         },
         AiModel {
             id: "bitnet-b1.58-2b".to_string(),
-            name: "BitNet b1.58 2B (1-Bit Ternary · 410MB VRAM · Cold)".to_string(),
+            name: "BitNet b1.58 2B (1-Bit Ternary Â· 410MB VRAM Â· Cold)".to_string(),
             provider: "local_edge".to_string(),
             base_url: "http://127.0.0.1:11434/v1".to_string(),
             api_key: None,
@@ -258,7 +257,7 @@ pub fn get_default_models_fleet() -> Vec<AiModel> {
         },
         AiModel {
             id: "lfm-1b".to_string(),
-            name: "Liquid LFM-1B (Non-Transformer LNN · 650MB VRAM)".to_string(),
+            name: "Liquid LFM-1B (Non-Transformer LNN Â· 650MB VRAM)".to_string(),
             provider: "local_edge".to_string(),
             base_url: "http://127.0.0.1:11434/v1".to_string(),
             api_key: None,
@@ -284,7 +283,7 @@ pub fn get_default_models_fleet() -> Vec<AiModel> {
         },
         AiModel {
             id: "friday-1b-operator".to_string(),
-            name: "FRIDAY-1B-Operator (Fine-Tuned GGUF · 1.05GB VRAM)".to_string(),
+            name: "FRIDAY-1B-Operator (Fine-Tuned GGUF Â· 1.05GB VRAM)".to_string(),
             provider: "local_edge".to_string(),
             base_url: "http://127.0.0.1:11434/v1".to_string(),
             api_key: None,
@@ -297,7 +296,7 @@ pub fn get_default_models_fleet() -> Vec<AiModel> {
                 "responses".to_string(),
             ],
             status: ModelStatus::Normal,
-            priority: 3,
+            priority: 0,
             is_active: false,
             telemetry: ModelTelemetry {
                 availability_pct: 100.0,
@@ -466,15 +465,15 @@ pub async fn test_model_ping(
     model: &AiModel,
     api_key: &str,
 ) -> Result<(u64, u64, String), String> {
-    if api_key.trim().is_empty() {
-        return Err("No API key configured for model test".to_string());
-    }
-
+    crate::providers::glm::validate_provider_config(&model.base_url, &model.name)?;
+    if api_key.trim().is_empty() && !crate::providers::glm::is_local_endpoint(&model.base_url) { return Err("No API key configured for model test".to_string()); }
+    let effective_key = if api_key.trim().is_empty() { "ollama" } else { api_key.trim() };
     let url = crate::providers::glm::normalize_api_url(&model.base_url);
     let is_reasoner = model.name.contains("reasoner") || model.name.contains("r1");
+    let model_tag = if model.provider == "local_edge" { &model.id } else { &model.name };
 
     let mut map = serde_json::Map::new();
-    map.insert("model".to_string(), json!(model.name));
+    map.insert("model".to_string(), json!(model_tag));
     map.insert(
         "messages".to_string(),
         json!([
@@ -491,7 +490,7 @@ pub async fn test_model_ping(
     let start = Instant::now();
     let res = http
         .post(&url)
-        .bearer_auth(api_key.trim())
+        .bearer_auth(effective_key)
         .json(&payload)
         .timeout(Duration::from_secs(15))
         .send()

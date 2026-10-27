@@ -17,12 +17,35 @@ export default defineConfig({
   },
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   clearScreen: false,
+  optimizeDeps: {
+    entries: ["index.html"],
+    include: [
+      "react",
+      "react-dom",
+      "@tauri-apps/api/core",
+      "motion/react",
+      "lucide-react",
+      "zustand",
+      "react-markdown",
+      "remark-gfm",
+      "cmdk",
+      "clsx",
+      "tailwind-merge",
+      "sonner",
+      "class-variance-authority",
+      "@tanstack/react-query",
+      "@tanstack/react-form",
+      "@tanstack/react-table",
+      "pmtiles",
+    ],
+    exclude: ["maplibre-gl"],
+  },
   server: {
     port: 1420,
     strictPort: true,
     host: "0.0.0.0",
     watch: {
-      ignored: ["**/src-tauri/**", "**/resources/**", "**/*.zip", "**/*.tar.gz", "**/target/**"],
+      ignored: ["**/src-tauri/**", "**/resources/**", "**/scratch/**", "**/scratch_extracted/**", "**/*.zip", "**/*.tar.gz", "**/target/**"],
     },
   },
   build: {

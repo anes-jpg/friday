@@ -18,7 +18,7 @@ interface Spark {
 }
 
 export const ClickSpark: React.FC<ClickSparkProps> = ({
-  sparkColor = "rgba(110, 240, 160, 0.9)", // Acid green particle
+  sparkColor = "rgba(244, 244, 245, 0.9)",
   sparkSize = 8,
   sparkRadius = 18,
   sparkCount = 6,

@@ -565,7 +565,7 @@ export const IntelligentUIRenderer: React.FC<IntelligentUIRendererProps> = ({
         if (compName === "slider") {
           const stateVar = rawArgs[0] && typeof rawArgs[0] === "object" && "type" in rawArgs[0] && rawArgs[0].type === "ref"
             ? (rawArgs[0] as OpenUIReference).name
-            : compNode.props && typeof compNode.props.value === "object" && "type" in compNode.props.value && compNode.props.value.type === "ref"
+            : compNode.props?.value && typeof compNode.props.value === "object" && "type" in compNode.props.value && compNode.props.value.type === "ref"
             ? (compNode.props.value as OpenUIReference).name
             : undefined
 
@@ -925,7 +925,7 @@ export const IntelligentUIRenderer: React.FC<IntelligentUIRendererProps> = ({
             aria-label="Copy OpenUI code"
             className="px-2 py-1 rounded text-[10px] font-mono border border-black/10 dark:border-white/10 bg-black/20 text-[hsl(var(--muted))] hover:text-[hsl(var(--ink))] cursor-pointer flex items-center gap-1"
           >
-            {copied ? <Check className="size-2.5 text-emerald-400" /> : <Copy className="size-2.5" />}
+            {copied ? <Check className="size-2.5 text-[hsl(var(--success))]" /> : <Copy className="size-2.5" />}
             <span>{copied ? "Copied" : "Copy Code"}</span>
           </button>
 

@@ -37,7 +37,7 @@ FRIDAY enforces the **Utterance Contract** on every single turn:
 
 ### 1.5 The Three Design Laws (`AGENTS.md`)
 1. **Surface Law**: Rounded rectangles on an 8px grid (`16px` container radius, `8px` controls). Mica (Win11) / Acrylic (Win10) dark plates.
-2. **One-Signal Law**: Single accent color `--color-acid: oklch(78% 0.19 152)` / `hsl(var(--signal))` appears at most twice per viewport, reserved strictly for active states (`running`, `verifying`, `listening`).
+2. **One-Signal Law**: Preserve the violet accent `--color-acid: oklch(68.5% 0.205 285.5)` / `hsl(var(--signal))` and the existing interface. Completion tones are neutral; green UI styling is excluded.
 3. **Sub-Frame Law**: Transitions 120–220ms, transform & opacity only, `cubic-bezier(0.22, 1, 0.36, 1)`. 0% idle CPU for canvas orb, WebGL2 maps, and scroll loops. Zero `any` in TypeScript, zero `.unwrap()` in Rust.
 
 ---

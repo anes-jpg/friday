@@ -1,219 +1,92 @@
-import React, { useEffect, useState } from "react"
-import { useFridayStore, ConsoleTab } from "@/lib/store"
-import { invokeCommand } from "@/lib/ipc"
+import React, { lazy, useEffect, useState } from "react"
+import { useFridayStore } from "@/lib/store"
+import { invokeCommand, isDesktop } from "@/lib/ipc"
 import { AtmosphericField } from "@/components/layout/AtmosphericField"
-import { Rail, type ConsoleRoute } from "./Rail"
+import { Rail } from "./Rail"
 import { ChatTab } from "./ChatTab"
-import { BeastTab } from "./BeastTab"
-import { BrowserTab } from "./BrowserTab"
-import { ReviewTab } from "./ReviewTab"
-import { DelphiTab } from "./DelphiTab"
-import { AutomationsTab } from "./AutomationsTab"
-import { SkillsTab } from "./SkillsTab"
-import { MemoryTab } from "./MemoryTab"
-import { AuditTab } from "./AuditTab"
-import { SettingsTab } from "./SettingsTab"
-import { ProjectsTab } from "./ProjectsTab"
-import { AudioSpectrumVisualizer } from "@/components/telemetry/AudioSpectrumVisualizer"
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow"
-import { motion, AnimatePresence } from "motion/react"
-import { Minus, Square, X, Copy, Maximize2 } from "lucide-react"
-import { FridayOrb } from "@/components/orb"
+import { groupForRoute, workspaceRoutes } from "./navigation"
+import { Minus, Square, X, Copy, Maximize2, Scan, Search } from "lucide-react"
 import { cn } from "@/lib/utils"
-import {
-  WatermelonBentoCard,
-  WatermelonSegmentedTabs,
-  WatermelonKpiCard,
-  WatermelonCollapsibleDrawer,
-  WatermelonStatusBadge,
-  LiquidToggle,
-  MagneticSelect,
-  SloshSlider,
-  SlideConfirm,
-  ProgressTicks,
-  AnimatedTaskRow,
-  InlineMarkdownText,
-  normalizeAuditEntry,
-} from "./BenchoWatermelonPrimitives";
+import { useWindowMode } from "@/lib/window-mode"
 
-export const Console: React.FC = () => {
+const BeastTab = lazy(() => import("./BeastTab").then((m) => ({ default: m.BeastTab })))
+const BrowserTab = lazy(() => import("./BrowserTab").then((m) => ({ default: m.BrowserTab })))
+const ReviewTab = lazy(() => import("./ReviewTab").then((m) => ({ default: m.ReviewTab })))
+const DelphiTab = lazy(() => import("./DelphiTab").then((m) => ({ default: m.DelphiTab })))
+const AutomationsTab = lazy(() => import("./AutomationsTab").then((m) => ({ default: m.AutomationsTab })))
+const SkillsTab = lazy(() => import("./SkillsTab").then((m) => ({ default: m.SkillsTab })))
+const MemoryTab = lazy(() => import("./MemoryTab").then((m) => ({ default: m.MemoryTab })))
+const AuditTab = lazy(() => import("./AuditTab").then((m) => ({ default: m.AuditTab })))
+const SettingsTab = lazy(() => import("./SettingsTab").then((m) => ({ default: m.SettingsTab })))
+const ProjectsTab = lazy(() => import("./ProjectsTab").then((m) => ({ default: m.ProjectsTab })))
+const MonitorTab = lazy(() => import("./MonitorTab").then((m) => ({ default: m.MonitorTab })))
+
+export interface ConsoleProps { embedded?: boolean }
+export const Console: React.FC<ConsoleProps> = ({ embedded = false }) => {
   const tab = useFridayStore((s) => s.tab)
   const setTab = useFridayStore((s) => s.setTab)
-  const connectivity = useFridayStore((s) => s.connectivity)
-
+  const orb = useFridayStore((s) => s.orb)
+  const muted = useFridayStore((s) => s.micMuted)
+  const wakeWord = useFridayStore((s) => s.wakeWord.enabled)
+  const group = groupForRoute(tab)
   const [isMaximized, setIsMaximized] = useState(false)
-
+  const fullscreen = useWindowMode((s) => s.fullscreen)
+  const groupLabel = group[0].toUpperCase() + group.slice(1)
+  useEffect(() => { sessionStorage.setItem(`friday-route-${group}`, tab) }, [group, tab])
   useEffect(() => {
-    const checkMaximized = async () => {
-      try {
-        const isMax = await invokeCommand<boolean>("app_is_maximized")
-        setIsMaximized(!!isMax)
-      } catch {
-        try {
-          const win = getCurrentWebviewWindow()
-          setIsMaximized(await win.isMaximized())
-        } catch {}
-      }
-    }
-    checkMaximized()
-  }, [])
-
-  const handleMinimize = () => {
-    invokeCommand("app_minimize").catch(() => {
-      getCurrentWebviewWindow().minimize().catch(() => {})
-    })
+    if (!embedded && isDesktop) void invokeCommand<boolean>("app_is_maximized").then(setIsMaximized).catch(() => {})
+  }, [embedded])
+  const maximize = async () => {
+    if (!isDesktop) return
+    try { setIsMaximized(await invokeCommand<boolean>("app_toggle_maximize")) } catch (error) { console.warn(error) }
   }
-
-  const handleToggleMaximize = async () => {
-    try {
-      const isMax = await invokeCommand<boolean>("app_toggle_maximize")
-      setIsMaximized(!!isMax)
-    } catch {
-      try {
-        const win = getCurrentWebviewWindow()
-        await win.toggleMaximize()
-        setIsMaximized(await win.isMaximized())
-      } catch {}
-    }
+  const drag = (event: React.MouseEvent<HTMLElement>) => {
+    if (isDesktop && !embedded && event.button === 0 && !(event.target as HTMLElement).closest("button, input, a, select")) void invokeCommand("app_start_dragging").catch(() => {})
   }
-
-  const handleClose = () => {
-    invokeCommand("app_close").catch(() => {
-      getCurrentWebviewWindow().close().catch(() => {})
-    })
-  }
-
-  const handleEnterFullscreenHud = () => {
-    window.dispatchEvent(new CustomEvent("friday:trigger-hud-boot"))
-  }
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "F11") {
-        e.preventDefault()
-        handleEnterFullscreenHud()
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [])
-
-  const handleHeaderMouseDown = (e: React.MouseEvent<HTMLElement>) => {
-    if (e.button === 0 && !(e.target as HTMLElement).closest("button, a, input, select, textarea")) {
-      invokeCommand("app_start_dragging").catch(() => {
-        getCurrentWebviewWindow().startDragging().catch(() => {})
-      })
-    }
-  }
-
-  const isHealthy = connectivity !== "offline"
-
+  const status = orb === "idle" ? muted ? "Microphone muted" : isDesktop ? wakeWord ? "Wake word enabled" : "Push to talk" : "Desktop preview" : orb === "thinking" ? "Thinking" : orb === "speaking" ? "Speaking" : "Listening"
   return (
-    <main className="relative h-screen w-screen overflow-hidden bg-[hsl(var(--canvas))] p-2 sm:p-3 select-none">
-      {/* Outer Atmospheric Halftone World */}
-      <AtmosphericField />
-
-      {/* Main Crisp Shell: Hard Instrument */}
-      <section className="friday-shell-shadow relative z-10 flex h-full overflow-hidden rounded-[var(--radius-shell)] border border-white/20 dark:border-white/10 bg-[hsl(var(--surface))]">
-        {/* Canonical 64px Black Instrument Rail */}
-        <Rail
-          active={tab as ConsoleRoute}
-          onSelect={(r) => setTab(r as ConsoleTab)}
-          healthy={isHealthy}
-        />
-
-        {/* Content Canvas */}
-        <div className="flex min-w-0 flex-1 flex-col bg-[hsl(var(--surface))]">
-          {/* Integrated Titlebar / Drag Region */}
-          <header
-            data-tauri-drag-region
-            onMouseDown={handleHeaderMouseDown}
-            onDoubleClick={handleToggleMaximize}
-            className="flex h-[var(--header-height)] shrink-0 items-center justify-between border-b border-black/10 dark:border-white/10 px-4 cursor-default select-none bg-[hsl(var(--surface))]"
-          >
-            <div className="flex items-center gap-2.5 pointer-events-none">
-              <FridayOrb size={22} className="shrink-0" />
-              <span className="font-instrument text-[10px] font-semibold uppercase tracking-[.14em] text-[hsl(var(--muted))]">
-                FRIDAY // DESKTOP_OPERATOR
-              </span>
-              <span className="font-instrument text-[9px] px-1.5 py-0.5 rounded border border-black/15 dark:border-white/15 text-[hsl(var(--muted))] uppercase">
-                {tab}
-              </span>
-            </div>
-
-            {/* Audio Spectrum Visualizer (Capped, 30fps) */}
-            <div className="hidden md:flex items-center w-48 pointer-events-none">
-              <AudioSpectrumVisualizer height={18} barCount={24} className="w-full opacity-80" />
-            </div>
-
-            {/* Window Controls */}
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={handleEnterFullscreenHud}
-                aria-label="Enter Fullscreen Spatial HUD (F11)"
-                title="Enter Fullscreen Spatial HUD (F11)"
-                className="flex items-center gap-1.5 px-2.5 py-1 mr-1 text-[10px] font-mono font-medium rounded-[var(--radius-control)] border border-[hsl(var(--signal))]/30 bg-[hsl(var(--signal))]/10 text-[hsl(var(--signal))] hover:bg-[hsl(var(--signal))]/20 transition-all cursor-pointer shadow-xs"
-              >
-                <Maximize2 className="size-3" />
-                <span className="hidden sm:inline">HUD Mode</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleMinimize}
-                aria-label="Minimize"
-                className="grid size-8 place-items-center text-[hsl(var(--muted))] hover:bg-black/5 dark:hover:bg-white/10 hover:text-[hsl(var(--ink))] transition-colors rounded-[var(--radius-control)]"
-              >
-                <Minus className="size-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={handleToggleMaximize}
-                aria-label={isMaximized ? "Restore" : "Maximize"}
-                className="grid size-8 place-items-center text-[hsl(var(--muted))] hover:bg-black/5 dark:hover:bg-white/10 hover:text-[hsl(var(--ink))] transition-colors rounded-[var(--radius-control)]"
-              >
-                {isMaximized ? <Copy className="size-3 rotate-180" /> : <Square className="size-3" />}
-              </button>
-              <button
-                type="button"
-                onClick={handleClose}
-                aria-label="Close"
-                className="grid size-8 place-items-center text-[hsl(var(--muted))] hover:bg-red-500 hover:text-white transition-colors rounded-[var(--radius-control)]"
-              >
-                <X className="size-3.5" />
-              </button>
+    <main className={cn("friday-workspace", embedded && "is-embedded")}>
+      <AtmosphericField className="workspace-atmosphere" />
+      <Rail active={tab} onSelect={setTab} />
+      <div className="workspace-body">
+        {!embedded && (
+          <header className="workspace-header" data-tauri-drag-region onMouseDown={drag} onDoubleClick={maximize}>
+            <div className="workspace-identity"><span className="wordmark">FRIDAY<span className="wordmark-dot">.</span></span><span className="workspace-divider" /><span className="workspace-name">{groupLabel}</span></div>
+            <div className="workspace-status"><span className={cn("status-point", orb !== "idle" && "is-active")} /><span>{status}</span></div>
+            <div className="window-actions">
+              <button type="button" aria-label="Open command palette" title="Commands (Ctrl+K)" onClick={() => useFridayStore.getState().setPalette(true)}><Search size={16} /></button>
+              <button type="button" aria-label="Enter spatial control room" title="Control room (Ctrl+Shift+F11)" onClick={() => window.dispatchEvent(new CustomEvent("friday:trigger-hud-boot"))}><Scan size={16} /></button>
+              <button type="button" aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"} title="Fullscreen (F11)" onClick={() => void useWindowMode.getState().toggleFullscreen()}><Maximize2 size={15} /></button>
+              {isDesktop && <>
+                <button type="button" aria-label="Minimize" onClick={() => void invokeCommand("app_minimize")}><Minus size={16} /></button>
+                <button type="button" aria-label={isMaximized ? "Restore" : "Maximize"} onClick={() => void maximize()}>{isMaximized ? <Copy size={13} /> : <Square size={13} />}</button>
+                <button type="button" className="window-close" aria-label="Close" onClick={() => void invokeCommand("app_close")}><X size={16} /></button>
+              </>}
             </div>
           </header>
-
-          {/* Tab Content Surface */}
-          <div className="flex min-h-0 flex-1 overflow-hidden">
-            <section className="min-w-0 flex-1 overflow-y-auto">
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={tab}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
-                  className="h-full w-full flex flex-col min-h-0"
-                >
-                  {tab === "chat" && <ChatTab />}
-                  {tab === "browser" && <BrowserTab />}
-                  {tab === "automations" && <AutomationsTab />}
-                  {tab === "memory" && <MemoryTab />}
-                  {tab === "review" && <ReviewTab />}
-                  {tab === "skills" && <SkillsTab />}
-                  {tab === "audit" && <AuditTab />}
-                  {tab === "settings" && <SettingsTab />}
-                  {tab === "beast" && <BeastTab />}
-                  {tab === "delphi" && <DelphiTab />}
-                  {tab === "projects" && <ProjectsTab />}
-                </motion.div>
-              </AnimatePresence>
-            </section>
-          </div>
-        </div>
-      </section>
+        )}
+        {workspaceRoutes[group].length > 1 && (
+          <nav className="workspace-local-nav" aria-label={`${groupLabel} views`}>
+            {workspaceRoutes[group].map((route) => <button type="button" key={route.id} aria-current={tab === route.id ? "page" : undefined} className={cn(tab === route.id && "is-selected")} onClick={() => setTab(route.id)}>{route.label}</button>)}
+          </nav>
+        )}
+        <section className="workspace-content" aria-label={groupLabel}>
+          <div className="workspace-route" key={group === "monitor" ? "monitor" : tab}><React.Suspense fallback={<div role="status" className="workspace-loading">Opening workspace…</div>}>
+            {tab === "chat" && <ChatTab />}
+            {tab === "browser" && <BrowserTab />}
+            {tab === "automations" && <AutomationsTab />}
+            {tab === "memory" && <MemoryTab />}
+            {tab === "review" && <ReviewTab />}
+            {tab === "skills" && <SkillsTab />}
+            {tab === "audit" && <AuditTab />}
+            {(tab === "settings" || tab === "models") && <SettingsTab />}
+            {tab === "beast" && <BeastTab />}
+            {tab === "delphi" && <DelphiTab />}
+            {tab === "projects" && <ProjectsTab />}
+            {group === "monitor" && <MonitorTab />}
+          </React.Suspense></div>
+        </section>
+      </div>
     </main>
   )
 }

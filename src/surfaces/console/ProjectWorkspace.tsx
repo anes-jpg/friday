@@ -1,0 +1,176 @@
+import { lazy, Suspense, useEffect, useMemo, useState } from "react"
+import { useForm } from "@tanstack/react-form"
+import { useQuery } from "@tanstack/react-query"
+import { createColumnHelper, tableFeatures, useTable, columnFilteringFeature, globalFilteringFeature, rowSortingFeature, createFilteredRowModel, createSortedRowModel } from "@tanstack/react-table"
+import { ArrowDownUp, ArrowUpRight, BookOpen, Code2, FolderOpen, Plus, RefreshCw, Settings2, Sparkles, Trash2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Field, FieldGroup, FieldLabel, FieldDescription } from "@/components/ui/field"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectGroup, SelectItem } from "@/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyContent, EmptyMedia } from "@/components/ui/empty"
+import { useProjects, emptyProjectDraft, projectDraftError, projectFromDraft, buildProjectPrompt, projectPresets, presetItems, flushProjects, type ProjectPreset, type ProjectDraft, type WorkspaceProject, type ProjectItem } from "@/lib/projects"
+import { TodayView } from "./TodayView"
+import { RunHistoryView } from "./RunHistoryView"
+import type { RunRecord } from "@/lib/workspace-native"
+import { useSettings } from "@/lib/settings"
+import { useFriday, sendChatMessage } from "@/lib/store"
+import { invokeCommand, isDesktop } from "@/lib/ipc"
+import type { ProjectMetadata } from "@/lib/types"
+
+const CodeStudio = lazy(() => import("@/components/project/InAppCodeStudio").then(module => ({ default: module.InAppCodeStudio })))
+const Terminal = lazy(() => import("@/components/project/InAppTerminal").then(module => ({ default: module.InAppTerminal })))
+const GitViewer = lazy(() => import("@/components/project/InAppGitViewer").then(module => ({ default: module.InAppGitViewer })))
+const taskFeatures = tableFeatures({ columnFilteringFeature, globalFilteringFeature, rowSortingFeature, filteredRowModel: createFilteredRowModel(), sortedRowModel: createSortedRowModel() })
+const columnHelper = createColumnHelper<typeof taskFeatures, ProjectItem>()
+const taskColumns = columnHelper.columns([
+  columnHelper.accessor("title", { header: "Task" }),
+  columnHelper.accessor("status", { header: "Status", cell: info => info.getValue().replaceAll("-", " ") }),
+  columnHelper.accessor("priority", { header: "Priority", cell: info => info.getValue() || "medium" }),
+  columnHelper.accessor("dueDate", { header: "Due", cell: info => info.getValue() || "Not set" }),
+])
+
+function ProjectSetup({ project, onClose }: { project?: WorkspaceProject; onClose: () => void }) {
+  const [step, setStep] = useState(0)
+  const [error, setError] = useState<string | null>(null)
+  const [preset, setPreset] = useState<ProjectPreset>("blank")
+  const [startingTasks, setStartingTasks] = useState("")
+  const profiles = useSettings(state => state.saved.profiles)
+  const form = useForm({
+    defaultValues: project ? { name: project.name, directive: project.directive, rootPath: project.rootPath || "", kind: project.kind, instructions: project.instructions, responseLanguage: project.responseLanguage, tags: project.tags.join(", "), contextLinks: project.contextLinks.join("\n"), providerId: project.providerId, expanded: project.expanded } : { ...emptyProjectDraft },
+    onSubmit: async ({ value }) => {
+      setError(null)
+      const problem = projectDraftError(value)
+      if (problem) { setError(problem); return }
+      try {
+        const record = projectFromDraft(value, project)
+        if (record.rootPath) {
+          if (!isDesktop) throw new Error("Attaching a local folder requires the Windows app. Leave it empty to create a planning workspace.")
+          const metadata = await invokeCommand<ProjectMetadata>("inspect_project_metadata", { path: record.rootPath })
+          record.framework = metadata.framework
+        }
+        useProjects.getState().saveProject(record)
+        if (!project) for (const item of presetItems(record.id, preset, startingTasks.split("\n"))) useProjects.getState().saveItem(item)
+        await flushProjects()
+        onClose()
+      } catch (failure) { setError(String(failure instanceof Error ? failure.message : failure)) }
+    },
+  })
+  const next = () => {
+    setError(null)
+    if (!form.state.values.name.trim()) { setError("Give your project a name."); return }
+    if (step === 1) { const problem = projectDraftError(form.state.values); if (problem) { setError(problem); return } }
+    setStep(value => Math.min(2, value + 1))
+  }
+  const textField = (name: "name" | "directive" | "rootPath" | "instructions" | "tags" | "contextLinks", label: string, multiline = false, hint?: string) => <form.Field key={name} name={name}>{field => <Field data-invalid={name === "name" && Boolean(error) && !field.state.value.trim()}><FieldLabel htmlFor={`project-${name}`}>{label}</FieldLabel>{multiline ? <Textarea id={`project-${name}`} value={field.state.value} onChange={event => field.handleChange(event.target.value)} onBlur={field.handleBlur} rows={name === "instructions" ? 4 : 3} dir="auto" /> : <Input id={`project-${name}`} value={field.state.value} onChange={event => field.handleChange(event.target.value)} onBlur={field.handleBlur} aria-invalid={name === "name" && Boolean(error) && !field.state.value.trim()} autoFocus={name === "name"} />}{hint && <FieldDescription>{hint}</FieldDescription>}</Field>}</form.Field>
+  return <Dialog open onOpenChange={open => { if (!open && !form.state.isSubmitting) onClose() }}><DialogContent className="project-setup-dialog"><DialogHeader><span className="instrument-label">{project ? "Project customization" : "New project"} / {step + 1} of 3</span><DialogTitle>{["Make it yours.", "Give FRIDAY context.", "Ready when you are."][step]}</DialogTitle><DialogDescription>{["A workspace for code, research, design, or a goal of your own.", "Choose how FRIDAY should work with you on this project.", "Review your setup. Saving creates a workspace; it does not run commands."][step]}</DialogDescription></DialogHeader>
+    <ol className="project-setup-steps" aria-label="Project setup steps">{["Basics", "Context", "Review"].map((label, index) => <li key={label} aria-current={step === index ? "step" : undefined}><span>{index + 1}</span>{label}</li>)}</ol>
+    <form onSubmit={event => { event.preventDefault(); if (step < 2) next(); else void form.handleSubmit() }}>
+      <FieldGroup>
+        {step === 0 && !project && <Field><FieldLabel>Starting preset</FieldLabel><Select value={preset} onValueChange={value => { const selected = value as ProjectPreset; setPreset(selected); form.setFieldValue("kind", projectPresets[selected].kind); form.setFieldValue("directive", projectPresets[selected].directive); setStartingTasks(projectPresets[selected].tasks.join("\n")) }}><SelectTrigger aria-label="Project preset"><SelectValue /></SelectTrigger><SelectContent><SelectGroup>{Object.entries(projectPresets).map(([id, option]) => <SelectItem key={id} value={id}>{option.label}</SelectItem>)}</SelectGroup></SelectContent></Select><FieldDescription>Editable starting structure. All starting tasks are still to do.</FieldDescription></Field>}
+        {step === 2 && !project && <Field><FieldLabel htmlFor="project-starting-tasks">Starting tasks (one per line)</FieldLabel><Textarea id="project-starting-tasks" value={startingTasks} onChange={event => setStartingTasks(event.target.value)} rows={3} /><FieldDescription>Change or remove any suggested task before creating the project.</FieldDescription></Field>}
+        {step === 0 && <>{textField("name", "Project name")}{textField("directive", "What do you want to achieve?", true)}<form.Field name="kind">{field => <Field><FieldLabel>Workspace type</FieldLabel><Select value={field.state.value} onValueChange={value => field.handleChange(value as ProjectDraft["kind"])}><SelectTrigger aria-label="Workspace type"><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="code">Code & development</SelectItem><SelectItem value="research">Research & learning</SelectItem><SelectItem value="design">Design & content</SelectItem><SelectItem value="general">Custom project</SelectItem></SelectGroup></SelectContent></Select></Field>}</form.Field>{textField("rootPath", "Local folder (optional)", false, "Attach an existing folder in the Windows app, or leave empty to start with a plan.")}</>}
+        {step === 1 && <>{textField("instructions", "Project instructions", true, "Conventions, constraints, style, and what a good result looks like.")}{textField("contextLinks", "Reference links", true, "One complete HTTP or HTTPS URL per line. Links are included as references, not automatically indexed.")}{textField("tags", "Tags", false, "Separate tags with commas.")}<form.Field name="responseLanguage">{field => <Field><FieldLabel>Response language</FieldLabel><Select value={field.state.value} onValueChange={value => field.handleChange(value as ProjectDraft["responseLanguage"])}><SelectTrigger aria-label="Project response language"><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="en">English</SelectItem><SelectItem value="fr">Français</SelectItem><SelectItem value="ar">العربية</SelectItem></SelectGroup></SelectContent></Select></Field>}</form.Field><form.Field name="providerId">{field => <Field><FieldLabel>Provider for project conversations</FieldLabel><Select value={field.state.value || "inherit"} onValueChange={value => field.handleChange(value === "inherit" ? "" : value)}><SelectTrigger aria-label="Project provider"><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="inherit">Use current provider</SelectItem>{profiles.map(profile => <SelectItem value={profile.id} key={profile.id}>{profile.name} · {profile.model}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>}</form.Field><form.Field name="expanded">{field => <Field orientation="horizontal"><FieldLabel htmlFor="project-expanded">Detailed responses</FieldLabel><input id="project-expanded" type="checkbox" checked={field.state.value} onChange={event => field.handleChange(event.target.checked)} /></Field>}</form.Field></>}
+        {step === 2 && <form.Subscribe selector={state => state.values}>{values => <div className="project-setup-review"><h3 dir="auto">{values.name}</h3><p dir="auto">{values.directive || "Add your first objective after creating the workspace."}</p><dl><dt>Workspace</dt><dd>{values.kind}</dd><dt>Folder</dt><dd>{values.rootPath || "Planning workspace"}</dd><dt>Language</dt><dd>{{ en: "English", fr: "Français", ar: "العربية" }[values.responseLanguage]}</dd><dt>Provider</dt><dd>{profiles.find(profile => profile.id === values.providerId)?.name || "Current provider"}</dd><dt>Instructions</dt><dd dir="auto">{values.instructions || "No custom instructions"}</dd></dl></div>}</form.Subscribe>}
+      </FieldGroup>
+      {error && <p className="project-error" role="alert">{error}</p>}
+      <DialogFooter><Button type="button" variant="ghost" onClick={step > 0 ? () => setStep(value => value - 1) : onClose}>{step > 0 ? "Back" : "Cancel"}</Button><form.Subscribe selector={state => state.isSubmitting}>{busy => <Button type="submit" variant="outline" disabled={busy}>{busy ? "Checking folder…" : step < 2 ? "Continue" : project ? "Save project" : "Create workspace"}</Button>}</form.Subscribe></DialogFooter>
+    </form></DialogContent></Dialog>
+}
+
+function TaskTable({ items, onEdit, onDelete, onAsk }: { items: ProjectItem[]; onEdit: (item: ProjectItem) => void; onDelete: (item: ProjectItem) => void; onAsk: (item: ProjectItem) => void }) {
+  const table = useTable({ features: taskFeatures, columns: taskColumns, data: items, getRowId: row => row.id })
+  return <div className="project-task-table"><Input aria-label="Search project tasks" placeholder="Find a task…" value={table.state.globalFilter ?? ""} onChange={event => table.setGlobalFilter(event.target.value)} /><Table><TableHeader>{table.getHeaderGroups().map(group => <TableRow key={group.id}>{group.headers.map(header => <TableHead key={header.id}><button type="button" onClick={header.column.getToggleSortingHandler()} aria-label={`Sort by ${header.column.id}`}><table.FlexRender header={header} /><ArrowDownUp size={13} /></button></TableHead>)}<TableHead><span className="sr-only">Task actions</span></TableHead></TableRow>)}</TableHeader><TableBody>{table.getRowModel().rows.map(row => <TableRow key={row.id}>{row.getAllCells().map(cell => <TableCell key={cell.id}><table.FlexRender cell={cell} /></TableCell>)}<TableCell><div className="project-row-actions"><Button variant="ghost" size="icon" aria-label={`Edit ${row.original.title}`} onClick={() => onEdit(row.original)}><Settings2 data-icon="inline-start" /></Button><Button variant="ghost" size="icon" aria-label={`Ask FRIDAY about ${row.original.title}`} onClick={() => onAsk(row.original)}><ArrowUpRight data-icon="inline-start" /></Button><Button variant="ghost" size="icon" aria-label={`Delete ${row.original.title}`} onClick={() => onDelete(row.original)}><Trash2 data-icon="inline-start" /></Button></div></TableCell></TableRow>)}{!table.getRowModel().rows.length && <TableRow><TableCell colSpan={5}>No tasks match this search.</TableCell></TableRow>}</TableBody></Table></div>
+}
+
+export function ProjectWorkspace() {
+  const { projects, items, activeId, loadError, ready } = useProjects()
+  const [projectSearch, setProjectSearch] = useState("")
+  const [view, setView] = useState("today")
+  const [setup, setSetup] = useState<"new" | WorkspaceProject | null>(null)
+  const [itemEditor, setItemEditor] = useState<Partial<ProjectItem> | null>(null)
+  const [itemTitle, setItemTitle] = useState("")
+  const [itemDetails, setItemDetails] = useState("")
+  const [itemStatus, setItemStatus] = useState<ProjectItem["status"]>("todo")
+  const [itemPriority, setItemPriority] = useState<NonNullable<ProjectItem["priority"]>>("medium")
+  const [itemDueDate, setItemDueDate] = useState("")
+  const [instruction, setInstruction] = useState("")
+  const [draftPrompt, setDraftPrompt] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<{ project?: WorkspaceProject; item?: ProjectItem } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [sending, setSending] = useState(false)
+  const [selectedNotes, setSelectedNotes] = useState<string[]>([])
+  const profiles = useSettings(state => state.saved.profiles)
+  const activeProfileId = useSettings(state => state.saved.activeProfileId)
+  const threads = useFriday(state => state.threads)
+  const project = projects.find(record => record.id === activeId) ?? projects[0]
+  const projectItems = useMemo(() => items.filter(item => item.projectId === project?.id), [items, project?.id])
+  const tasks = useMemo(() => projectItems.filter(item => item.type === "task"), [projectItems])
+  const notes = useMemo(() => projectItems.filter(item => item.type === "note"), [projectItems])
+  const metadata = useQuery({ queryKey: ["project-metadata", project?.id, project?.rootPath], enabled: isDesktop && Boolean(project?.rootPath), queryFn: () => invokeCommand<ProjectMetadata>("inspect_project_metadata", { path: project?.rootPath }) })
+  const history = useQuery({ queryKey: ["run-history", project?.id], enabled: isDesktop && Boolean(project?.id) && ["history", "conversations"].includes(view), queryFn: () => invokeCommand<RunRecord[]>("get_run_history", { projectId: project?.id }), refetchInterval: view === "history" ? 10_000 : false })
+  useEffect(() => {
+    const open = (event: Event) => {
+      if (!(event instanceof CustomEvent)) return
+      const detail = event.detail as { projectId?: string; view?: string; itemId?: string }
+      if (detail.projectId) useProjects.getState().select(detail.projectId)
+      setView(detail.view || "overview")
+      if (detail.itemId) { const item = useProjects.getState().items.find(record => record.id === detail.itemId); if (item) editItem(item) }
+    }
+    window.addEventListener("friday:open-work-record", open)
+    return () => window.removeEventListener("friday:open-work-record", open)
+  }, [])
+  const safeAction = (action: () => void) => { setError(null); try { action() } catch (failure) { setError(String(failure instanceof Error ? failure.message : failure)) } }
+  const editItem = (item: Partial<ProjectItem>) => { setItemEditor(item); setItemTitle(item.title || ""); setItemDetails(item.description || ""); setItemStatus(item.status || "todo"); setItemPriority(item.priority || "medium"); setItemDueDate(item.dueDate || ""); setError(null) }
+  const saveItem = () => {
+    if (!project || !itemEditor || !itemTitle.trim()) { setError("Give this item a title."); return }
+    safeAction(() => { useProjects.getState().saveItem({ ...itemEditor, id: itemEditor.id ?? crypto.randomUUID(), projectId: project.id, type: itemEditor.type || "task", title: itemTitle, description: itemDetails, status: itemStatus, priority: itemPriority, dueDate: itemDueDate || undefined }); setItemEditor(null) })
+  }
+  const stageInstruction = (text: string) => { if (project && text.trim()) setDraftPrompt(buildProjectPrompt(project, text, notes.filter(note => selectedNotes.includes(note.id)).map(note => ({ id: note.id, title: note.title, content: note.description || "", links: note.sourceLinks })))) }
+  const send = async () => {
+    if (!project || !draftPrompt) return
+    setError(null); setSending(true)
+    try {
+      const threadId = project.threadId && useFriday.getState().threads.some(thread => thread.id === project.threadId) ? project.threadId : useFriday.getState().createThread(project.name)
+      if (threadId !== project.threadId) { useProjects.getState().saveProject({ ...project, threadId }); await flushProjects() }
+      useFriday.getState().setActiveThread(threadId)
+      useFriday.getState().setTab("chat")
+      const text = draftPrompt
+      setDraftPrompt(null)
+      await sendChatMessage(text, project.expanded, { projectId: project.id, providerProfileId: project.providerId || activeProfileId, threadId })
+    } catch (failure) { setError(String(failure instanceof Error ? failure.message : failure)) }
+    finally { setSending(false) }
+  }
+  const folderReady = Boolean(project?.rootPath) && isDesktop && metadata.isSuccess
+  return <div className="project-workspace">
+    <aside className="project-switcher"><header><span className="instrument-label">Your workspaces</span><Button variant="ghost" size="icon" aria-label="Create project" onClick={() => setSetup("new")} disabled={!ready || Boolean(loadError)}><Plus data-icon="inline-start" /></Button></header><h1>Work<span>.</span></h1><Button variant="ghost" onClick={() => setView("today")} aria-pressed={view === "today"}>Today</Button><Input aria-label="Search workspaces" placeholder="Find a project…" value={projectSearch} onChange={event => setProjectSearch(event.target.value)} /><div className="project-list">{projects.filter(record => `${record.name} ${record.tags.join(" ")}`.toLowerCase().includes(projectSearch.toLowerCase())).map(record => <button type="button" className={record.id === project?.id ? "is-current" : undefined} key={record.id} onClick={() => safeAction(() => { useProjects.getState().select(record.id); setView("overview"); setInstruction("") })}><span className="project-monogram">{record.name.slice(0, 2).toUpperCase()}</span><span><strong dir="auto">{record.name}</strong><small>{record.kind} · {record.status}</small></span></button>)}</div><footer><span>{projects.length} saved workspaces</span><small>Stored on this device. Local files stay in your folder.</small></footer></aside>
+    <main className="project-main">
+      {loadError && <p className="project-error" role="alert">{loadError}</p>}
+      {view === "today" ? <TodayView onCreate={() => setSetup("new")} onOpen={(id, nextView, itemId) => { useProjects.getState().select(id); setView(nextView || "overview"); if (itemId) { const item = items.find(record => record.id === itemId); if (item) editItem(item) } }} /> : !project ? <div className="project-first-workspace"><span className="instrument-label">An idea needs a place.</span><h2>MAKE<br />SOMETHING<span>.</span></h2><p>Your code, research, references, tasks, and conversations — around a goal of your own.</p><Button variant="outline" onClick={() => setSetup("new")} disabled={Boolean(loadError)}><Plus data-icon="inline-start" />Create your first workspace</Button><div className="project-start-options"><span><Code2 size={18} />Build an app</span><span><BookOpen size={18} />Explore an idea</span><span><FolderOpen size={18} />Connect a folder</span></div></div> : <>
+        <header key={project.id} className="project-heading"><div><span className="instrument-label">{project.kind} workspace / {project.status}</span><h2 dir="auto">{project.name}</h2><p dir="auto">{project.directive || "Set a goal in project customization."}</p></div><Button variant="outline" onClick={() => setSetup(project)}><Settings2 data-icon="inline-start" />Customize</Button></header>
+        <Tabs value={view} onValueChange={setView}><TabsList><TabsTrigger value="overview">Overview</TabsTrigger><TabsTrigger value="tasks">Tasks ({tasks.length})</TabsTrigger><TabsTrigger value="notes">Notes ({notes.length})</TabsTrigger><TabsTrigger value="code">Files</TabsTrigger><TabsTrigger value="terminal">Terminal</TabsTrigger><TabsTrigger value="git">Changes</TabsTrigger><TabsTrigger value="conversations">Conversations</TabsTrigger><TabsTrigger value="history">Run history</TabsTrigger></TabsList></Tabs>
+        {error && !itemEditor && !draftPrompt && <p className="project-error" role="alert">{error}</p>}
+        <div className="project-provider-context"><span>Project: {project.name}</span><span>Provider: {profiles.find(profile => profile.id === (project.providerId || activeProfileId))?.name || "Choose a provider in Settings"}</span><span>{selectedNotes.length} selected source{selectedNotes.length === 1 ? "" : "s"}</span></div>
+        {view === "history" && <RunHistoryView runs={history.data || []} pending={history.isPending && isDesktop} error={history.isError ? history.error.message : undefined} reload={() => history.refetch().then(() => undefined)} />}
+        {view === "conversations" && <section className="project-items-view"><header><div><h3>Project conversations</h3><p>Continue the project conversation with its recorded context.</p></div><Button variant="outline" onClick={() => { const threadId = useFriday.getState().createThread(project.name); useProjects.getState().saveProject({ ...project, threadId }); useFriday.getState().setTab("chat") }}>New conversation</Button></header>{[...new Set([project.threadId, ...(history.data || []).map(run => run.thread_id)].filter((id): id is string => Boolean(id)))].map(id => <Button key={id} variant="ghost" onClick={() => { useFriday.getState().setActiveThread(id); useFriday.getState().setTab("chat") }}>{threads.find(thread => thread.id === id)?.title || "Project conversation"}<ArrowUpRight data-icon="inline-end" /></Button>)}{!project.threadId && !history.data?.length && <p>No conversation yet. Send the first request from Overview.</p>}</section>}
+        {view === "overview" && <div key={project.id} className="project-overview"><section className="project-brief"><span className="instrument-label">Next action</span><h3>What should we work on?</h3><div className="project-tags">{project.tags.map(tag => <span key={tag}>{tag}</span>)}</div><form onSubmit={event => { event.preventDefault(); stageInstruction(instruction) }}><Field><FieldLabel htmlFor="project-request">Work with FRIDAY</FieldLabel><Textarea id="project-request" value={instruction} onChange={event => setInstruction(event.target.value)} placeholder="Plan the next feature, review a file, or work through an idea…" dir="auto" rows={4} /><FieldDescription>Review the project context and request before sending.</FieldDescription></Field><Button type="submit" variant="outline" disabled={!instruction.trim()}><Sparkles data-icon="inline-start" />Prepare conversation</Button></form></section><div className="project-context-plates"><section><span className="instrument-label">Progress</span><strong className="project-counter">{tasks.filter(task => task.status === "done").length}<small> / {tasks.length}</small></strong><p>Tasks marked done by you.</p><Button variant="ghost" onClick={() => setView("tasks")}>Open tasks<ArrowUpRight data-icon="inline-end" /></Button></section><section><span className="instrument-label">Working folder</span><p className="project-folder" dir="auto">{project.rootPath || "Planning workspace — no folder attached"}</p>{metadata.isPending && isDesktop && project.rootPath && <p role="status">Inspecting folder…</p>}{metadata.isError && <p className="project-error" role="alert">{metadata.error.message}</p>}{metadata.data && <p>{metadata.data.framework} · {metadata.data.totalFilesCount} files · {metadata.data.gitBranch || "No Git branch"}</p>}<Button variant="ghost" onClick={() => project.rootPath && isDesktop ? void metadata.refetch() : setSetup(project)}>{project.rootPath && isDesktop ? <><RefreshCw data-icon="inline-start" />Refresh folder</> : "Attach a folder"}</Button></section><section><span className="instrument-label">Project context</span><p dir="auto">{project.instructions || "No custom instructions yet."}</p>{project.contextLinks.map(link => <a href={link} key={link} target="_blank" rel="noopener noreferrer">{new URL(link).hostname}<ArrowUpRight size={13} /></a>)}<Button variant="ghost" onClick={() => setSetup(project)}>Edit context<ArrowUpRight data-icon="inline-end" /></Button></section></div></div>}
+        {view === "tasks" && <section className="project-items-view"><header><div><h3>Tasks</h3><p>Track real tasks. Sending an instruction does not mark it complete.</p></div><Button variant="outline" onClick={() => editItem({ type: "task" })}><Plus data-icon="inline-start" />Add task</Button></header>{tasks.length ? <TaskTable items={tasks} onEdit={editItem} onDelete={item => setPendingDelete({ item })} onAsk={item => stageInstruction(`${item.title}\n${item.description || ""}`)} /> : <Empty><EmptyHeader><EmptyMedia variant="icon"><Code2 /></EmptyMedia><EmptyTitle>No tasks yet</EmptyTitle><EmptyDescription>Add a specific next step for this project.</EmptyDescription></EmptyHeader><EmptyContent><Button variant="outline" onClick={() => editItem({ type: "task" })}>Add the first task</Button></EmptyContent></Empty>}</section>}
+        {view === "notes" && <section className="project-items-view"><header><div><h3>Notes</h3><p>Decisions, research, and notes for this project.</p></div><Button variant="outline" onClick={() => editItem({ type: "note" })}><Plus data-icon="inline-start" />Add note</Button></header><div className="project-notes">{notes.map(note => <article key={note.id}><h4 dir="auto">{note.title}</h4><p dir="auto">{note.description}</p>{note.sourceLinks?.map(link => <a key={link} href={link} target="_blank" rel="noopener noreferrer">{new URL(link).hostname}</a>)}<div><Button variant="ghost" aria-pressed={selectedNotes.includes(note.id)} onClick={() => setSelectedNotes(current => current.includes(note.id) ? current.filter(id => id !== note.id) : [...current, note.id])}>{selectedNotes.includes(note.id) ? "Remove from AI context" : "Use as cited context"}</Button><Button variant="ghost" onClick={() => editItem(note)}>Edit</Button><Button variant="ghost" onClick={() => setPendingDelete({ item: note })}>Delete</Button></div></article>)}</div>{!notes.length && <Empty><EmptyHeader><EmptyTitle>No notes yet</EmptyTitle><EmptyDescription>Save a decision or reference so it is easy to find later.</EmptyDescription></EmptyHeader></Empty>}</section>}
+        {["code", "terminal", "git"].includes(view) && <div className="project-native-view">{folderReady && project.rootPath ? <Suspense fallback={<p role="status">Opening project tools…</p>}>{view === "code" ? <CodeStudio key={project.id} projectPath={project.rootPath} projectName={project.name} onAskFriday={stageInstruction} /> : view === "terminal" ? <Terminal key={project.id} projectPath={project.rootPath} projectName={project.name} /> : <GitViewer key={project.id} projectPath={project.rootPath} projectName={project.name} onAskFriday={stageInstruction} />}</Suspense> : <Empty><EmptyHeader><EmptyMedia variant="icon"><FolderOpen /></EmptyMedia><EmptyTitle>{isDesktop ? "Attach a project folder" : "Local tools require Windows"}</EmptyTitle><EmptyDescription>{isDesktop ? "Connect an existing folder in project customization to browse files, run commands, and review changes." : "Your planning workspace, tasks, and notes work here. Open the Windows app to attach a folder and use its local tools."}</EmptyDescription></EmptyHeader><EmptyContent><Button variant="outline" onClick={() => setSetup(project)}>Customize project</Button></EmptyContent></Empty>}</div>}
+        <footer className="project-footer"><span>{project.rootPath ? "Folder connected" : "Planning workspace"} · Updated {new Date(project.updated_at).toLocaleDateString()}</span><Button variant="ghost" onClick={() => setPendingDelete({ project })}>Remove workspace</Button></footer>
+      </>}
+    </main>
+    {setup && <ProjectSetup project={setup === "new" ? undefined : setup} onClose={() => { setSetup(null); setView("overview") }} />}
+    {itemEditor && <Dialog open onOpenChange={open => { if (!open) setItemEditor(null) }}><DialogContent className="project-item-dialog"><DialogHeader><DialogTitle>{itemEditor.id ? "Edit" : "New"} {itemEditor.type || "task"}</DialogTitle><DialogDescription>Saved in this project on your device.</DialogDescription></DialogHeader><form onSubmit={event => { event.preventDefault(); saveItem() }}><FieldGroup><Field><FieldLabel htmlFor="project-item-title">Title</FieldLabel><Input id="project-item-title" value={itemTitle} onChange={event => setItemTitle(event.target.value)} autoFocus dir="auto" /></Field><Field><FieldLabel htmlFor="project-item-description">Details</FieldLabel><Textarea id="project-item-description" value={itemDetails} onChange={event => setItemDetails(event.target.value)} rows={4} dir="auto" /></Field>{itemEditor.type !== "note" && <Field><FieldLabel>Status</FieldLabel><Select value={itemStatus} onValueChange={value => setItemStatus(value as ProjectItem["status"])}><SelectTrigger aria-label="Task status"><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="todo">To do</SelectItem><SelectItem value="in-progress">In progress</SelectItem><SelectItem value="done">Done</SelectItem></SelectGroup></SelectContent></Select></Field>}
+      {itemEditor.type !== "note" && <>
+        <Field><FieldLabel>Priority</FieldLabel><Select value={itemPriority} onValueChange={value => setItemPriority(value as NonNullable<ProjectItem["priority"]>)}><SelectTrigger aria-label="Task priority"><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="low">Low</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="high">High</SelectItem><SelectItem value="critical">Critical</SelectItem></SelectGroup></SelectContent></Select></Field>
+        <Field><FieldLabel htmlFor="project-item-due">Due date (optional)</FieldLabel><Input id="project-item-due" type="date" value={itemDueDate} onChange={event => setItemDueDate(event.target.value)} /></Field>
+      </>}
+    </FieldGroup>{error && <p className="project-error" role="alert">{error}</p>}<DialogFooter><Button type="button" variant="ghost" onClick={() => setItemEditor(null)}>Cancel</Button><Button type="submit" variant="outline">Save {itemEditor.type || "task"}</Button></DialogFooter></form></DialogContent></Dialog>}
+    {draftPrompt && <Dialog open onOpenChange={open => { if (!open && !sending) setDraftPrompt(null) }}><DialogContent className="project-request-dialog"><DialogHeader><DialogTitle>Send with project context.</DialogTitle><DialogDescription>Review the project, provider, and quoted sources. This request continues the project conversation.</DialogDescription></DialogHeader><p className="project-provider-context">{project?.name} · {profiles.find(profile => profile.id === (project?.providerId || activeProfileId))?.name || "Current provider"}</p><Field><FieldLabel htmlFor="project-prompt-preview">Request</FieldLabel><Textarea id="project-prompt-preview" value={draftPrompt} onChange={event => setDraftPrompt(event.target.value)} rows={12} dir="auto" /></Field>{error && <p className="project-error" role="alert">{error}</p>}<DialogFooter><Button variant="ghost" onClick={() => setDraftPrompt(null)} disabled={sending}>Cancel</Button><Button variant="outline" onClick={() => void send()} disabled={sending || !draftPrompt.trim()}>{sending ? "Sending…" : "Send & open conversation"}<ArrowUpRight data-icon="inline-end" /></Button></DialogFooter></DialogContent></Dialog>}
+    {pendingDelete && <Dialog open onOpenChange={open => { if (!open) setPendingDelete(null) }}><DialogContent className="project-item-dialog"><DialogHeader><DialogTitle>Remove {pendingDelete.project ? "workspace" : pendingDelete.item?.type}?</DialogTitle><DialogDescription>{pendingDelete.project ? "This removes the saved workspace, tasks, and notes. Files in its local folder are kept." : `Remove “${pendingDelete.item?.title}” from this project.`}</DialogDescription></DialogHeader>{error && <p className="project-error" role="alert">{error}</p>}<DialogFooter><Button variant="ghost" onClick={() => setPendingDelete(null)}>Cancel</Button><Button variant="outline" onClick={() => safeAction(() => { if (pendingDelete.project) useProjects.getState().removeProject(pendingDelete.project.id); else if (pendingDelete.item) useProjects.getState().removeItem(pendingDelete.item.id); setPendingDelete(null) })}>Remove</Button></DialogFooter></DialogContent></Dialog>}
+  </div>
+}
