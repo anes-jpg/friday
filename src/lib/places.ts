@@ -10,6 +10,8 @@ export const ALGERIA_CITIES = [
   { name: "Tizi Ouzou", center: [4.0497, 36.7169] as [number, number] },
 ]
 export type PlaceCategory = "all" | "shop" | "food" | "health" | "services" | "leisure" | "beauty" | "hotel"
+export type BusinessDetailField = "phone" | "email" | "website" | "address" | "openingHours"
+export interface BusinessDetailEvidence { value: string; sourceUrl: string; fetchedAt: number; provider: "wikidata" | "website" | "manual" }
 export interface MapPlace {
   id: string
   osmType?: "node" | "way" | "relation"
@@ -21,6 +23,7 @@ export interface MapPlace {
   address?: string
   tags: Record<string, string>
   provenance?: PlaceProvenance
+  details?: Partial<Record<BusinessDetailField, BusinessDetailEvidence>>
 }
 const savedPlaceSchema = z.object({
   id: z.string().min(1), name: z.string().min(1), category: z.string(),
@@ -28,6 +31,7 @@ const savedPlaceSchema = z.object({
   osmType: z.enum(["node", "way", "relation"]).optional(), osmId: z.number().int().positive().optional(),
   address: z.string().optional(), tags: z.record(z.string()),
   provenance: z.object({ source:z.string(), fetchedAt:z.number(), cached:z.boolean(), stale:z.boolean() }).optional(),
+  details: z.record(z.enum(["phone", "email", "website", "address", "openingHours"]), z.object({ value: z.string().max(2000), sourceUrl: z.string().url().refine(value => Boolean(safePlaceWebsite(value)), "HTTP or HTTPS source required"), fetchedAt: z.number().finite(), provider: z.enum(["wikidata", "website", "manual"]) })).optional(),
 })
 export function parseSavedPlaces(data: unknown): MapPlace[] { return z.array(savedPlaceSchema).parse(data) }
 const tagsSchema = z.record(z.string())
@@ -174,7 +178,7 @@ export async function placeDetails(place: MapPlace, signal: AbortSignal): Promis
     const data = osmAreaSchema.parse(raw)
     const element = data.elements.find(item => item.type === place.osmType && item.id === place.osmId)
     const result = element ? parseNearbyPlaces({ elements: [{ ...element, lat: element.lat ?? place.lat, lon: element.lon ?? place.lng }] })[0] : undefined
-    return result ? { ...place, ...result, category: result.category === "Place" ? place.category : result.category, address: result.address || place.address, provenance:sourceFor(raw) || place.provenance } : place
+    return result ? { ...place, ...result, tags: { ...place.tags, ...result.tags }, category: result.category === "Place" ? place.category : result.category, address: result.address || place.address, provenance:sourceFor(raw) || place.provenance } : place
     } catch (error) {
       if (signal.aborted) throw error
       await searchRateLimit(signal)

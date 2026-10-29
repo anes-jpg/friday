@@ -4,6 +4,7 @@ import App from "./App";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { workspaceQueryClient } from "./lib/query";
 import "./styles/theme.css";
+import "./styles/operator-refinement.css";
 import { useProjects } from "./lib/projects";
 import { useSavedPlaces } from "./lib/saved-places";
 

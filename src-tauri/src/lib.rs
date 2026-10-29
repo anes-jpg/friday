@@ -9,6 +9,7 @@ pub mod settings;
 pub mod workspace_commands;
 pub mod daily_work;
 pub mod places;
+pub mod business_research;
 pub mod health;
 
 use agent::{AgentCore, PendingPlan, TurnResult};
@@ -2330,6 +2331,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             submit_utterance,
             places::get_place_data,
+            business_research::read_business_site,
+            business_research::search_business_sources,
             places::cancel_place_request,
             confirm_plan,
             cancel_run,

@@ -9,6 +9,8 @@ import { Plus, Search, Clock, ArrowUpRight, Eye, EyeOff, Trash2, Check, RefreshC
 import { cn } from "@/lib/utils"
 import { DailyPreferences } from "@/components/work/DailyPreferences"
 import { SettingsHealth } from "./SettingsHealth"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { BlockReveal } from "@/components/ui/block-reveal"
 
 const speechVoices = Array.from(new Map(Object.values(PIPER_VOICES).map((voice) => [voice.id, voice])).values())
 
@@ -92,7 +94,7 @@ export function SettingsTab() {
       <div className="settings-main">
         <div className="settings-scroll">
           <header className="settings-page-title"><span className="instrument-label">Settings / {categories.find((item) => item.id === category)?.label}</span><h2 className="page-heading">{categories.find((item) => item.id === category)?.label}</h2><p>{categories.find((item) => item.id === category)?.description}.</p></header>
-          {loading && <p role="status">Reading saved settings…</p>}
+          {loading && <BlockReveal loading label="Reading provider settings" />}
           {category === "providers" && profile && (
             <div className="provider-layout">
               <div className="provider-index">
@@ -102,6 +104,7 @@ export function SettingsTab() {
               </div>
               <section className="provider-detail" aria-label="Provider details">
                 <div className="provider-detail-title"><h3>{profile.name}</h3><button type="button" className="quiet-action" onClick={() => update({ activeProfileId: profile.id })} disabled={draft.activeProfileId === profile.id}>{draft.activeProfileId === profile.id ? <><Check size={14} />Current provider</> : "Use this provider"}</button></div>
+                <Tabs defaultValue="connection" className="provider-panels"><TabsList aria-label="Provider configuration"><TabsTrigger value="connection">Connection</TabsTrigger><TabsTrigger value="credentials">Credentials</TabsTrigger><TabsTrigger value="routing">Routing</TabsTrigger></TabsList><TabsContent value="connection"><BlockReveal key={profile.id}>
                 <label className="settings-field">Start from a preset<select aria-label="Provider preset" defaultValue="custom" onChange={(event) => { const preset = presets[event.target.value]; updateProfile({ name: preset.name, baseUrl: preset.baseUrl }) }}>{Object.entries(presets).map(([id, preset]) => <option key={id} value={id}>{preset.name}</option>)}</select></label>
                 <label className="settings-field">Display name<input value={profile.name} onChange={(event) => updateProfile({ name: event.target.value })} /></label>
                 <label className="settings-field">Base URL<input type="url" spellCheck={false} value={profile.baseUrl} placeholder="https://your-provider.example/v1" onChange={(event) => updateProfile({ baseUrl: event.target.value })} /><small>Any OpenAI-compatible local or remote endpoint.</small></label>
@@ -109,9 +112,12 @@ export function SettingsTab() {
                   <label className="settings-field">API mode<select value={profile.apiMode} onChange={(event) => updateProfile({ apiMode: event.target.value as ProviderProfile["apiMode"] })}><option value="chat">Chat Completions</option><option value="responses">Responses</option></select></label>
                   <label className="settings-field">Exact model ID<input spellCheck={false} value={profile.model} onChange={(event) => updateProfile({ model: event.target.value, lightModel: profile.lightModel === profile.model || !profile.lightModel ? event.target.value : profile.lightModel })} placeholder="Model ID from your provider" /></label>
                 </div>
-                <label className="settings-field">Lightweight model ID<input spellCheck={false} value={profile.lightModel} onChange={(event) => updateProfile({ lightModel: event.target.value })} /><small>Used for simpler instructions. IDs are sent exactly as entered.</small></label>
+                </BlockReveal></TabsContent><TabsContent value="credentials"><BlockReveal>
                 <label className="settings-field">API key<div className="settings-secret"><input type={showKey ? "text" : "password"} value={keys[profile.id] ?? ""} autoComplete="new-password" spellCheck={false} placeholder={profile.hasKey ? "Stored · enter a replacement" : "Optional for local endpoints"} onChange={(event) => setKey(profile.id, event.target.value)} /><button type="button" aria-label={showKey ? "Hide API key" : "Show API key"} onClick={() => setShowKey(!showKey)}>{showKey ? <EyeOff size={16} /> : <Eye size={16} />}</button></div><small>{isDesktop ? "Stored in Windows Credential Manager per provider." : "API keys can be saved in the Windows app."}</small></label>
+                </BlockReveal></TabsContent><TabsContent value="routing"><BlockReveal>
+                <label className="settings-field">Lightweight model ID<input spellCheck={false} value={profile.lightModel} onChange={(event) => updateProfile({ lightModel: event.target.value })} /><small>Used for simpler instructions. IDs are sent exactly as entered.</small></label>
                 <FormRow title="Allow fallback" description="Use this profile if the current provider fails. Its own credentials are used."><Toggle label="Allow provider fallback" checked={profile.fallback} onChange={(fallback) => updateProfile({ fallback })} /></FormRow>
+                </BlockReveal></TabsContent></Tabs>
                 <div className="provider-detail-actions"><button type="button" className="quiet-action" disabled={testing} onClick={() => void test()}><RefreshCw size={14} />{testing ? "Testing…" : "Test connection"}</button>{draft.profiles.length > 1 && <button type="button" className="quiet-action" onClick={() => setRemoving(!removing)}><Trash2 size={14} />Remove</button>}</div>
                 {removing && <div className="settings-notice"><p>Remove {profile.name} from your profiles?</p><button type="button" className="quiet-action mt-2" onClick={() => { const profiles = draft.profiles.filter((item) => item.id !== profile.id); update({ profiles, activeProfileId: draft.activeProfileId === profile.id ? profiles[0].id : draft.activeProfileId }); setSelected(profiles[0].id); setRemoving(false) }}>Remove provider</button></div>}
                 {connection && <p role="status" className={cn("settings-notice", !connection.ok && "is-error")}>{connection.message}</p>}

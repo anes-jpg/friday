@@ -1,0 +1,19 @@
+# Free builder and business research
+
+HorizonX's public catalog describes a preview → inspect source → add to project workflow, alongside component kits, icons, assets, and shaders. Its server requires a subscription. FRIDAY uses free source references from shadcn and Watermelon instead; HorizonX was removed from the Codex configuration. No subscriber components were accessed.
+
+In Work, open **Builder**, select a stack and blocks, inspect the starter previews/source, and prepare an implementation. The saved kit, business listing, and latest verified details become selected project context. The request is reviewed before sending it to the configured model. Kits are starting structures with visible placeholders; generating and validating a completed website still requires a model and a local folder.
+
+Available recipes are portable HTML, React/TypeScript/Vite, and Dioramas. Dioramas contributes its inspectable engine API, scene review workflow, and procedural/supplied asset approach. Image generation, fal/Meshy pipelines, and paid services are excluded. The 3D dependencies belong to the generated website rather than the desktop application. Upstream code is MIT; upstream generated assets have separate attribution requirements, so supply your own assets or use procedural geometry.
+
+Portable sites preview from index.html. Module-based sites can use a separate loopback development URL; the iframe retains its opaque sandbox and never receives allow-same-origin. A generated Vite server must allow the literal `null` CORS origin for module loading in that frame and remain bound to loopback. Open the local app externally to review storage-dependent behavior. URL checks reject remote servers, credentials, script schemes, and FRIDAY's origin.
+
+The map supports business/category, website-listing, and contact filters. Business details combine exact OSM records, the exact linked Wikidata entity's phone/website claims, and contacts extracted from public-site links and structured data. Browser search remains available when free search cannot return readable links. Public sources can omit facts or block requests; absence is kept visible and does not prove a business has no website.
+
+Research candidates require business-identity confirmation before saving. Changed fields retain their source URL, provider, and verification time; unchanged fields preserve their existing provenance. The original project listing remains intact, with a separate latest-details capture for updates. Read-only model tools `business.search` and `business.read` expose the same free research path. Native reads validate public addresses across redirects, bound request time and response size, and execute no site scripts.
+
+Loading placeholders stay visible while data is pending; loaded blocks use neutral ASCII Reveal, with cached-content preservation and reduced-motion support. Memory and provider settings use bounded working panes. Shared onboarding covers the current features and reports setup/status without fabricated latency.
+
+Verification: TypeScript check, 175 frontend tests in 22 files, and both native business-research tests passed. Visual inspection was stopped by Computer Use because it could not verify the current browser URL; rendered layout, animation frame rate, live model generation, and real-world business coverage remain unverified.
+
+The public DuckDuckGo HTML search endpoint returned HTTP 200 with 10 readable result links in a live check. `pnpm tauri build --no-bundle` passed, including the production frontend build. The executable is `src-tauri/target/release/friday.exe`, 63,176,704 bytes, generated on 2026-10-29 at 11:49:19 local time. Its SHA256 is `A4D0DD3BAFB78042055967CBE8A496304E21F6566A4CC6E758B0B0E9BB3BF21A`. The frontend build retains warnings about mixed static/dynamic imports and a large main chunk.

@@ -24,7 +24,7 @@ export const resumeSchema = z.object({
   checkpoint: z.string().default(""), links: z.array(z.string().url()).default([]), nextStep: z.string().default(""), updatedAt: z.string().datetime({ offset: true }),
 })
 const preferencesSchema = z.object({
-  previousWorkView: z.enum(["today", "overview", "tasks", "notes", "code", "terminal", "git", "conversations", "history", "preview"]).default("today"),
+  previousWorkView: z.enum(["today", "overview", "tasks", "notes", "code", "terminal", "git", "conversations", "history", "preview", "builder"]).default("today"),
   restoreView: z.boolean().default(false), previousView: z.enum(["map", "cameras", "recordings", "alerts", "chat", "hud", "beast", "review", "browser", "delphi", "automations", "skills", "models", "memory", "audit", "settings", "projects", "analytics", "history", "telemetry"]).default("projects"),
   shortcut: z.string().regex(/^(?:Ctrl|Alt|Shift)(?:\+(?:Ctrl|Alt|Shift))*\+(?:Space|Key[A-Z]|[A-Z]|F\d{1,2})$/, "Use a modifier and key, such as Ctrl+Alt+Space.").default("Ctrl+Alt+Space"), timezone: z.string().default("UTC"),
 })

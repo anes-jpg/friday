@@ -12,7 +12,10 @@ import { PlaceActions } from "./PlaceActions"
 import { PlaceComparison } from "./PlaceComparison"
 import { useSavedPlaces } from "@/lib/saved-places"
 import { AsciiLoader } from "@/components/ui/ascii-loader"
-import { businessPhone, businessWebsiteStatus, filterBusinesses, type WebsiteFilter } from "@/lib/business-workflow"
+import { businessPhone, businessPhoneLink, businessWebsite, businessEmail, businessAddress, businessHours, businessWebsiteStatus, filterBusinesses, type WebsiteFilter } from "@/lib/business-workflow"
+import { enrichLinkedBusiness } from "@/lib/business-research"
+import { BusinessResearchPanel } from "./BusinessResearchPanel"
+import { BlockReveal } from "@/components/ui/block-reveal"
 import { WebsiteProjectDialog } from "./WebsiteProjectDialog"
 
 const categories: { id: PlaceCategory; label: string }[] = [{ id: "all", label: "All" }, { id: "shop", label: "Shops" }, { id: "food", label: "Food & coffee" }, { id: "beauty", label: "Salons" }, { id: "hotel", label: "Hotels" }, { id: "health", label: "Health" }, { id: "services", label: "Services" }, { id: "leisure", label: "Leisure" }]
@@ -48,7 +51,7 @@ export function PlacesPanel({ center, selected, mapPlaces, onSelect, onResults, 
   const nearby = useQuery({ queryKey: ["nearby-places", area], enabled: Boolean(area), staleTime: 10 * 60_000,
     queryFn: ({ signal }) => area ? nearbyPlaces(area.center, area.category, signal, area.radius) : Promise.resolve([]) })
   const details = useQuery({ queryKey: ["place-details", selected?.id], enabled: Boolean(selected), staleTime: 30 * 60_000,
-    queryFn: ({ signal }) => selected ? placeDetails(selected, signal) : Promise.reject(new Error("Choose a place.")) })
+    queryFn: async ({ signal }) => selected ? enrichLinkedBusiness(await placeDetails(selected, signal), signal) : Promise.reject(new Error("Choose a place.")) })
   const result = tab === "nearby" ? nearby : search
   const mapped = useMemo(() => filterMapPlaces(mapPlaces, area?.center ?? center, tab === "nearby" ? area?.category ?? category : "all", area?.radius ?? radius), [mapPlaces, area, center[0], center[1], category, radius, tab])
   const candidates = useMemo(() => {
@@ -58,7 +61,10 @@ export function PlacesPanel({ center, selected, mapPlaces, onSelect, onResults, 
     const extras = mapped.filter(candidate => !listed.some(place => place.id===candidate.id || (place.name.toLocaleLowerCase() === candidate.name.toLocaleLowerCase() && Math.hypot(place.lng - candidate.lng, place.lat - candidate.lat) < .0005)))
     return [...listed, ...extras]
   }, [tab, saved, request, search.data, nearby.data, mapped, collectionId, savedData.collections])
-  const places = useMemo(() => businessOnly ? filterBusinesses(candidates ?? [], websiteFilter, contactOnly) : candidates, [businessOnly, candidates, websiteFilter, contactOnly])
+  const places = useMemo(() => {
+    const records = candidates?.map(item => ({ ...item, details: { ...item.details, ...saved.find(record => record.id === item.id)?.details } }))
+    return businessOnly ? filterBusinesses(records ?? [], websiteFilter, contactOnly) : records
+  }, [businessOnly, candidates, websiteFilter, contactOnly, saved])
   const shortlist = async (item: MapPlace) => {
     if (shortlisting) return
     setShortlisting(item.id)
@@ -72,23 +78,26 @@ export function PlacesPanel({ center, selected, mapPlaces, onSelect, onResults, 
   }
   useEffect(() => setVisibleCount(60), [tab, request, area])
   useEffect(() => { onResults(places ?? []) }, [places, onResults])
-  const place = details.data ?? selected
+  const base = details.data ?? selected
+  const stored = saved.find(item => item.id === base?.id)
+  const place = base ? { ...base, details: { ...base.details, ...stored?.details } } : null
   const save = async () => {
     if (!place || savedData.error) return
     setSaveError(null)
     try { if(saved.some(item=>item.id===place.id)) await savedData.remove(place.id);else await savedData.save(place) } catch(failure) {setSaveError(String(failure))}
   }
-  const website = safePlaceWebsite(place?.tags.website || place?.tags["contact:website"])
+  const website = place ? businessWebsite(place) : undefined
   return <aside className="places-panel" aria-label="Places and businesses">
     <header><div><span className="instrument-label">Discovery → project</span><h2>{place ? "Business & place details" : "Find your next client."}</h2></div><Button variant="ghost" size="icon" aria-label="Hide place search" onClick={onClose}><X data-icon="inline-start" /></Button></header>
     {savedData.error && <p role="alert" className="places-error">{savedData.error}</p>}
     {place ? <div className="place-detail">
       <Button variant="ghost" onClick={() => onSelect(null)}><ArrowLeft data-icon="inline-start" />Back to places</Button>
       <span className="instrument-label">{place.category.replaceAll("_", " ")}</span><h3 dir="auto">{place.name}</h3>
-      <PlacePhotos key={place.id} place={place} />
+      <details className="place-media-disclosure"><summary>Source photos</summary><PlacePhotos key={place.id} place={place} /></details>
       {details.isFetching && <p role="status">Loading business details…</p>}
       {details.isError && <p className="places-error" role="alert">Details could not load. <button type="button" onClick={() => void details.refetch()}>Try again</button></p>}
-      <dl><dt>Address</dt><dd dir="auto">{place.address || "No street address listed"}</dd><dt>Opening hours</dt><dd>{place.tags.opening_hours || "Not listed"}</dd><dt>Phone</dt><dd>{place.tags.phone || place.tags["contact:phone"] || "Not listed"}</dd>{place.tags.cuisine && <><dt>Cuisine</dt><dd>{place.tags.cuisine.replaceAll(";", ", ")}</dd></>}{place.tags.wheelchair && <><dt>Wheelchair access</dt><dd>{place.tags.wheelchair}</dd></>}</dl>
+      <BlockReveal loading={details.isPending && !businessPhone(place) && !businessHours(place)} label="Reading business contact fields" lines={3}><dl><dt>Phone</dt><dd>{businessPhone(place) ? <a href={businessPhoneLink(place)}>{businessPhone(place)}</a> : "Not supplied by available sources"}</dd><dt>Email</dt><dd>{businessEmail(place) || "Not supplied by available sources"}</dd><dt>Address</dt><dd dir="auto">{businessAddress(place) || "No street address listed"}</dd><dt>Opening hours</dt><dd>{businessHours(place) || "Not listed"}</dd>{place.tags.cuisine && <><dt>Cuisine</dt><dd>{place.tags.cuisine.replaceAll(";", ", ")}</dd></>}{place.tags.wheelchair && <><dt>Wheelchair access</dt><dd>{place.tags.wheelchair}</dd></>}</dl></BlockReveal>
+      <BusinessResearchPanel key={place.id} place={place} onSave={async updated => { await savedData.save(updated); onSelect(updated) }} />
       <div className="place-detail-actions"><Button variant="outline" onClick={()=>void save()} disabled={Boolean(savedData.error) || !savedData.ready}><Bookmark data-icon="inline-start" />{saved.some(item => item.id === place.id) ? "Remove saved place" : "Save place"}</Button>{website && <a href={website} target="_blank" rel="noopener noreferrer">Website<ExternalLink size={14} /></a>}<a href={`https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lng}`} target="_blank" rel="noopener noreferrer">Directions<ExternalLink size={14} /></a></div>
       <PlaceActions key={place.id} place={place}/>
       <Button variant="ghost" size="sm" disabled={comparison.length>=3 && !comparison.some(item=>item.id===place.id)} onClick={()=>setComparison(items=>items.some(item=>item.id===place.id) ? items.filter(item=>item.id!==place.id) : [...items,place])}>{comparison.some(item=>item.id===place.id) ? "Remove from comparison" : "Add to comparison"}</Button>
@@ -111,7 +120,7 @@ export function PlacesPanel({ center, selected, mapPlaces, onSelect, onResults, 
       {businessOnly && <div className="business-lead-filters"><label>Website<select aria-label="Filter businesses by website" value={websiteFilter} onChange={event => setWebsiteFilter(event.target.value as WebsiteFilter)}><option value="all">Any website status</option><option value="not-listed">Not listed in source</option><option value="listed">Website listed</option></select></label><label><input type="checkbox" checked={contactOnly} onChange={event => setContactOnly(event.target.checked)} />Contact listed</label><small>“Not listed” does not prove a business has no website. Map labels need a detailed listing check.</small></div>}
       {saveError && <p role="alert" className="places-error">{saveError}</p>}
       <div className="place-results" aria-live="polite">{places && <span className="place-result-count">{places.length} listed places{tab === "nearby" && area ? ` · within ${area.radius / 1000} km` : ""}</span>}
-        {tab !== "saved" && result.isFetching && <AsciiLoader label="Finding businesses and source details" />}
+        {tab !== "saved" && result.isFetching && !places?.length && <BlockReveal loading label="Finding businesses and source details" lines={6} />}
         {tab !== "saved" && result.isError && <p className="places-error" role="alert">{tab === "nearby" && mapped.length ? "Detailed listings could not load. Showing places labelled on the map. " : result.error.message}<button type="button" onClick={() => void result.refetch()}>Try again</button></p>}
         {places?.slice(0, visibleCount).map(item => <article key={item.id} className="business-result"><button type="button" className="place-result" onClick={() => onSelect(item)}><MapPin size={17} /><span><strong dir="auto">{item.name}</strong><small>{item.category.replaceAll("_", " ")}</small>{item.address && <small dir="auto">{item.address}</small>}{businessOnly && <small>{businessWebsiteStatus(item) === "listed" ? "Website listed" : businessWebsiteStatus(item) === "unknown" ? "Map label · website unverified" : "Website not listed"}{businessPhone(item) ? " · Phone listed" : ""}</small>}</span></button>{businessOnly && <div className="business-result-actions"><Button variant="ghost" size="sm" disabled={!savedData.ready || Boolean(savedData.error) || Boolean(shortlisting)} onClick={() => void shortlist(item)}>{savedData.collections.find(record => record.id === "website-leads")?.placeIds.includes(item.id) ? "Shortlisted" : "Shortlist"}</Button><Button variant="outline" size="sm" onClick={() => setWebsitePlace(item)}>Build website</Button></div>}</article>)}
         {places && places.length > visibleCount && <Button variant="ghost" size="sm" onClick={() => setVisibleCount(current => current + 60)}>Show more places ({places.length - visibleCount})</Button>}

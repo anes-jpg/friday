@@ -1442,6 +1442,19 @@ impl ToolRegistry {
         });
 
         self.register(ToolDefinition {
+            name: "business.search".to_string(),
+            description: "Find free public source websites for a business by name and location. Results are candidate URLs, not verified business facts.".to_string(),
+            tier: RiskTier::Green,
+            schema: json!({"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}),
+        });
+        self.register(ToolDefinition {
+            name: "business.read".to_string(),
+            description: "Read a public business website without executing scripts. Returns the final source URL and a bounded HTML excerpt for contact and structured-data research. Verify the business identity before using facts.".to_string(),
+            tier: RiskTier::Green,
+            schema: json!({"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}),
+        });
+
+        self.register(ToolDefinition {
             name: "agent.delegate".to_string(),
             description: "Delegate complex programming, architecture, or deep multi-step research to a multi-agent crew (CrewAI & LangGraph swarms)".to_string(),
             tier: RiskTier::Green,
@@ -2545,6 +2558,20 @@ impl ToolRegistry {
                 }
             }
 
+            "business.search" => {
+                let query=args.get("query").and_then(Value::as_str).unwrap_or("");
+                match crate::business_research::search_business_sources(query.to_string()).await {
+                    Ok(sources)=>json!({"status":"success","sources":sources,"verified":false}),
+                    Err(error)=>json!({"status":"error","message":error}),
+                }
+            }
+            "business.read" => {
+                let url=args.get("url").and_then(Value::as_str).unwrap_or("");
+                match crate::business_research::read_business_site(url.to_string()).await {
+                    Ok(page)=>json!({"status":"success","source_url":page.url,"quoted_html":page.html.chars().take(45000).collect::<String>(),"truncated":page.html.chars().count()>45000,"verified":false}),
+                    Err(error)=>json!({"status":"error","message":error}),
+                }
+            }
             "web.extract" => {
                 let url = args.get("url").and_then(|u| u.as_str()).unwrap_or("");
                 let instruction = args.get("instruction").and_then(|i| i.as_str()).unwrap_or("");

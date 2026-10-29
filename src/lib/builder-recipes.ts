@@ -1,0 +1,35 @@
+import { useProjects, flushProjects, type WorkspaceProject } from "./projects"
+import { useDailyWork, newCapture } from "./daily-work"
+import { isDesktop, invokeCommand } from "./ipc"
+
+export const builderRecipes = [
+  { id: "portable", name: "Portable business website", summary: "One responsive index.html. Fast preview, simple hosting, no package installation.", stack: "HTML · CSS · JavaScript", source: "https://developer.mozilla.org/en-US/docs/Web/HTML", guide: "Write a complete index.html with embedded CSS and JavaScript. Use semantic HTML, accessible controls, mobile layout, and the supplied business facts. Keep all required styling and scripts in this file so the local preview works." },
+  { id: "react", name: "React component workspace", summary: "Reusable components, typed data, and a local development server.", stack: "React · TypeScript · Vite · Tailwind", source: "https://ui.shadcn.com", guide: "Build modular React and TypeScript components in a Vite workspace. Inspect package versions and existing code before using APIs. Use shadcn or the linked free Watermelon registry as source references; adapt tokens and replace demo content with verified project data. For the isolated module preview, configure the local Vite server.cors origin to the literal string null (the opaque iframe origin), while keeping the server bound to loopback. Do not add allow-same-origin to the FRIDAY frame. Run the appropriate checks and provide the actual local development URL for preview; use the external local app for storage-dependent behavior." },
+  { id: "dioramas", name: "Dioramas scene website", summary: "A cinematic scene with a useful interaction, supplied assets, or procedural geometry.", stack: "Three.js · GSAP · Lenis · postprocessing", source: "https://github.com/blendi-remade/dioramas", guide: "Use Dioramas' brief → scene → review → revise workflow. Inspect its current src/core and docs/ENGINE.md before importing code. Verified core API: new Engine({canvas,fov,background,shadows,post}), engine.onTick((dt,t)=>...), engine.onResize((w,h,dpr)=>...), engine.start(), engine.paused, studioEnvironment(renderer,options), normalize(object,size,options), prepModel(object,renderer,options). Upstream package snapshot: three ^0.186.1, gsap ^3.15.0, lenis ^1.3.26, n8ao ^2.0.1, postprocessing ^6.39.5. Re-check compatibility when creating the generated project. Use supplied assets or procedural geometry; exclude gen.mjs, fal, Meshy, image generation, paid API calls, and FAL_KEY. Keep semantic HTML content, one discoverable interaction, touch controls, a reduced-motion/static fallback, and pause rendering while hidden or covered. Review the entire page at desktop and 390px mobile widths. For an isolated module preview, configure the local Vite server.cors origin to the literal string null and bind it to loopback; open the local app externally when storage is required. Provide the real local development URL. Do not copy upstream demo branding or invent customer facts." },
+] as const
+export type BuilderRecipeId = typeof builderRecipes[number]["id"]
+export const builderBlocks = [
+  { id: "offer", name: "Offer & contact action", description: "A clear offer with one real contact action.", source: "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/section", code: '<section aria-labelledby="offer"><h1 id="offer">BUSINESS_NAME</h1><p>VERIFIED_OFFER</p><a href="VERIFIED_CONTACT_URL">CONTACT_ACTION</a></section>' },
+  { id: "services", name: "Services grid", description: "Services supplied by the brief, without invented prices.", source: "https://ui.shadcn.com/docs/components/card", code: '<section aria-labelledby="services"><h2 id="services">Services</h2><ul class="services-grid"><li><h3>VERIFIED_SERVICE</h3><p>SOURCED_DESCRIPTION</p></li></ul></section>' },
+  { id: "contact", name: "Contact & location", description: "Sourced phone, address, hours, and directions.", source: "https://registry.watermelon.sh/r/contact-1.json", code: '<section aria-labelledby="contact"><h2 id="contact">Contact</h2><address>VERIFIED_ADDRESS</address><a href="tel:VERIFIED_PHONE">VERIFIED_PHONE</a><p>VERIFIED_OPENING_HOURS</p><a href="VERIFIED_DIRECTIONS_URL">Directions</a></section>' },
+  { id: "faq", name: "Questions & answers", description: "Accessible disclosure rows, with answers verified by the owner.", source: "https://registry.watermelon.sh/r/accordion-1.json", code: '<section aria-labelledby="questions"><h2 id="questions">Questions</h2><details><summary>VERIFIED_QUESTION</summary><p>VERIFIED_ANSWER</p></details></section>' },
+] as const
+export type BuilderBlockId = typeof builderBlocks[number]["id"]
+export function recipeFor(project: WorkspaceProject) {
+  return builderRecipes.find(recipe => project.tags.includes(`builder:${recipe.id}`)) || builderRecipes[0]
+}
+export function builderGuide(project: WorkspaceProject) { return recipeFor(project).guide }
+export async function prepareBuilderKit(project: WorkspaceProject, recipeId: BuilderRecipeId, blockIds: BuilderBlockId[]) {
+  const recipe = builderRecipes.find(item => item.id === recipeId)
+  if (!recipe) throw new Error("Choose a builder recipe")
+  await Promise.all([useProjects.getState().hydrate(), useDailyWork.getState().hydrate()])
+  const current = useProjects.getState().projects.find(item => item.id === project.id)
+  if (!current || useProjects.getState().loadError) throw new Error("Project is unavailable")
+  const blocks = builderBlocks.filter(block => blockIds.includes(block.id))
+  const updated = { ...current, tags: [...current.tags.filter(tag => !tag.startsWith("builder:")), `builder:${recipe.id}`], rootPath: current.rootPath || (isDesktop ? await invokeCommand<string>("workspace_create_website_folder", { id: current.id }) : undefined) }
+  useProjects.getState().saveProject(updated); await flushProjects()
+  const source = newCapture({ id: `${project.id}-builder-kit`, projectId: project.id, inbox: false, title: `${recipe.name} · builder kit`, sourceKind: "idea", text: `${recipe.stack}\n${recipe.guide}\nSource: ${recipe.source}\n\nSelected blocks (replace or omit every placeholder using verified facts; never publish placeholder content):\n${blocks.map(block => `${block.name}\nReference: ${block.source}\n${block.code}`).join("\n\n")}` })
+  await useDailyWork.getState().saveCapture(source)
+  const request = `Implement the next website draft for ${updated.name} using the selected ${recipe.name} recipe and attached builder kit. ${recipe.guide} ${updated.rootPath ? `Write the actual files in the attached working folder ${updated.rootPath}, following the file-tool confirmation requirements.` : "Help me attach a working folder first."} Use the project's business brief and selected sources. Research missing contact facts with business.search and business.read when available; verify identity and cite sources before including those facts. Report missing facts for owner review. Do not generate images, use paid services, send messages, deploy, or publish. After implementation, report changed files, checks, and how to preview the result.`
+  return { project: updated, sourceId: source.id, request }
+}
