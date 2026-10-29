@@ -11,7 +11,7 @@ export const ALGERIA_CITIES = [
 ]
 export type PlaceCategory = "all" | "shop" | "food" | "health" | "services" | "leisure" | "beauty" | "hotel"
 export type BusinessDetailField = "phone" | "email" | "website" | "address" | "openingHours"
-export interface BusinessDetailEvidence { value: string; sourceUrl: string; fetchedAt: number; provider: "wikidata" | "website" | "manual" }
+export interface BusinessDetailEvidence { value: string; sourceUrl: string; fetchedAt: number; provider: "wikidata" | "website" | "manual" | "google" }
 export interface MapPlace {
   id: string
   osmType?: "node" | "way" | "relation"
@@ -24,14 +24,21 @@ export interface MapPlace {
   tags: Record<string, string>
   provenance?: PlaceProvenance
   details?: Partial<Record<BusinessDetailField, BusinessDetailEvidence>>
+  locationPrecision?: "area"
+  researchSourceUrl?: string
+  researchQuery?: string
+  researchExcerpt?: string
 }
 const savedPlaceSchema = z.object({
   id: z.string().min(1), name: z.string().min(1), category: z.string(),
   lat: z.number().finite().min(-90).max(90), lng: z.number().finite().min(-180).max(180),
   osmType: z.enum(["node", "way", "relation"]).optional(), osmId: z.number().int().positive().optional(),
   address: z.string().optional(), tags: z.record(z.string()),
+  locationPrecision: z.literal("area").optional(),
+  researchSourceUrl: z.string().url().refine(value => Boolean(safePlaceWebsite(value))).optional(),
+  researchQuery: z.string().max(1000).optional(), researchExcerpt: z.string().max(4000).optional(),
   provenance: z.object({ source:z.string(), fetchedAt:z.number(), cached:z.boolean(), stale:z.boolean() }).optional(),
-  details: z.record(z.enum(["phone", "email", "website", "address", "openingHours"]), z.object({ value: z.string().max(2000), sourceUrl: z.string().url().refine(value => Boolean(safePlaceWebsite(value)), "HTTP or HTTPS source required"), fetchedAt: z.number().finite(), provider: z.enum(["wikidata", "website", "manual"]) })).optional(),
+  details: z.record(z.enum(["phone", "email", "website", "address", "openingHours"]), z.object({ value: z.string().max(2000), sourceUrl: z.string().url().refine(value => Boolean(safePlaceWebsite(value)), "HTTP or HTTPS source required"), fetchedAt: z.number().finite(), provider: z.enum(["wikidata", "website", "manual", "google"]) })).optional(),
 })
 export function parseSavedPlaces(data: unknown): MapPlace[] { return z.array(savedPlaceSchema).parse(data) }
 const tagsSchema = z.record(z.string())
@@ -172,6 +179,7 @@ export async function nearbyPlaces(center: [number, number], category: PlaceCate
     Math.hypot(a.lat - lat, (a.lng - lng) * Math.cos(lat * Math.PI / 180)) - Math.hypot(b.lat - lat, (b.lng - lng) * Math.cos(lat * Math.PI / 180)))
 }
 export async function placeDetails(place: MapPlace, signal: AbortSignal): Promise<MapPlace> {
+  if (place.locationPrecision === "area") return place
   if (place.osmType && place.osmId) {
     try {
     const raw = await fetchJson(`https://www.openstreetmap.org/api/0.6/${place.osmType}/${place.osmId}.json`, signal)

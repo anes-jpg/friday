@@ -61,7 +61,7 @@ export async function searchBusinessSources(place: MapPlace) {
   if (!isDesktop) throw new Error("Free source search runs in the Windows app. Use the browser search links here.")
   return invokeCommand<Array<{ title: string; url: string }>>("search_business_sources", { query: `${place.name} ${place.address || ""} contact téléphone site officiel` })
 }
-export function verifiedBusiness(place: MapPlace, values: Partial<Record<BusinessDetailField, string>>, source: string, provider: "website" | "manual" = "manual"): MapPlace {
+export function verifiedBusiness(place: MapPlace, values: Partial<Record<BusinessDetailField, string>>, source: string, provider: "website" | "manual" | "google" = "manual"): MapPlace {
   const sourceUrl = safePlaceWebsite(source)
   if (!sourceUrl) throw new Error("Add a public source URL for the details you verified.")
   const details = { ...place.details }

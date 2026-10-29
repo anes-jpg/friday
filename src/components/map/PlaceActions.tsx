@@ -8,12 +8,13 @@ import { useSavedPlaces } from "@/lib/saved-places"
 import { useProjects, emptyProjectDraft, projectFromDraft, flushProjects, type ProjectItem } from "@/lib/projects"
 import type { MapPlace } from "@/lib/places"
 import { WebsiteProjectDialog } from "./WebsiteProjectDialog"
+import { placeSourceLink, businessAddress, businessPhone, businessHours } from "@/lib/business-workflow"
 
 export function placeLink(place: MapPlace) {
-  return place.osmType && place.osmId ? `https://www.openstreetmap.org/${place.osmType}/${place.osmId}` : `https://www.openstreetmap.org/?mlat=${place.lat}&mlon=${place.lng}`
+  return placeSourceLink(place)
 }
 export function placeNote(place: MapPlace) {
-  return [`Place: ${place.name}`, `Address: ${place.address || "Not supplied"}`, `Phone: ${place.tags.phone || place.tags["contact:phone"] || "Not supplied"}`, `Opening hours (source listing): ${place.tags.opening_hours || "Not supplied"}`, `Source: ${placeLink(place)}`, place.provenance ? `Retrieved: ${new Date(place.provenance.fetchedAt).toISOString()}${place.provenance.stale ? " (stale cache)" : ""}` : "Retrieval time unavailable"].join("\n")
+  return [`Place: ${place.name}`, `Address: ${businessAddress(place) || "Not supplied"}`, `Phone: ${businessPhone(place) || "Not supplied"}`, `Opening hours (source listing): ${businessHours(place) || "Not supplied"}`, `Source: ${placeLink(place)}`, ...(place.locationPrecision === "area" ? ["Business coordinates are unverified", place.researchExcerpt || ""] : []), place.provenance ? `Retrieved: ${new Date(place.provenance.fetchedAt).toISOString()}${place.provenance.stale ? " (stale cache)" : ""}` : "Retrieval time unavailable"].join("\n")
 }
 export function PlaceActions({ place }: { place: MapPlace }) {
   const [websiteOpen, setWebsiteOpen] = useState(false)

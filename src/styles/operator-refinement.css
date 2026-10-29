@@ -1,7 +1,25 @@
 /* Bounded desktop instruments: headers stay put; the working pane scrolls. */
 .block-reveal { min-width: 0; --ascii-accent: hsl(var(--ink)); --ascii-glyph: hsl(var(--muted)); }
 .workspace-content:is([data-workspace-tab=memory],[data-workspace-tab=settings],[data-workspace-tab=models]) { overflow: hidden; }
-.block-pending { padding: 24px; display: flex; flex-direction: column; gap: 24px; min-height: 160px; }
+.block-pending { padding: 16px; gap: 16px; border-bottom: 1px solid hsl(var(--line)); }
+.block-pending .ascii-glyphs pre { font-size: 11px; }
+.workspace-opening-notice { padding: 16px 24px; flex-shrink: 0; }
+.workspace-opening-notice .ascii-glyphs pre { font-size: 11px; }
+.google-business-search { display: flex; flex-direction: column; gap: 8px; padding: 16px; border: 1px solid hsl(var(--line)); border-radius: 16px; background: hsl(var(--surface)); }
+.google-business-search p { margin: 0; font-size: 12px; line-height: 1.5; color: hsl(var(--muted)); }
+.google-business-search label { font-size: 12px; }
+.google-search-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.google-import-results, .google-lead-review { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.google-import-results .business-source-results { max-height: 320px; overflow: auto; }
+.google-import-results .business-source-results li { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.google-import-results .business-source-results p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.google-contact-candidates { display: flex; flex-wrap: wrap; gap: 8px; }
+.google-contact-candidates p { width: 100%; }
+.google-page-excerpt { border: 1px solid hsl(var(--line)); border-radius: 8px; padding: 8px; }
+.google-page-excerpt summary, .google-discovery-disclosure summary { cursor: pointer; font-size: 12px; }
+.google-page-excerpt pre { font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; margin: 8px 0 0; }
+.google-discovery-disclosure { padding: 8px 0; }
+.google-discovery-disclosure[open] > summary { margin-bottom: 8px; }
 .ascii-loader.is-working .ascii-glyphs { color: hsl(var(--ink)); }
 .ascii-loader-compact .ascii-glyphs pre { font-size: 10px; }
 .records-workspace.memory-workspace { display: flex; flex-direction: column; overflow: hidden; padding: 24px; }

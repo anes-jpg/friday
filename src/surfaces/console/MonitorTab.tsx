@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, lazy } from "react"
 import { Camera, Plus, Video, Maximize2, Minimize2, Play, Pause, Circle, Square, Trash2, ArrowUpRight, Download, X, Search } from "lucide-react"
-import { useFriday } from "@/lib/store"
+import { useFriday, type ConsoleTab } from "@/lib/store"
 import { useMonitoring, cameraStream, recordingBlob, type CameraSource, type Recording } from "@/lib/monitoring"
 import { cn } from "@/lib/utils"
 const GodsEyeSurface = lazy(() => import("@/surfaces/os/GodsEyeSurface").then((module) => ({ default: module.GodsEyeSurface })))
@@ -31,7 +31,7 @@ function CameraPreview({ source, focused, onFocus }: { source: CameraSource; foc
     </article>
   )
 }
-export function MonitorTab({ view }: { view?: "cameras" | "recordings" | "alerts" }) {
+export function MonitorTab({ view }: { view?: ConsoleTab }) {
   const storeTab = useFriday((s) => s.tab)
   const tab = view ?? storeTab
   const { sources, recordings, events, error, hydrate } = useMonitoring()
@@ -59,7 +59,7 @@ export function MonitorTab({ view }: { view?: "cameras" | "recordings" | "alerts
     } catch (error) { setFormError(String(error)) }
     finally { setBusyRecording(null) }
   }
-  if (tab === "map" || tab === "hud") return <React.Suspense fallback={<div className="workspace-loading">Opening map…</div>}><GodsEyeSurface /></React.Suspense>
+  if (tab === "map" || tab === "hud") return <GodsEyeSurface />
   return (
     <div className="monitor-workspace">
       <header className="monitor-heading"><div><span className="instrument-label">Monitor / {tab === "alerts" ? "Activity" : tab}</span><h1 className="page-heading">{tab === "cameras" ? "Your eyes on the room." : tab === "recordings" ? "Recorded moments." : "What happened."}</h1><p>{tab === "cameras" ? "Connect your own cameras. Recording starts only when you ask." : tab === "recordings" ? `${recordings.length} recordings · ${(storedBytes / 1024 ** 3).toFixed(2)} GB stored on this device` : "Camera connections, recording events, and errors."}</p></div>

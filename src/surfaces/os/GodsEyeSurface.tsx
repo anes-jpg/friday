@@ -97,7 +97,7 @@ export const GodsEyeSurface: React.FC<GodsEyeSurfaceProps> = ({
   const [locationError, setLocationError] = useState<string | null>(null)
   const selectPlace = (place: MapPlace | null) => {
     setSelectedPlace(place)
-    if (place) { setPlacesOpen(true); setMapCenter([place.lng, place.lat]); setMapZoom(16) }
+    if (place) { setPlacesOpen(true); if (place.locationPrecision !== "area") { setMapCenter([place.lng, place.lat]); setMapZoom(16) } }
   }
   const locate = () => {
     setLocationError(null)
@@ -319,7 +319,7 @@ export const GodsEyeSurface: React.FC<GodsEyeSurfaceProps> = ({
     setMapCenter(ALGERIA_CENTER)
   }
 
-  const mapMarkers = useMemo<MapMarkerData[]>(() => [...markers, ...visiblePlaces.slice(0, 200).map((place, index) => ({ id: `place:${place.id}`, lat: place.lat, lng: place.lng, title: place.name, active: selectedPlace?.id === place.id, showLabel: selectedPlace?.id === place.id || (index < 20 && place.name !== "Unnamed place") })), ...(selectedPlace && !visiblePlaces.slice(0, 200).some(place => place.id === selectedPlace.id) ? [{ id: `place:${selectedPlace.id}`, lat: selectedPlace.lat, lng: selectedPlace.lng, title: selectedPlace.name, active: true }] : [])], [markers, visiblePlaces, selectedPlace])
+  const mapMarkers = useMemo<MapMarkerData[]>(() => [...markers, ...visiblePlaces.filter(place => place.locationPrecision !== "area").slice(0, 200).map((place, index) => ({ id: `place:${place.id}`, lat: place.lat, lng: place.lng, title: place.name, active: selectedPlace?.id === place.id, showLabel: selectedPlace?.id === place.id || (index < 20 && place.name !== "Unnamed place") })), ...(selectedPlace && selectedPlace.locationPrecision !== "area" && !visiblePlaces.slice(0, 200).some(place => place.id === selectedPlace.id) ? [{ id: `place:${selectedPlace.id}`, lat: selectedPlace.lat, lng: selectedPlace.lng, title: selectedPlace.name, active: true }] : [])], [markers, visiblePlaces, selectedPlace])
 
   return (
     <div className={cn("relative w-full h-full overflow-hidden bg-[#000000]", className)}>

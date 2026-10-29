@@ -1,4 +1,4 @@
-import React, { lazy, useEffect, useState } from "react"
+import React, { lazy, useDeferredValue, useEffect, useState } from "react"
 import { useFridayStore } from "@/lib/store"
 import { invokeCommand, isDesktop } from "@/lib/ipc"
 import { AtmosphericField } from "@/components/layout/AtmosphericField"
@@ -9,7 +9,7 @@ import { Minus, Square, X, Copy, Maximize2, Scan, Search } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useWindowMode } from "@/lib/window-mode"
 import { useDailyWork } from "@/lib/daily-work"
-import { BlockReveal } from "@/components/ui/block-reveal"
+import { AsciiLoader } from "@/components/ui/ascii-loader"
 
 const BeastTab = lazy(() => import("./BeastTab").then((m) => ({ default: m.BeastTab })))
 const BrowserTab = lazy(() => import("./BrowserTab").then((m) => ({ default: m.BrowserTab })))
@@ -27,6 +27,9 @@ const OperationsTab = lazy(() => import("./OperationsTab").then((m) => ({ defaul
 export interface ConsoleProps { embedded?: boolean }
 export const Console: React.FC<ConsoleProps> = ({ embedded = false }) => {
   const tab = useFridayStore((s) => s.tab)
+  const displayedTab = useDeferredValue(tab)
+  const opening = displayedTab !== tab
+  const routeLabel = Object.values(workspaceRoutes).flat().find(route => route.id === tab)?.label || "Workspace"
   const launchReady = useDailyWork(state => state.launchReady)
   const setTab = useFridayStore((s) => s.setTab)
   const orb = useFridayStore((s) => s.orb)
@@ -78,21 +81,22 @@ export const Console: React.FC<ConsoleProps> = ({ embedded = false }) => {
             {workspaceRoutes[group].map((route) => <button type="button" key={route.id} aria-current={tab === route.id ? "page" : undefined} className={cn(tab === route.id && "is-selected")} onClick={() => setTab(route.id)}>{route.label}</button>)}
           </nav>
         )}
-        <section className="workspace-content" data-workspace-tab={tab} aria-label={groupLabel}>
-          <div className="workspace-route" key={group === "monitor" ? "monitor" : tab}><React.Suspense fallback={<BlockReveal loading label="Opening workspace" lines={8} className="workspace-loading" />}>
-            {tab === "chat" && <ChatTab />}
-            {tab === "browser" && <BrowserTab />}
-            {tab === "automations" && <AutomationsTab />}
-            {tab === "memory" && <MemoryTab />}
-            {tab === "review" && <ReviewTab />}
-            {tab === "skills" && <SkillsTab />}
-            {tab === "audit" && <AuditTab />}
-            {(tab === "settings" || tab === "models") && <SettingsTab />}
-            {tab === "beast" && <BeastTab />}
-            {tab === "delphi" && <DelphiTab />}
-            {tab === "projects" && <ProjectsTab />}
-            {(tab === "analytics" || tab === "history" || tab === "telemetry") && <OperationsTab view={tab} />}
-            {group === "monitor" && tab !== "telemetry" && <MonitorTab />}
+        {opening && <AsciiLoader label={`Opening ${routeLabel}`} className="workspace-opening-notice" />}
+        <section className="workspace-content" data-workspace-tab={displayedTab} aria-label={groupForRoute(displayedTab)} aria-busy={opening}>
+          <div className="workspace-route"><React.Suspense fallback={<AsciiLoader label={`Opening ${routeLabel}`} detail="The workspace controls remain available." className="workspace-opening-notice" />}>
+            {displayedTab === "chat" && <ChatTab />}
+            {displayedTab === "browser" && <BrowserTab />}
+            {displayedTab === "automations" && <AutomationsTab />}
+            {displayedTab === "memory" && <MemoryTab />}
+            {displayedTab === "review" && <ReviewTab />}
+            {displayedTab === "skills" && <SkillsTab />}
+            {displayedTab === "audit" && <AuditTab />}
+            {(displayedTab === "settings" || displayedTab === "models") && <SettingsTab />}
+            {displayedTab === "beast" && <BeastTab />}
+            {displayedTab === "delphi" && <DelphiTab />}
+            {displayedTab === "projects" && <ProjectsTab />}
+            {(displayedTab === "analytics" || displayedTab === "history" || displayedTab === "telemetry") && <OperationsTab view={displayedTab} />}
+            {groupForRoute(displayedTab) === "monitor" && displayedTab !== "telemetry" && <MonitorTab view={displayedTab} />}
           </React.Suspense></div>
         </section>
       </div>

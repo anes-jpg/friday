@@ -10,6 +10,7 @@ pub mod workspace_commands;
 pub mod daily_work;
 pub mod places;
 pub mod business_research;
+pub mod business_search;
 pub mod health;
 
 use agent::{AgentCore, PendingPlan, TurnResult};
@@ -2328,11 +2329,19 @@ pub fn run() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(|invoke| {
+            // External research pages must never call desktop operator commands.
+            if invoke.message.webview_ref().label().starts_with("business-search-") {
+                invoke.resolver.reject("Google research pages cannot invoke FRIDAY commands");
+                return true;
+            }
+            let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
             submit_utterance,
             places::get_place_data,
             business_research::read_business_site,
             business_research::search_business_sources,
+            business_search::open_business_search,
+            business_search::capture_business_search,
             places::cancel_place_request,
             confirm_plan,
             cancel_run,
@@ -2488,7 +2497,9 @@ log_frontend_error,
             commit_project_changes,
             inspect_project_metadata,
             init_project_git
-        ])
+            ];
+            handler(invoke)
+        })
         .setup(|app| {
             let state = app.state::<AppState>();
             if let Ok(mut handle) = state.agent.app.lock() { *handle = Some(app.handle().clone()); }

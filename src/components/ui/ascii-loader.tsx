@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
+import { useSettings } from "@/lib/settings"
 
 const bands = ["[ # : . . . : # ]", "[ : # : . : # : ]", "[ . : # : # : . ]", "[ . . : # : . . ]"]
 export const asciiCoreFrames = Array.from({ length: 4 }, (_, frame) =>
@@ -16,8 +17,10 @@ export function AsciiLoader({ label, detail, variant = "compact", active = true,
   label: string; detail?: string; variant?: "compact" | "core"; active?: boolean; className?: string
 }) {
   const [frame, setFrame] = useState(0)
-  const [reduced, setReduced] = useState(false)
+  const userReduced = useSettings(state => state.saved.appearance.reducedMotion)
+  const [reduced, setReduced] = useState(() => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches)
   useEffect(() => {
+    if (typeof window.matchMedia !== "function") return
     const media = window.matchMedia("(prefers-reduced-motion: reduce)")
     const update = () => setReduced(media.matches)
     update()
@@ -25,10 +28,10 @@ export function AsciiLoader({ label, detail, variant = "compact", active = true,
     return () => media.removeEventListener("change", update)
   }, [])
   useEffect(() => {
-    if (!active || reduced) return
+    if (!active || reduced || userReduced) return
     const timer = setInterval(() => setFrame(current => (current + 1) % 4), 180)
     return () => clearInterval(timer)
-  }, [active, reduced])
+  }, [active, reduced, userReduced])
   return <div className={cn("ascii-loader", `ascii-loader-${variant}`, active && "is-working", className)} role="status">
     <div className="ascii-glyphs" aria-hidden="true">{(variant === "core" ? asciiCoreFrames : bands).map((glyphs, index) => <pre key={index} className={index === (active ? frame : 0) ? "is-visible" : undefined}>{glyphs}</pre>)}</div>
     <div className="ascii-caption"><span>{label}</span>{detail && <small>{detail}</small>}</div>

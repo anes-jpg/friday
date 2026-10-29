@@ -6,6 +6,7 @@ import { builderGuide, type BuilderRecipeId } from "./builder-recipes"
 
 export type WebsiteFilter = "all" | "not-listed" | "listed"
 export function placeSourceLink(place: MapPlace): string {
+  if (place.researchSourceUrl && safePlaceWebsite(place.researchSourceUrl)) return safePlaceWebsite(place.researchSourceUrl) || ""
   return place.osmType && place.osmId ? `https://www.openstreetmap.org/${place.osmType}/${place.osmId}` : `https://www.openstreetmap.org/?mlat=${place.lat}&mlon=${place.lng}`
 }
 export function businessWebsite(place: MapPlace) { return safePlaceWebsite(place.details?.website?.value || place.tags.website || place.tags["contact:website"]) }
@@ -23,6 +24,7 @@ export function businessWebsiteStatus(place: MapPlace): "listed" | "not-listed" 
   return businessWebsite(place) ? "listed" : place.osmType ? "not-listed" : "unknown"
 }
 export function isBusiness(place: MapPlace): boolean {
+  if (place.locationPrecision === "area" && place.researchSourceUrl) return true
   if (place.tags.shop || place.tags.office || place.tags.craft) return true
   return ["restaurant", "cafe", "fast_food", "bar", "pub", "pharmacy", "dentist", "doctors", "clinic", "bank", "fuel", "cinema", "theatre", "hotel", "motel", "guest_house", "hostel", "beauty", "hairdresser", "bakery", "fitness_centre", "sports_centre", "bowling_alley"].includes(place.tags.amenity || place.tags.tourism || place.tags.leisure || place.category)
 }
@@ -30,7 +32,7 @@ export function filterBusinesses(places: MapPlace[], website: WebsiteFilter, con
   return places.filter(place => isBusiness(place) && (!contactOnly || Boolean(businessPhone(place) || businessEmail(place))) && (website === "all" || businessWebsiteStatus(place) === website))
 }
 export function businessBrief(place: MapPlace): string {
-  return JSON.stringify({ name: place.name, category: place.category, address: businessAddress(place) || null, phone: businessPhone(place) || null, email: businessEmail(place) || null, website: businessWebsite(place) || null, websiteObservation: businessWebsite(place) ? "Website listed in source" : "No usable website listed in this source; verify independently", openingHours: businessHours(place) || null, fieldSources: place.details || {}, coordinates: { lat: place.lat, lng: place.lng }, source: placeSourceLink(place), listingProvider: place.provenance?.source || "OpenStreetMap map listing", retrievedAt: place.provenance ? new Date(place.provenance.fetchedAt).toISOString() : null, stale: place.provenance?.stale ?? null }, null, 2)
+  return JSON.stringify({ name: place.name, category: place.category, address: businessAddress(place) || null, phone: businessPhone(place) || null, email: businessEmail(place) || null, website: businessWebsite(place) || null, websiteObservation: businessWebsite(place) ? "Website listed in source" : "No usable website listed in this source; verify independently", openingHours: businessHours(place) || null, fieldSources: place.details || {}, coordinates: place.locationPrecision === "area" ? null : { lat: place.lat, lng: place.lng }, searchArea: place.locationPrecision === "area" ? { lat: place.lat, lng: place.lng, note: "Search context only; business coordinates are unknown" } : undefined, researchQuery: place.researchQuery, quotedSearchText: place.researchExcerpt, source: placeSourceLink(place), listingProvider: place.provenance?.source || "OpenStreetMap map listing", retrievedAt: place.provenance ? new Date(place.provenance.fetchedAt).toISOString() : null, stale: place.provenance?.stale ?? null }, null, 2)
 }
 export function websiteBuildRequest(project: WorkspaceProject): string {
   return `Build a complete, responsive business website for this project using the selected business sources and builder kit. ${builderGuide(project)} ${project.rootPath ? `Use the attached working folder: ${project.rootPath}. Write the actual files using the available file tools and follow their confirmation requirements.` : "First help me attach a working folder; then write the actual website files."} Include a clear offer, services, contact details that the sources actually supply, and a location section. Use the project's response language for customer-facing copy. Prefer the latest verified-details capture over the original listing when they differ. Research missing facts with business.search and business.read when available, checking the business identity and citing the source. Keep unknown facts visible for review. Do not invent reviews, prices, team members, photos, credentials, or opening hours. Do not generate images or use paid services. Do not send messages to the business, deploy, or publish. After writing files, report what changed, how to preview it, and what still needs owner verification.`
