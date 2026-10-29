@@ -1076,13 +1076,7 @@ export async function detectProjectScripts(rootPath: string): Promise<ProjectScr
     }
   } catch {}
 
-  // Fallback defaults if no package.json or unreadable
-  return [
-    { name: "dev", command: "npm run dev", category: "dev" },
-    { name: "build", command: "npm run build", category: "build" },
-    { name: "test", command: "npm test", category: "test" },
-    { name: "status", command: "git status", category: "other" },
-  ]
+  return []
 }
 
 /* ── Persistent Storage Accessors ─────────────────────────────────────────── */

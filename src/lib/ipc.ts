@@ -662,6 +662,6 @@ export const ipcRecordEpisodicEvent = (data: {
 export const ipcActuateUiaElement = (elementId: string, action: string, val?: string) =>
   invokeCommand<boolean>("actuate_uia_element", { elementId, action, val })
 
-export const ipcTerminateProcessSocket = (pid: number, processName: string) =>
-  invokeCommand<boolean>("terminate_process_socket", { pid, processName })
+export const ipcTerminateProcessSocket = (pid: number, processName: string, simulated = false) =>
+  invokeCommand<boolean>("terminate_process_socket", { pid, processName, simulated })
 

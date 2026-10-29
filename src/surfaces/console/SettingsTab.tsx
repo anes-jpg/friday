@@ -5,8 +5,9 @@ import { invokeCommand, isDesktop } from "@/lib/ipc"
 import { ipcGetPiperStatus } from "@/lib/piper"
 import { PIPER_VOICES } from "@/lib/kokoro"
 import { useWindowMode } from "@/lib/window-mode"
-import { Plus, Search, ArrowUpRight, Eye, EyeOff, Trash2, Check, RefreshCw, Play, Square, Monitor, Mic, Server, Volume2, Shield, Camera, Activity } from "lucide-react"
+import { Plus, Search, Clock, ArrowUpRight, Eye, EyeOff, Trash2, Check, RefreshCw, Play, Square, Monitor, Mic, Server, Volume2, Shield, Camera, Activity } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { DailyPreferences } from "@/components/work/DailyPreferences"
 import { SettingsHealth } from "./SettingsHealth"
 
 const speechVoices = Array.from(new Map(Object.values(PIPER_VOICES).map((voice) => [voice.id, voice])).values())
@@ -18,6 +19,7 @@ const categories = [
   { id: "appearance", label: "Appearance", icon: Monitor, description: "Theme, motion, fullscreen and control room" },
   { id: "monitoring", label: "Monitoring", icon: Camera, description: "Camera preview limits, recording storage and retention" },
   { id: "security", label: "Privacy & spend", icon: Shield, description: "Credentials, confirmations and daily spend" },
+  { id: "daily", label: "Daily workflow", icon: Clock, description: "Quick capture shortcut, timezone and launch view" },
   { id: "diagnostics", label: "Diagnostics", icon: Activity, description: "Hardware and local service readiness" },
 ] as const
 type Category = typeof categories[number]["id"]
@@ -147,6 +149,7 @@ export function SettingsTab() {
             <FormRow title="Action confirmation" description="Routine actions run directly. Sensitive actions require a preview; high-risk actions require “confirm”."><span className="instrument-label">Three tiers</span></FormRow>
             <FormRow title="Mobile access" description="Remote access is optional. No gateway is started by this interface."><span className="instrument-label">Off</span></FormRow>
           </div>}
+          {category === "daily" && <DailyPreferences />}
           {category === "diagnostics" && <div className="settings-section">
             <SettingsHealth />
             <button type="button" className="quiet-action" onClick={() => void checkDiagnostics()}><RefreshCw size={14} />Check services</button>

@@ -5,6 +5,20 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all="camelCase")]
 pub struct ReminderSchedule { pub kind:String,pub time:String,pub date:Option<String> }
 
+/// New one-time reminders require one unambiguous wall-clock occurrence.
+/// Existing recurrence calculation continues to support legacy schedules.
+pub fn validate_new_occurrence(schedule:&ReminderSchedule,timezone:&str)->Result<(),String> {
+    if schedule.kind!="once" {return Ok(());}
+    let zone:chrono_tz::Tz=timezone.parse().map_err(|_|"Choose a valid IANA timezone".to_string())?;
+    let date=NaiveDate::parse_from_str(schedule.date.as_deref().ok_or("Choose a one-time date")?,"%Y-%m-%d").map_err(|_|"Choose a valid date".to_string())?;
+    let time=NaiveTime::parse_from_str(&schedule.time,"%H:%M").map_err(|_|"Choose a time as HH:MM".to_string())?;
+    match zone.from_local_datetime(&date.and_time(time)) {
+        LocalResult::Single(_)=>Ok(()),
+        LocalResult::Ambiguous(_,_)=>Err("This local time occurs twice. Choose another time.".into()),
+        LocalResult::None=>Err("This local time does not exist in the selected timezone.".into()),
+    }
+}
+
 pub fn next_occurrence(schedule:&ReminderSchedule,timezone:&str,after:i64)->Result<i64,String> {
     let zone:chrono_tz::Tz=timezone.parse().map_err(|_|"Choose a valid IANA timezone, such as Africa/Algiers".to_string())?;
     let time=NaiveTime::parse_from_str(&schedule.time,"%H:%M").map_err(|_|"Choose a time as HH:MM".to_string())?;

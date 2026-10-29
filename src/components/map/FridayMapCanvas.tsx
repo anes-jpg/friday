@@ -9,12 +9,19 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from "react"
+import { invokeCommand } from "@/lib/ipc"
 import * as maplibregl from "maplibre-gl"
+import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url"
 import "maplibre-gl/dist/maplibre-gl.css"
 import { getFridayMapStyle, registerPmTilesProtocol, type FridayMapPreset } from "@/lib/map-style"
 import { Compass, ZoomIn, ZoomOut, Layers, Crosshair, Satellite, Moon, Map } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ALGERIA_CENTER, type MapPlace } from "@/lib/places"
+
+// Vite bundles MapLibre into an application chunk, so its sibling-file worker
+// lookup resolves beside that chunk instead of beside MapLibre. Pin the worker
+// to Vite's emitted asset URL for both dev and packaged Tauri builds.
+maplibregl.setWorkerUrl(maplibreWorkerUrl)
 
 export interface MapMarkerData {
   id: string
@@ -87,6 +94,7 @@ export const FridayMapCanvas: React.FC<FridayMapCanvasProps> = ({
   const [currentCenter, setCurrentCenter] = useState<[number, number]>(center)
   const [currentPitch, setCurrentPitch] = useState(pitch)
   const [mapLoaded, setMapLoaded] = useState(false)
+  const [mapError, setMapError] = useState<string | null>(null)
   const [activeStyle, setActiveStyle] = useState<FridayMapPreset>(stylePreset)
 
   // Keep internal style in sync with external prop
@@ -172,7 +180,16 @@ export const FridayMapCanvas: React.FC<FridayMapCanvasProps> = ({
 
     map.on("load", () => {
       setMapLoaded(true)
+      setMapError(null)
+      map.resize()
       syncRoutes(map, routes)
+    })
+
+    map.on("error", (event) => {
+      const message = event.error?.message || "Unable to load basemap tiles. Check network/CSP access."
+      setMapError(message)
+      console.error("[FridayMapCanvas] MapLibre error:", event.error)
+      void invokeCommand("log_frontend_error", { source: "FridayMapCanvas", message })
     })
 
     map.on("moveend", () => {
@@ -364,7 +381,12 @@ export const FridayMapCanvas: React.FC<FridayMapCanvasProps> = ({
       )}
     >
       <div ref={containerRef} className="w-full h-full" />
-
+      {mapError && (
+        <div role="alert" className="absolute left-1/2 top-3 z-30 flex max-w-[92%] -translate-x-1/2 items-center gap-3 rounded-lg border border-red-400/30 bg-[#05070a]/90 px-3 py-2 text-xs leading-snug text-red-100 shadow-2xl">
+          <span className="truncate">{mapError}</span>
+          <button type="button" onClick={() => setMapError(null)} aria-label="Dismiss map error" className="cursor-pointer text-red-200/70 transition-opacity hover:text-red-100">×</button>
+        </div>
+      )}
       {/* Celestial Viewport Cardinal Markings (Reference 1 Aesthetic) */}
       <div className="absolute inset-0 pointer-events-none z-10 flex flex-col justify-between p-3">
         {/* Top & Corner Ticks */}

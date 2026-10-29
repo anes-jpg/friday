@@ -1,4 +1,6 @@
 import { automationFromSaved, type SavedAutomation } from "./automations"
+import { useDailyWork } from "./daily-work"
+import { useProjects } from "./projects"
 /** FRIDAY store — Zustand state with real AI dispatch & voice synthesis.
  *
  * Shared across Console and all surfaces, powered by Claude's clean domain model
@@ -62,7 +64,8 @@ import {
   GOLDEN_PHRASES,
 } from "./voice"
 import { PHRASE_BANK_CATALOG, preloadPhraseBank, playInstantAcousticCue } from "./phrasebank"
-import { executeAiTurn } from "./ai"
+import { executeAiTurn, getAiConfig } from "./ai"
+import { useSettings } from "./settings"
 import { flushWorkspaceWrites, type RunEvent } from "./workspace-native"
 
 interface PendingRequest { id: string; threadId: string; runId?: string; cancelled: boolean; lastSequence?:number }
@@ -76,6 +79,10 @@ export function acceptRunEvent(event: RunEvent) {
   if (event.sequence <= (request.lastSequence || 0)) return
   request.lastSequence=event.sequence
   request.runId = event.run_id
+  if (["completed", "cancelled", "interrupted", "failed"].includes(event.status)) {
+    const summary = typeof event.detail.show === "string" ? event.detail.show : typeof event.detail.message === "string" ? event.detail.message : typeof event.detail.error === "string" ? event.detail.error : `Run ${event.status}. Completed actions remain in run history.`
+    useFriday.setState(state => ({ threads: state.threads.map(thread => ({ ...thread, messages: thread.messages.map(message => message.runId === event.run_id || message.pending_plan?.run_id === event.run_id ? { ...message, pendingPlan: null, pending_plan: null, show: summary, content: summary } : message) })) }))
+  }
   if (request.cancelled) { void invokeCommand("cancel_run", { runId: event.run_id }).catch(() => {}); return }
   if (visibleRequestId !== request.id || useFriday.getState().activeThreadId !== request.threadId) return
   const store = useFriday.getState()
@@ -152,6 +159,9 @@ export type ConsoleTab =
   | "audit"
   | "settings"
   | "projects"
+  | "analytics"
+  | "history"
+  | "telemetry"
 
 const EMPTY_UTTERANCE: Utterance = {
   heard: "",
@@ -1325,6 +1335,7 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
       try {
         store.setOrb("thinking")
         const confirmed = await invokeCommand<PendingPlanBackend>("confirm_plan", { planId: targetId, confirmation: "confirm" })
+        if (!confirmed) throw new Error("Confirmation requires the Windows app.")
         store.resetUtterance()
         store.setOrb("idle")
 
@@ -1341,9 +1352,10 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
                     : "\n\n> \u2705 **Plan Confirmed and Executed**"
                   return {
                     ...m,
-                    pending_plan: null,
-                    pendingPlan: null,
-                    show: (m.show || m.content) + executionDetails,
+                    pending_plan: confirmed.status === "awaiting_confirm" ? confirmed : null,
+                    pendingPlan: confirmed.status === "awaiting_confirm" ? confirmed : null,
+                    show: confirmed.status === "awaiting_confirm" ? confirmed.diff || confirmed.result_summary || "Review the next step." : executionDetails.trim(),
+                    content: confirmed.status === "awaiting_confirm" ? confirmed.diff || "Review the next step." : executionDetails.trim(),
                   }
                 }
                 return m
@@ -1352,6 +1364,7 @@ export const useFriday: UseBoundStore<StoreApi<State>> = create<State>((set) => 
           }),
         }))
         playInstantAcousticCue()
+        if (isDesktop) { await useProjects.getState().hydrate(true); await useDailyWork.getState().hydrate(true) }
       } catch (e) {
         console.warn("Failed to confirm plan:", e)
         store.setResult({ say: String(e instanceof Error ? e.message : e), show: "The plan was not completed. Review its run history before retrying.", delivery: { emotion: "calm-concerned", pace: 1, energy: 0.6, pause_before_ms: 0, emphasis: [] } })
@@ -1426,16 +1439,59 @@ export function formatAutoThreadTitle(prompt: string): string {
 }
 
 /** Dispatches a real message turn into the active thread and queries the configured provider. */
-export async function sendChatMessage(text: string, expandedMode: boolean = false, context: { projectId?: string; providerProfileId?: string; threadId?: string } = {}) {
+export async function sendChatMessage(text: string, expandedMode: boolean = false, context: { projectId?: string; providerProfileId?: string; threadId?: string; sourceIds?: string[]; taskId?: string; routineId?: string; toolCall?: { name: string; args: Record<string, unknown> } } = {}) {
   const clean = text.trim()
   if (!clean) return
+  if (/^(quick capture|capture)(?:\s|$)/i.test(clean) && !context.routineId) {
+    const material = clean.replace(/^(quick capture|capture)\s*/i, "")
+    useDailyWork.getState().openCapture({ text: material, sourceKind: "idea" })
+    try {
+      const inputs = await import("./capture-input")
+      if (/^(?:the )?clipboard$/i.test(material)) useDailyWork.setState({ draft: { text: await inputs.readSharedClipboard(), sourceKind: "clipboard" } })
+      else if (/^(?:the )?screen(?: once)?$/i.test(material)) useDailyWork.setState({ draft: await inputs.captureScreenText() })
+      else if (/^https?:\/\/\S+$/i.test(material)) useDailyWork.setState({ draft: await inputs.captureWebpage(material) })
+    } catch (failure) { useDailyWork.setState(current => ({ draft: { ...current.draft, extractionError: String(failure) } })) }
+    useFriday.getState().setOrb("idle")
+    return
+  }
+  if (/^remind me\b/i.test(clean) && !context.routineId) {
+    useDailyWork.setState({ reminderDraft: { name: clean.replace(/^remind me\s*/i, "").slice(0, 160), message: clean.replace(/^remind me\s*/i, ""), phrase: clean, sourceIds: [...useDailyWork.getState().selectedSourceIds], projectId: context.projectId || useDailyWork.getState().contextProjectId } })
+    useFriday.getState().setOrb("idle")
+    return
+  }
+  if (/^(continue|where did i leave off)/i.test(clean)) {
+    const resume = useDailyWork.getState().resumes.find(record => clean.toLowerCase().includes(record.name.toLowerCase()))
+    if (resume) { const { resumeProject } = await import("./work-navigation"); resumeProject(resume); return }
+  }
+  if (/^run\s+/i.test(clean) && !context.routineId) {
+    const routine = useDailyWork.getState().routines.find(record => clean.slice(4).trim().toLowerCase() === record.name.toLowerCase())
+    if (routine) { sessionStorage.setItem("friday-open-routine", routine.id); useDailyWork.setState({ routineOpen: true }); useFriday.getState().setOrb("idle"); return }
+  }
 
   // Constitutional Sub-150ms Non-Verbal Acoustic Earcon (§01 & §03)
   playInstantAcousticCue()
 
   const store = useFriday.getState()
   const threadId = context.threadId || store.activeThreadId || store.threads[0]?.id || store.createThread()
+  const daily = useDailyWork.getState()
+  const associatedProject = useProjects.getState().projects.find(project => project.threadId === threadId)
+  const projectId = Object.hasOwn(context, "projectId") ? context.projectId : associatedProject?.id || daily.contextProjectId
+  const selectedTask = useProjects.getState().items.find(item => item.id === daily.selectedTaskId && item.type === "task" && (item.projectId || undefined) === projectId)
+  context = { ...context, projectId, sourceIds: [...(context.sourceIds ?? daily.selectedSourceIds)], taskId: context.taskId ?? selectedTask?.id }
+  for (const id of context.sourceIds || []) {
+    const capture = daily.captures.find(record => record.id === id)
+    if (capture?.extractionError) throw new Error(capture.extractionError)
+    if (!capture && !useProjects.getState().items.some(record => record.id === id)) throw new Error(`Source ${id} no longer exists.`)
+  }
+  const sharedSources = context.sourceIds?.map(id => {
+    const capture = daily.captures.find(record => record.id === id)
+    const note = useProjects.getState().items.find(record => record.id === id)
+    return { id, title: capture?.title || note?.title || id, text: capture?.text || note?.description || "", url: capture?.url, capturedAt: capture?.capturedAt }
+  })
   const providerProfileId=context.providerProfileId || store.activeModelId
+  const defaultConfig = getAiConfig()
+  const selectedProfile = useSettings.getState().saved.profiles.find(profile => profile.id === providerProfileId)
+  const providerConfig = selectedProfile && useSettings.getState().loaded ? { baseUrl: selectedProfile.baseUrl, model: selectedProfile.model, apiKey: selectedProfile.baseUrl === defaultConfig.baseUrl ? defaultConfig.apiKey : "" } : defaultConfig
   const request: PendingRequest = { id: crypto.randomUUID(), threadId, cancelled: false }
   pendingRequests.set(request.id, request)
   visibleRequestId = request.id
@@ -1477,13 +1533,15 @@ export async function sendChatMessage(text: string, expandedMode: boolean = fals
     }))
 
     await flushWorkspaceWrites()
-    const aiRes = await executeAiTurn(clean, recentMessages, expandedMode ? "expanded" : "command", { ...context, providerProfileId, threadId, requestId: request.id })
+    const aiRes = await executeAiTurn(clean, recentMessages, expandedMode ? "expanded" : "command", { ...context, sharedSources, providerConfig, providerProfileId, threadId, requestId: request.id })
     request.runId = aiRes.runId
+    if (isDesktop) { await useProjects.getState().hydrate(true); await useDailyWork.getState().hydrate(true) }
     recordLatency("ttft",aiRes.ttftMs)
     if (request.cancelled) return
 
     store.pushMessage(threadId, {
-      id: asstMsgId,
+      id: aiRes.runId ? `msg-${aiRes.runId}-assistant` : asstMsgId,
+      sourceIds: context.sourceIds, projectId: context.projectId, runId: aiRes.runId,
       role: "assistant",
       content: aiRes.show,
       say: aiRes.say,
@@ -1595,13 +1653,15 @@ export async function sendChatMessage(text: string, expandedMode: boolean = fals
     if (request.cancelled) return
     const errMsg = typeof err === "string" ? err : err instanceof Error ? err.message : JSON.stringify(err)
     store.pushMessage(threadId, {
-      id: asstMsgId,
+      id: request.runId ? `msg-${request.runId}-assistant` : asstMsgId,
+      runId: request.runId, projectId: context.projectId, sourceIds: context.sourceIds,
       role: "assistant",
-      content: `### Response Notice\n\n${errMsg}\n\nPlease check your provider endpoint and API key in Settings.`,
-      say: "There was an issue processing your request. Please check Settings.",
-      show: `### Response Notice\n\n${errMsg}\n\nPlease check your provider endpoint and API key in Settings.`,
+      content: `### Request stopped\n\n${errMsg}`,
+      say: "The request stopped. The details are on your screen.",
+      show: `### Request stopped\n\n${errMsg}`,
       created_at: new Date().toISOString(),
-    })
+    }, !isDesktop)
+    if (visibleRequestId !== request.id || useFriday.getState().activeThreadId !== threadId) return
     store.setOrb("idle")
     store.setDoing(null)
     store.setPlan([{ id: `${userMsgId}-respond`, label: "Work through your instruction", tier: "green", status: "failed" }])

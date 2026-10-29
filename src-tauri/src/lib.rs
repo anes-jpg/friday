@@ -7,6 +7,7 @@ pub mod tools;
 pub mod voice;
 pub mod settings;
 pub mod workspace_commands;
+pub mod daily_work;
 pub mod places;
 pub mod health;
 
@@ -64,10 +65,14 @@ async fn submit_utterance(
     thread_id: Option<String>,
     project_id: Option<String>,
     provider_profile_id: Option<String>,
+    source_ids: Option<Vec<String>>,
+    task_id: Option<String>,
+    routine_id: Option<String>,
+    tool_call: Option<serde_json::Value>,
     state: State<'_, AppState>,
 ) -> Result<TurnResult, String> {
     let mode_str = mode.unwrap_or_else(|| "command".to_string());
-    state.agent.execute_request(&utterance, &mode_str, agent::runs::RequestContext {request_id,thread_id,project_id,provider_profile_id}).await
+    state.agent.execute_request(&utterance, &mode_str, agent::runs::RequestContext {request_id,thread_id,project_id,provider_profile_id,source_ids:source_ids.unwrap_or_default(),task_id,routine_id,tool_call}).await
 }
 
 #[tauri::command]
@@ -822,9 +827,19 @@ fn get_network_telemetry() -> Result<crate::tools::net_telemetry::NetworkSocketA
 }
 
 #[tauri::command]
-fn terminate_process_socket(pid: u32, process_name: String) -> Result<bool, String> {
-    tracing::info!("Terminating process socket PID: {} ({})", pid, process_name);
-    crate::tools::net_telemetry::NetTelemetryEngine::terminate_process(pid)
+fn terminate_process_socket(
+    pid: u32,
+    process_name: String,
+    simulated: Option<bool>,
+) -> Result<bool, String> {
+    let simulated = simulated.unwrap_or(false);
+    tracing::info!(
+        "Terminating process socket PID: {} ({}) simulated={}",
+        pid,
+        process_name,
+        simulated
+    );
+    crate::tools::net_telemetry::NetTelemetryEngine::terminate_process(pid, &process_name, simulated)
 }
 
 #[tauri::command]
@@ -853,6 +868,25 @@ fn get_geospatial_telemetry() -> Result<crate::tools::geospatial::GeospatialResp
 fn get_hardware_vitals() -> Result<crate::tools::hardware::SystemHardwareTelemetry, String> {
     let engine = crate::tools::hardware::HardwareTelemetryEngine::new();
     Ok(engine.get_telemetry())
+}
+
+#[tauri::command]
+fn log_frontend_error(app: tauri::AppHandle, source: String, message: String) -> Result<(), String> {
+    use std::io::Write;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join("frontend_errors.log");
+    let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| e.to_string())?;
+    writeln!(file, "{stamp} :: source={source} :: {message}")
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1341,7 +1375,7 @@ async fn process_voice_utterance(
     mode: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<TurnResult, String> {
-    submit_utterance(utterance, mode, None, None, None, None, state).await
+    submit_utterance(utterance, mode, None, None, None, None, None, None, None, None, state).await
 }
 
 #[tauri::command]
@@ -2301,6 +2335,14 @@ pub fn run() {
             cancel_run,
             cancel_plan,
             workspace_commands::workspace_snapshot,
+            workspace_commands::workspace_select,
+            workspace_commands::get_message_context,
+            workspace_commands::save_explicit_preference,
+            workspace_commands::capture_webpage,
+            workspace_commands::capture_text_file,
+            workspace_commands::workspace_import_daily,
+            workspace_commands::get_daily_preferences,
+            workspace_commands::save_daily_preferences,
             workspace_commands::workspace_save,
             workspace_commands::workspace_delete,
             workspace_commands::workspace_import,
@@ -2346,6 +2388,7 @@ workspace_commands::get_reconcile_actions,
             delete_automation,
             trigger_automation,
             get_skills,
+log_frontend_error,
             toggle_skill,
             save_api_key,
             get_api_key_status,

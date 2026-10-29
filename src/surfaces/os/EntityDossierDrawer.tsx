@@ -72,7 +72,7 @@ export const EntityDossierDrawer: React.FC<EntityDossierDrawerProps> = ({
       setIsTerminating(true)
       setStatusMessage("Terminating process via Win32 signal...")
       try {
-        await ipcTerminateProcessSocket(pid, processName)
+        await ipcTerminateProcessSocket(pid, processName, details.simulated === true)
         setIsTerminated(true)
         setStatusMessage(`PID ${pid} (${processName}) successfully terminated`)
         onActionComplete?.()

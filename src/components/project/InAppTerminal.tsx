@@ -20,6 +20,8 @@ import { executeProjectCommand, detectProjectScripts } from "@/lib/workflow"
 interface InAppTerminalProps {
   projectPath: string
   projectName: string
+  onRunCommand?: (command: string) => Promise<void>
+  onAskFriday?: (prompt: string, source?: Partial<import("@/lib/daily-work").Capture>) => void
 }
 
 interface LogEntry {
@@ -33,6 +35,8 @@ interface LogEntry {
 export const InAppTerminal: React.FC<InAppTerminalProps> = ({
   projectPath,
   projectName,
+  onRunCommand,
+  onAskFriday,
 }) => {
   const [scripts, setScripts] = useState<ProjectScript[]>([])
   const [logs, setLogs] = useState<LogEntry[]>([])
@@ -62,6 +66,13 @@ export const InAppTerminal: React.FC<InAppTerminalProps> = ({
   const runCommand = async (cmdToRun: string) => {
     const clean = cmdToRun.trim()
     if (!clean || isRunning) return
+    if (onRunCommand) {
+      setIsRunning(true)
+      try { await onRunCommand(clean); setInputCommand("") }
+      catch (failure) { toast.error(String(failure)) }
+      finally { setIsRunning(false) }
+      return
+    }
 
     setIsRunning(true)
     const logId = `log-${Date.now()}`
@@ -239,6 +250,7 @@ export const InAppTerminal: React.FC<InAppTerminalProps> = ({
 
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-white/30">{log.timestamp}</span>
+                  {log.result && onAskFriday && <button type="button" onClick={() => onAskFriday("Explain the selected command output and suggest the next step.", { title: log.command, sourceKind: "command", path: projectPath, text: JSON.stringify({ command: log.command, ...log.result }, null, 2) })}>Ask about output</button>}
                   {log.result && (
                     <span
                       className={cn(

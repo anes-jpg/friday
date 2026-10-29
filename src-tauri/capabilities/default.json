@@ -23,6 +23,10 @@
     "opener:default",
     "notification:default",
     "clipboard-manager:default",
-    "global-shortcut:default"
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
+    "global-shortcut:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister"
   ]
 }

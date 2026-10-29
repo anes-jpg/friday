@@ -13,6 +13,7 @@ import type { RiskTier } from "@/lib/types"
 import { useFriday } from "@/lib/store"
 import { toast } from "sonner"
 import { invokeCommand } from "@/lib/ipc"
+import { useDailyWork } from "@/lib/daily-work"
 
 export interface Command {
   id: string
@@ -29,6 +30,10 @@ export interface Command {
 function staticCommands(): Command[] {
   const s = useFriday.getState()
   return [
+    { id: "c-work-capture", label: "Quick capture", group: "Workspace", shortcut: useDailyWork.getState().preferences.shortcut, run: () => useDailyWork.getState().openCapture() },
+    { id: "c-work-search", label: "Search workspace", group: "Workspace", run: () => useDailyWork.setState({ searchOpen: true }) },
+    { id: "c-work-today", label: "Today", group: "Workspace", run: () => { sessionStorage.setItem("friday-work-view", "today"); s.setTab("projects"); window.dispatchEvent(new CustomEvent("friday:open-work-record", { detail: { view: "today" } })) } },
+    { id: "c-work-routines", label: "Desktop routines", group: "Workspace", run: () => useDailyWork.setState({ routineOpen: true }) },
     /* windows */
     {
       id: "c-console",

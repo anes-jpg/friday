@@ -8,6 +8,7 @@ import { groupForRoute, workspaceRoutes } from "./navigation"
 import { Minus, Square, X, Copy, Maximize2, Scan, Search } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useWindowMode } from "@/lib/window-mode"
+import { useDailyWork } from "@/lib/daily-work"
 
 const BeastTab = lazy(() => import("./BeastTab").then((m) => ({ default: m.BeastTab })))
 const BrowserTab = lazy(() => import("./BrowserTab").then((m) => ({ default: m.BrowserTab })))
@@ -20,10 +21,12 @@ const AuditTab = lazy(() => import("./AuditTab").then((m) => ({ default: m.Audit
 const SettingsTab = lazy(() => import("./SettingsTab").then((m) => ({ default: m.SettingsTab })))
 const ProjectsTab = lazy(() => import("./ProjectsTab").then((m) => ({ default: m.ProjectsTab })))
 const MonitorTab = lazy(() => import("./MonitorTab").then((m) => ({ default: m.MonitorTab })))
+const OperationsTab = lazy(() => import("./OperationsTab").then((m) => ({ default: m.OperationsTab })))
 
 export interface ConsoleProps { embedded?: boolean }
 export const Console: React.FC<ConsoleProps> = ({ embedded = false }) => {
   const tab = useFridayStore((s) => s.tab)
+  const launchReady = useDailyWork(state => state.launchReady)
   const setTab = useFridayStore((s) => s.setTab)
   const orb = useFridayStore((s) => s.orb)
   const muted = useFridayStore((s) => s.micMuted)
@@ -33,6 +36,10 @@ export const Console: React.FC<ConsoleProps> = ({ embedded = false }) => {
   const fullscreen = useWindowMode((s) => s.fullscreen)
   const groupLabel = group[0].toUpperCase() + group.slice(1)
   useEffect(() => { sessionStorage.setItem(`friday-route-${group}`, tab) }, [group, tab])
+  useEffect(() => {
+    const daily = useDailyWork.getState()
+    if (launchReady && daily.ready && daily.preferences.previousView !== tab) void daily.savePreferences({ previousView: tab }).catch(failure => console.warn("Could not save the launch view", failure))
+  }, [tab, launchReady])
   useEffect(() => {
     if (!embedded && isDesktop) void invokeCommand<boolean>("app_is_maximized").then(setIsMaximized).catch(() => {})
   }, [embedded])
@@ -83,7 +90,8 @@ export const Console: React.FC<ConsoleProps> = ({ embedded = false }) => {
             {tab === "beast" && <BeastTab />}
             {tab === "delphi" && <DelphiTab />}
             {tab === "projects" && <ProjectsTab />}
-            {group === "monitor" && <MonitorTab />}
+            {(tab === "analytics" || tab === "history" || tab === "telemetry") && <OperationsTab view={tab} />}
+            {group === "monitor" && tab !== "telemetry" && <MonitorTab />}
           </React.Suspense></div>
         </section>
       </div>

@@ -6,6 +6,8 @@ import { playInstantAcousticCue } from "@/lib/phrasebank";
 import { isAudioActive } from "@/lib/kokoro";
 
 import { Palette } from "@/surfaces/palette/Palette";
+import { DailyWorkHost } from "@/components/work/DailyWorkHost";
+import { useDailyWork } from "@/lib/daily-work";
 import { Console } from "@/surfaces/console/Console";
 import { FridayOSShell } from "@/surfaces/os/FridayOSShell";
 import { HudBootSequence } from "@/components/hud/HudBootSequence";
@@ -290,6 +292,11 @@ export const App: React.FC = () => {
               return;
             }
             const cmd = event.payload.trim();
+            if (useDailyWork.getState().captureOpen) {
+              useDailyWork.setState(current => ({ draft: { ...current.draft, text: [current.draft.text, cmd].filter(Boolean).join("\n"), sourceKind: "idea" } }));
+              store.setPartial(""); store.setOrb("idle");
+              return;
+            }
             const lower = cmd.toLowerCase().replace(/[.,!?;:]/g, "").trim();
             if (
               lower === "hey friday" ||
@@ -460,6 +467,7 @@ export const App: React.FC = () => {
       {windowError && <div className="window-error" role="alert">Window mode could not change: {windowError}</div>}
 
       <Palette />
+      <DailyWorkHost />
       <React.Suspense fallback={null}>
         {showOnboarding && (
           <OnboardingModal

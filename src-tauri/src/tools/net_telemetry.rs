@@ -25,6 +25,10 @@ pub struct NetworkSocketArc {
     pub origin_coords: [f64; 2], // local [lng, lat]
     pub remote_coords: [f64; 2], // destination [lng, lat]
     pub cable_landing_ref: Option<String>,
+    /// True while the arc comes from a sample/simulated feed (audit F01:
+    /// sample records must never be able to drive real process termination).
+    #[serde(default)]
+    pub simulated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,6 +126,7 @@ impl NetTelemetryEngine {
                     origin_coords: local_coords,
                     remote_coords,
                     cable_landing_ref: cable_ref,
+                    simulated: true,
                 }
             })
             .collect()
@@ -131,14 +136,33 @@ impl NetTelemetryEngine {
         self.cables.clone()
     }
 
-    /// Terminates a process or network socket by PID (Red Tier)
-    pub fn terminate_process(pid: u32) -> Result<bool, String> {
+    /// Terminates a process by PID (Red Tier).
+    /// Sample/simulated telemetry records are refused outright (audit F01), and
+    /// every accepted request is first validated against a fresh OS enumeration
+    /// so a mismatched or recycled PID can never be terminated under a fake name.
+    pub fn terminate_process(pid: u32, process_name: &str, simulated: bool) -> Result<bool, String> {
         if pid == 0 || pid == 4 {
             return Err("Cannot terminate protected system critical process".to_string());
+        }
+        if simulated {
+            return Err(format!(
+                "Sample telemetry for PID {} ({}) cannot terminate real processes",
+                pid, process_name
+            ));
         }
 
         #[cfg(target_os = "windows")]
         {
+            let declared = process_name.trim_end_matches(".exe").to_ascii_lowercase();
+            let actual = Self::real_process_image(pid)
+                .map_err(|e| format!("Process identity check failed for PID {}: {}", pid, e))?;
+            if actual != declared {
+                return Err(format!(
+                    "Refusing termination: PID {} is running '{}', not '{}' (identity validation failed)",
+                    pid, actual, process_name
+                ));
+            }
+
             use std::os::windows::process::CommandExt;
             use std::process::Command;
             const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -158,8 +182,48 @@ impl NetTelemetryEngine {
 
         #[cfg(not(target_os = "windows"))]
         {
-            Ok(true)
+            Err(format!(
+                "Process termination is a Windows capability; no action was performed for PID {}",
+                pid
+            ))
         }
+    }
+
+    /// Fresh OS enumeration for identity validation (audit F01): reads the real
+    /// image name for `pid` so a mismatched or recycled PID is refused even when
+    /// the caller supplies a plausible process name.
+    #[cfg(target_os = "windows")]
+    fn real_process_image(pid: u32) -> Result<String, String> {
+        use std::os::windows::process::CommandExt;
+        use std::process::Command;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let output = Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|e| format!("Failed to enumerate PID {}: {}", pid, e))?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        let line = text.lines().next().unwrap_or("").trim().to_string();
+        if line.is_empty() || line.starts_with("INFO:") {
+            return Err(format!("No process is running with PID {}", pid));
+        }
+        let image = line
+            .split(',')
+            .next()
+            .map(|field| field.trim_matches('"'))
+            .unwrap_or("");
+        if image.is_empty() {
+            return Err(format!("Could not read the image name for PID {}", pid));
+        }
+        Ok(image.trim_end_matches(".exe").to_ascii_lowercase())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn real_process_image(pid: u32) -> Result<String, String> {
+        Err(format!(
+            "Process enumeration is unavailable on this platform (PID {})",
+            pid
+        ))
     }
 }
 
@@ -178,5 +242,36 @@ mod tests {
 
         let cables = engine.get_cables();
         assert_eq!(cables.len(), 5);
+    }
+
+    #[test]
+    fn test_sample_socket_arcs_are_marked_simulated() {
+        let engine = NetTelemetryEngine::new();
+        for arc in engine.get_socket_arcs() {
+            assert!(arc.simulated, "sample arc {} must be marked simulated", arc.id);
+        }
+    }
+
+    #[test]
+    fn test_sample_pid_cannot_terminate_real_process() {
+        let result = NetTelemetryEngine::terminate_process(4512, "chrome.exe", true);
+        assert!(result.is_err());
+        let message = result.err().unwrap_or_default();
+        assert!(message.contains("Sample telemetry"), "{}", message);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_identity_mismatch_pid_is_refused() {
+        // A PID no real process owns, declared under an unrelated name: the
+        // fresh-enumeration identity check must refuse the termination.
+        let result = NetTelemetryEngine::terminate_process(u32::MAX - 1, "chrome.exe", false);
+        assert!(result.is_err());
+        let message = result.err().unwrap_or_default();
+        assert!(
+            message.contains("identity check failed") || message.contains("Refusing termination"),
+            "{}",
+            message
+        );
     }
 }

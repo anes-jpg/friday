@@ -14,6 +14,7 @@ import {
 } from "lucide-react"
 import { cn, ms } from "@/lib/utils"
 import ReactMarkdown from "react-markdown"
+import { openSavedSource } from "@/lib/work-navigation"
 import remarkGfm from "remark-gfm"
 import type { Message, PendingPlanBackend, ToolCall } from "@/lib/types"
 import { IntelligentUIRenderer, isOpenUICode, extractOpenUIFromMarkdown } from "@/components/intelligent-ui"
@@ -21,6 +22,9 @@ import { SmoothScroll, type SmoothScrollHandle } from "@/components/providers/Sm
 import { PerspectiveTilt, SpotlightSurface, SpringChip, Magnetic } from "@/components/motion/MouseInteractions"
 import { ChatHistorySidebar } from "@/components/chat/ChatHistorySidebar"
 import { isDesktop } from "@/lib/ipc"
+import { SourceChips } from "@/components/work/SourceChips"
+import { AnswerActions } from "@/components/work/AnswerActions"
+import { useDailyWork } from "@/lib/daily-work"
 
 function formatMessageTime(msg: { timestamp?: unknown; created_at?: unknown; time?: unknown }): string {
   const raw = msg.timestamp ?? msg.created_at ?? msg.time
@@ -416,6 +420,7 @@ export const ChatTab: React.FC = () => {
   }, [threadMessages.length, busy, partialText])
 
   const handleNewChat = () => {
+    useDailyWork.setState({ selectedSourceIds: [], selectedTaskId: undefined, contextProjectId: undefined })
     createThread()
     setInputText("")
     setTimeout(() => {
@@ -442,6 +447,12 @@ export const ChatTab: React.FC = () => {
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [chatHistoryOpen, toggleChatHistory])
 
+  useEffect(() => {
+    const id = sessionStorage.getItem("friday-open-message")
+    const node = id ? document.getElementById(`message-${id}`) : null
+    if (node) { node.scrollIntoView({ behavior: "instant", block: "center" }); sessionStorage.removeItem("friday-open-message") }
+  }, [threadMessages, activeThread?.id])
+
   const handleStartEditTitle = () => {
     if (!activeThread) return
     setTitleValue(activeThread.title)
@@ -457,7 +468,7 @@ export const ChatTab: React.FC = () => {
 
   const handleSend = () => {
     if (!inputText.trim()) return
-    sendChatMessage(inputText, expandedMode)
+    void sendChatMessage(inputText, expandedMode, { projectId: useDailyWork.getState().contextProjectId }).catch(error => setInputText(String(error)))
     setInputText("")
   }
 
@@ -541,6 +552,7 @@ export const ChatTab: React.FC = () => {
 
               return (
                 <article
+                  id={`message-${msg.id}`}
                   key={msg.id}
                   className={`flex flex-col space-y-1.5 ${
                     msg.role === "user" ? "items-end" : "items-start"
@@ -590,6 +602,13 @@ export const ChatTab: React.FC = () => {
                               <div className="space-y-3 text-[13.5px] leading-relaxed text-[hsl(var(--ink))]/90 font-sans">
                                 {(() => {
                                   const markdownComponents = {
+                                    a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
+                                      if (href?.startsWith("#source-")) {
+                                        const id = href.slice(8)
+                                        return <button type="button" className="work-citation" onClick={() => openSavedSource(id)}>{children}</button>
+                                      }
+                                      return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>
+                                    },
                                     h1: ({ children }: { children?: React.ReactNode }) => (
                                       <h1 className="mt-4 mb-2 text-[16px] font-semibold tracking-tight text-[hsl(var(--ink))] border-b border-white/[0.06] pb-1.5 flex items-center gap-2">
                                         {children}
@@ -771,6 +790,7 @@ export const ChatTab: React.FC = () => {
                         )
                       })()}
 
+                    <AnswerActions message={msg} threadId={activeThread?.id || ""} />
                     {/* Interactive Plan Confirmation Card */}
                     {(() => {
                       const plan = msg.pendingPlan || msg.pending_plan
@@ -842,6 +862,7 @@ export const ChatTab: React.FC = () => {
       </SmoothScroll>
 
       {/* Composer fixed at bottom with breathing room */}
+      <SourceChips />
       <div className="talk-composer-wrap">
         <div className="mx-auto max-w-[880px] w-full">
           <FridayComposer

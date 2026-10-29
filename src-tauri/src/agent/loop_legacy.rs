@@ -116,7 +116,7 @@ impl AgentCore {
                 .unwrap_or_default()
                 .as_millis();
             let msg = DbMessage {
-                id: format!("msg-{}", now_ms),
+                id: super::runs::current().map(|context|format!("msg-{}-assistant",context.run.id)).unwrap_or_else(||format!("msg-{}", now_ms)),
                 thread_id,
                 role: "assistant".to_string(),
                 say: Some(say.to_string()),
@@ -127,7 +127,7 @@ impl AgentCore {
             let _ = db.insert_message(&msg);
 
             let fact_content = format!("User: {} Assistant: {}", say.trim(), show.trim());
-            if !say.trim().is_empty() && fact_content.len() < 4096 {
+            if super::runs::current().is_none() && !say.trim().is_empty() && fact_content.len() < 4096 {
                 let fact = crate::memory::db::DbFact {
                     id: format!("fact-turn-{}", now_ms),
                     content: fact_content,
@@ -149,7 +149,7 @@ impl AgentCore {
                 .unwrap_or_default()
                 .as_millis();
             let msg = DbMessage {
-                id: format!("msg-user-{}", now_ms),
+                id: super::runs::current().map(|context|format!("msg-{}-user",context.run.id)).unwrap_or_else(||format!("msg-user-{}",now_ms)),
                 thread_id,
                 role: "user".to_string(),
                 say: Some(utterance.to_string()),
@@ -226,7 +226,7 @@ impl AgentCore {
             ].iter().filter(|&&b| b).count();
 
             // Require at least 2 distinct operator domain signals (e.g. web + code, or code + memory + report)
-            has_operator_signals >= 2
+            has_operator_signals >= 2 || super::runs::current().is_some_and(|context|!context.sources.is_empty() || context.routine.is_some())
         };
 
         // Tier 1: Deterministic Action Engine & Semantic Router (<15ms, 0 tokens, 0 cloud calls)
@@ -1721,11 +1721,13 @@ impl AgentCore {
 
         #[cfg(target_os = "windows")]
         let active_window_context = {
+            if super::runs::current().is_some() {String::new()} else {
             let (title, process) = crate::tools::win32::get_active_window_info();
             format!(
                 "<active-window process=\"{}\" title=\"{}\" />",
                 process, title
             )
+            }
         };
         #[cfg(not(target_os = "windows"))]
         let active_window_context = String::new();
@@ -1856,9 +1858,9 @@ impl AgentCore {
         // Daily workspace memory: retrieve relevant facts, conversations, and
         // durable records before the model sees the user request. This makes the
         // assistant useful across sessions instead of starting from zero.
-        let memory_matches = super::runs::current().and_then(|context| context.db.lock().ok().map(|db| db.workspace_search(&processed_utterance).unwrap_or_default()))
-            .or_else(|| self.db.lock().ok().map(|db| db.workspace_search(&processed_utterance).unwrap_or_default()))
-            .unwrap_or_default();
+        let memory_matches = if super::runs::current().is_some() {vec![]} else {self.db.lock().ok().map(|db| db.workspace_search(&processed_utterance).unwrap_or_default())
+            .unwrap_or_default()
+        };
         if !memory_matches.is_empty() {
             let snippets = memory_matches.into_iter().take(10)
                 .filter_map(|item| item.get("title").and_then(|v| v.as_str()).map(|title| format!("- {}", title)))
@@ -1872,9 +1874,15 @@ impl AgentCore {
             }
         }
 
+        if let Some(context)=super::runs::current() {
+            if let Some(project)=&context.project {
+                messages.push(json!({"role":"system","content":format!("The user selected this project for this run: {}. Reply using its responseLanguage. Use its instructions and directive. Context links are only included when explicitly shared.",json!({"name":project["name"],"directive":project["directive"],"instructions":project["instructions"],"responseLanguage":project["responseLanguage"],"rootPath":project["rootPath"]}))}));
+            }
+            if let Some(task)=&context.task { messages.push(json!({"role":"user","content":format!("Selected task (quoted JSON data): {}",task)})); }
+        }
         messages.push(json!({
             "role": "user",
-            "content": processed_utterance
+            "content": super::runs::current().map(|context|crate::daily_work::quote(&processed_utterance,&context.sources)).unwrap_or_else(||processed_utterance.clone())
         }));
 
         let needs_reasoning = lower.contains("analyze")

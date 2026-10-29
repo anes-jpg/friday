@@ -165,6 +165,9 @@ export interface Message {
   pending_plan?: PendingPlanBackend | null
   pendingPlan?: PendingPlanBackend | null
   created_at: string
+  sourceIds?: string[]
+  projectId?: string
+  runId?: string
   /** §05.6 — logged per request: model, tokens, TTFT, total duration. */
   usage?: { model: string; prompt: number; completion: number; ttft_ms: number }
 }

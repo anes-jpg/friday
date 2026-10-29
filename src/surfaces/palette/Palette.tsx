@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -13,11 +13,17 @@ import { useFridayStore } from "@/lib/store";
 import { useFriday } from "@/lib/store";
 import { useProjects } from "@/lib/projects";
 import { useSavedPlaces } from "@/lib/saved-places";
+import { useDailyWork } from "@/lib/daily-work";
+import { openWorkRecord, resumeProject } from "@/lib/work-navigation";
+import { workspaceRoutes } from "@/surfaces/console/navigation";
+import { useWindowMode } from "@/lib/window-mode";
+import { toast } from "sonner";
 
 export type PaletteAction = {
   id: string;
   label: string;
-  group: "Actions" | "Navigation" | "Recent" | "Settings" | "Projects" | "Tasks & notes" | "Saved places" | "Conversations";
+  group: "Actions" | "Navigation" | "Recent" | "Settings" | "Projects" | "Tasks & notes" | "Saved places" | "Conversations" | "Captures" | "Routines" | "Memory" | "Skills" | "Automations";
+  keywords?: string;
   shortcut?: string;
   run: () => void;
 };
@@ -55,6 +61,16 @@ export function Palette({
   const workspaceItems = useProjects(state => state.items);
   const savedPlaces = useSavedPlaces(state => state.places);
   const threads = useFriday(state => state.threads);
+  const facts = useFriday(state => state.facts);
+  const skills = useFriday(state => state.skills);
+  const automations = useFriday(state => state.automations);
+  const fullscreen = useWindowMode(state => state.fullscreen);
+  const [search, setSearch] = useState("");
+  const [recentIds, setRecentIds] = useState<string[]>(() => {
+    try { const stored: unknown = JSON.parse(localStorage.getItem("friday-command-recents-v1") || "[]"); return Array.isArray(stored) ? stored.filter((id: unknown): id is string => typeof id === "string").slice(0, 6) : [] } catch { return [] }
+  });
+  useEffect(() => { if (isOpen) setSearch("") }, [isOpen]);
+  const { captures, routines, preferences } = useDailyWork();
   const handleOpenChange = (nextOpen: boolean) => {
     if (controlledOnOpenChange) {
       controlledOnOpenChange(nextOpen);
@@ -64,6 +80,12 @@ export function Palette({
   };
 
   const defaultActions: PaletteAction[] = useMemo(() => [
+    { id: "cmd-fullscreen", label: fullscreen ? "Exit fullscreen" : "Enter fullscreen", group: "Actions", shortcut: "F11", run: () => { void useWindowMode.getState().toggleFullscreen() } },
+    { id: "cmd-control-room", label: "Open spatial control room", group: "Navigation", shortcut: "Ctrl+Shift+F11", run: () => window.dispatchEvent(new CustomEvent("friday:trigger-hud-boot")) },
+    { id: "daily-capture", label: "Quick capture", group: "Actions", shortcut: preferences.shortcut, run: () => useDailyWork.getState().openCapture() },
+    { id: "daily-search", label: "Search workspace", group: "Actions", run: () => useDailyWork.setState({ searchOpen: true }) },
+    { id: "daily-today", label: "Today — inbox and continue working", group: "Navigation", run: () => openWorkRecord("", "today") },
+    { id: "daily-routines", label: "Manage desktop routines", group: "Actions", run: () => useDailyWork.setState({ routineOpen: true }) },
     // --- ACTIONS ---
     {
       id: "cmd-screen-read",
@@ -263,33 +285,55 @@ export function Palette({
     simulateVoiceTurn,
     openConsoleTab,
     onOpenSettings,
+    preferences.shortcut,
+    fullscreen,
   ]);
 
   const openWork = (projectId: string, view: string, itemId?: string) => {
-    useProjects.getState().select(projectId);
-    openConsoleTab("projects");
-    window.dispatchEvent(new CustomEvent("friday:open-work-record", { detail: { projectId, view, itemId } }));
+    openWorkRecord(projectId, view, itemId);
   };
   const recordActions: PaletteAction[] = [
+    ...facts.map(fact => ({ id: `memory-${fact.id}`, label: fact.subject, keywords: fact.value, group: "Memory" as const, run: () => { sessionStorage.setItem("friday-open-memory", fact.id); openConsoleTab("memory"); window.dispatchEvent(new CustomEvent("friday:open-memory", { detail: fact.id })) } })),
+    ...skills.map(skill => ({ id: `skill-${skill.id}`, label: skill.name, keywords: skill.description, group: "Skills" as const, run: () => openConsoleTab("skills") })),
+    ...automations.map(automation => ({ id: `automation-${automation.id}`, label: automation.name, group: "Automations" as const, run: () => openConsoleTab("automations") })),
+    ...captures.map(capture => ({ id: `capture-${capture.id}`, label: capture.title, group: "Captures" as const, run: () => useDailyWork.getState().openCapture(capture) })),
+    ...routines.map(routine => ({ id: `routine-${routine.id}`, label: `Open routine: ${routine.name}`, group: "Routines" as const, run: () => { sessionStorage.setItem("friday-open-routine", routine.id); useDailyWork.setState({ routineOpen: true }) } })),
+    ...useDailyWork.getState().resumes.map(record => ({ id: `resume-${record.id}`, label: `Continue ${record.name}`, group: "Projects" as const, run: () => resumeProject(record) })),
     ...projects.map(project => ({ id: `project-${project.id}`, label: project.name, group: "Projects" as const, run: () => openWork(project.id, "overview") })),
-    ...workspaceItems.filter(item => ["task", "note"].includes(item.type)).map(item => ({ id: `item-${item.id}`, label: `${item.title} · ${projects.find(project => project.id === item.projectId)?.name || "Project"}`, group: "Tasks & notes" as const, run: () => openWork(item.projectId, item.type === "note" ? "notes" : "tasks", item.id) })),
+    ...workspaceItems.filter(item => ["task", "note"].includes(item.type)).map(item => ({ id: `item-${item.id}`, label: `${item.title} · ${projects.find(project => project.id === item.projectId)?.name || "Project"}`, keywords: item.description, group: "Tasks & notes" as const, run: () => openWork(item.projectId, item.type === "note" ? "notes" : "tasks", item.id) })),
     ...savedPlaces.map(place => ({ id: `place-${place.id}`, label: place.name, group: "Saved places" as const, run: () => { openConsoleTab("map"); window.dispatchEvent(new CustomEvent("friday:select-place", { detail: place })); sessionStorage.setItem("friday-open-place", JSON.stringify(place)); } })),
     ...threads.map(thread => ({ id: `thread-${thread.id}`, label: thread.title, group: "Conversations" as const, run: () => { useFriday.getState().setActiveThread(thread.id); openConsoleTab("chat"); } })),
   ];
-  const effectiveActions = customActions || [...defaultActions, ...recordActions];
-  const groups = ["Projects", "Tasks & notes", "Saved places", "Conversations", "Actions", "Navigation", "Recent", "Settings"] as const;
+  const routeActions: PaletteAction[] = Object.values(workspaceRoutes).flat().filter(route => !defaultActions.some(action => action.id === `nav-${route.id}`)).map(route => ({ id: `nav-${route.id}`, label: `Go to ${route.label}`, group: "Navigation", run: () => openConsoleTab(route.id) }));
+  const effectiveActions = customActions || [...defaultActions.filter(action => !action.id.startsWith("recent-")), ...routeActions, ...recordActions];
+  const recent = recentIds.flatMap(id => { const action = effectiveActions.find(item => item.id === id); return action ? [{ ...action, id: `recent-${id}`, group: "Recent" as const }] : [] });
+  const visibleActions = search.trim() ? effectiveActions : [...recent, ...effectiveActions];
+  const groups = ["Recent", "Navigation", "Actions", "Projects", "Tasks & notes", "Captures", "Routines", "Memory", "Skills", "Automations", "Saved places", "Conversations", "Settings"] as const;
+  const execute = (action: PaletteAction) => {
+    handleOpenChange(false);
+    try {
+      action.run();
+      const id = action.id.replace(/^recent-/, "");
+      const next = [id, ...recentIds.filter(item => item !== id)].slice(0, 6);
+      setRecentIds(next);
+      try { localStorage.setItem("friday-command-recents-v1", JSON.stringify(next)) } catch { /* Commands remain usable without recent storage. */ }
+    } catch (failure) { toast.error(failure instanceof Error ? failure.message : String(failure)) }
+  };
 
   return (
     <CommandDialog
       open={isOpen}
       onOpenChange={handleOpenChange}
       title="FRIDAY command palette"
-      description="Search actions and destinations"
-      className="top-[18%] translate-y-0 overflow-hidden rounded-[18px] border-black/15 p-0 sm:max-w-[680px] dark:border-white/15"
+      description="Search your workspace, memories, actions, and destinations"
+      className="friday-palette top-[18%] translate-y-0 overflow-hidden rounded-2xl border-black/15 p-0 sm:max-w-[680px] dark:border-white/15"
+      showCloseButton={false}
     >
       <div className="bg-black text-white">
         <CommandInput
-          placeholder="Type a command or destination…"
+          placeholder="Search everything, or choose a command…"
+          value={search}
+          onValueChange={setSearch}
           className="text-white placeholder:text-white/40 font-instrument"
         />
       </div>
@@ -298,7 +342,7 @@ export function Palette({
           No matching command.
         </CommandEmpty>
         {groups.map((group, index) => {
-          const items = effectiveActions.filter((action) => action.group === group);
+          const items = visibleActions.filter((action) => action.group === group);
           if (!items.length) return null;
           return (
             <div key={group}>
@@ -307,12 +351,9 @@ export function Palette({
                 {items.map((action) => (
                   <CommandItem
                     key={action.id}
-                    value={`${group} ${action.label}`}
-                    onSelect={() => {
-                      action.run();
-                      handleOpenChange(false);
-                    }}
-                    className="min-h-10 rounded-[10px] data-[selected=true]:bg-black data-[selected=true]:text-white dark:data-[selected=true]:bg-white dark:data-[selected=true]:text-black text-xs cursor-pointer transition-colors px-3 py-2 flex items-center justify-between"
+                    value={`${group} ${action.label} ${action.keywords || ""} ${action.id}`}
+                    onSelect={() => execute(action)}
+                    className="min-h-10 rounded-lg data-[selected=true]:bg-black data-[selected=true]:text-white dark:data-[selected=true]:bg-white dark:data-[selected=true]:text-black text-xs cursor-pointer px-3 py-2 flex items-center justify-between"
                   >
                     <span className="truncate">{action.label}</span>
                     {action.shortcut && (
@@ -327,6 +368,7 @@ export function Palette({
           );
         })}
       </CommandList>
+      <footer className="palette-footer"><span><kbd>↑ ↓</kbd> Navigate <kbd>Enter</kbd> Open</span><span>{effectiveActions.length} destinations & commands <kbd>Esc</kbd> Close</span></footer>
     </CommandDialog>
   );
 }

@@ -466,6 +466,7 @@ describe('FRIDAY 12 Core E2E Journeys (§11, §12)', () => {
     expect(lastBefore?.pending_plan?.id).toBe(planId);
 
     // 2. Confirm pending plan
+    vi.spyOn(ipc, 'invokeCommand').mockResolvedValue({ id: planId, status: 'done' });
     await store.confirmPendingPlan?.(planId);
 
     const threadAfter = useFriday.getState().threads.find((t) => t.id === threadId);

@@ -138,6 +138,7 @@ impl SchedulerManager {
         let existing=if let Some(id)=&id {Some(db.get_automations().map_err(|e|e.to_string())?.into_iter().find(|auto|auto.id==*id).ok_or("Reminder no longer exists")?)} else {None};
         if existing.as_ref().is_some_and(|auto|auto.last_result.as_deref()==Some("Running")) {return Err("Wait for the current reminder attempt to finish before editing".into());}
         let timezone=timezone.or_else(||existing.as_ref().map(|auto|auto.timezone.clone())).unwrap_or_else(||"Africa/Algiers".into());
+        schedules::validate_new_occurrence(&schedule,&timezone)?;
         let next=next_occurrence(&schedule,&timezone,now())?;
         let record=DbAutomation {id:id.unwrap_or_else(||uuid::Uuid::now_v7().to_string()),name:name.trim().into(),trigger_type:"reminder".into(),trigger_expr:format!("{} at {}",schedule.kind,schedule.time),action_tool:tool,action_args:args,enabled:existing.as_ref().is_none_or(|auto|auto.enabled),last_run:existing.as_ref().and_then(|auto|auto.last_run),next_run:if existing.as_ref().is_none_or(|auto|auto.enabled) {Some(next)} else {None},last_result:existing.and_then(|auto|auto.last_result),timezone,schedule:Some(serde_json::to_value(schedule).map_err(|e|e.to_string())?)};
         db.insert_automation(&record).map_err(|e|e.to_string())?;Ok(record)

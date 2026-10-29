@@ -21,7 +21,7 @@ import { getProjectGitDiff, commitProjectChanges } from "@/lib/workflow"
 interface InAppGitViewerProps {
   projectPath: string
   projectName: string
-  onAskFriday?: (prompt: string) => void
+  onAskFriday?: (prompt: string, source?: Partial<import("@/lib/daily-work").Capture>) => void
 }
 
 export const InAppGitViewer: React.FC<InAppGitViewerProps> = ({
@@ -86,10 +86,10 @@ export const InAppGitViewer: React.FC<InAppGitViewerProps> = ({
       return
     }
 
-    const reviewPrompt = `[Project: ${projectName} at ${projectPath}] Branch: ${gitInfo.branch}\nPlease perform an automated code review on the following git diff. Check for constitutional compliance (Surface Law, One-Signal Law, Sub-Frame Law), safety flaws, and edge cases:\n\n${gitInfo.diff.slice(0, 1500)}`
+    const reviewPrompt = "Review the selected diff for safety flaws and edge cases. Show proposed changes before applying them."
 
     if (onAskFriday) {
-      onAskFriday(reviewPrompt)
+      onAskFriday(reviewPrompt, { title: `Git changes: ${gitInfo.branch}`, path: projectPath, text: gitInfo.diff, sourceKind: "diff" })
       toast.success("Dispatched code review request to FRIDAY!")
     } else {
       toast.info("Code review prompt queued for FRIDAY.")

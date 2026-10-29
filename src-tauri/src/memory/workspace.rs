@@ -12,6 +12,9 @@ pub struct WorkspaceSnapshot {
     pub items: Vec<Value>,
     pub places: Vec<Value>,
     pub collections: Vec<Value>,
+    pub captures: Vec<Value>,
+    pub routines: Vec<Value>,
+    pub resumes: Vec<Value>,
     pub active_id: Option<String>,
 }
 
@@ -35,14 +38,13 @@ pub fn validate_record(kind: &str, record: &Value) -> rusqlite::Result<(String, 
     let object = record.as_object().ok_or_else(|| invalid("Record must be an object"))?;
     let id = object.get("id").and_then(Value::as_str).filter(|v| !v.trim().is_empty() && v.len() <= 200)
         .ok_or_else(|| invalid("Record needs a bounded ID"))?.to_string();
-    let title_key = if kind == "item" { "title" } else { "name" };
+    let title_key = if ["item", "capture"].contains(&kind) { "title" } else { "name" };
     let title = object.get(title_key).and_then(Value::as_str).filter(|v| !v.trim().is_empty() && v.len() <= 1000)
         .ok_or_else(|| invalid("Record needs a name or title"))?.to_string();
-    let project = object.get("projectId").and_then(Value::as_str).map(str::to_string);
+    let project = object.get("projectId").and_then(Value::as_str).filter(|id| !id.is_empty()).map(str::to_string);
     match kind {
         "project" | "collection" => {},
         "item" => {
-            if project.is_none() { return Err(invalid("Item needs its originating project")); }
             if !["project", "task", "note", "goal", "milestone", "reminder"].contains(&object.get("type").and_then(Value::as_str).unwrap_or("")) {
                 return Err(invalid("Invalid workspace item type"));
             }
@@ -50,6 +52,7 @@ pub fn validate_record(kind: &str, record: &Value) -> rusqlite::Result<(String, 
                 return Err(invalid("Invalid item status"));
             }
         },
+        "capture" | "routine" | "resume" => crate::daily_work::validate(kind, record).map_err(invalid)?,
         "place" => {
             let lat = object.get("lat").and_then(Value::as_f64).ok_or_else(|| invalid("Place needs latitude"))?;
             let lng = object.get("lng").and_then(Value::as_f64).ok_or_else(|| invalid("Place needs longitude"))?;
@@ -80,18 +83,19 @@ impl Database {
             CREATE TABLE IF NOT EXISTS workspace_records(kind TEXT NOT NULL, id TEXT NOT NULL, project_id TEXT, title TEXT NOT NULL, data TEXT NOT NULL CHECK(json_valid(data)), updated_at INTEGER NOT NULL, PRIMARY KEY(kind,id));
             CREATE INDEX IF NOT EXISTS workspace_project ON workspace_records(project_id,kind);
             CREATE TABLE IF NOT EXISTS workspace_imports(source_id TEXT PRIMARY KEY, originals TEXT NOT NULL CHECK(json_valid(originals)), imported_at INTEGER NOT NULL);
-            INSERT OR IGNORE INTO workspace_migrations VALUES(1,unixepoch());")?;
+            INSERT OR IGNORE INTO workspace_migrations VALUES(1,unixepoch());
+            INSERT OR IGNORE INTO workspace_migrations VALUES(2,unixepoch());")?;
         tx.commit()
     }
 
     pub fn workspace_snapshot(&self) -> rusqlite::Result<WorkspaceSnapshot> {
-        let mut snapshot = WorkspaceSnapshot { version: 3, projects: vec![], items: vec![], places: vec![], collections: vec![], active_id: self.get_setting("workspace_active_id")? };
+        let mut snapshot = WorkspaceSnapshot { version: 4, projects: vec![], items: vec![], places: vec![], collections: vec![], captures: vec![], routines: vec![], resumes: vec![], active_id: self.get_setting("workspace_active_id")? };
         let mut stmt = self.conn.prepare("SELECT kind,data FROM workspace_records ORDER BY updated_at,id")?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?)))?;
         for row in rows {
             let (kind, raw) = row?;
             let value: Value = serde_json::from_str(&raw).map_err(|e| invalid(e.to_string()))?;
-            match kind.as_str() { "project" => snapshot.projects.push(value), "item" => snapshot.items.push(value), "place" => snapshot.places.push(value), "collection" => snapshot.collections.push(value), _ => {} }
+            match kind.as_str() { "project" => snapshot.projects.push(value), "item" => snapshot.items.push(value), "place" => snapshot.places.push(value), "collection" => snapshot.collections.push(value), "capture" => snapshot.captures.push(value), "routine" => snapshot.routines.push(value), "resume" => snapshot.resumes.push(value), _ => {} }
         }
         Ok(snapshot)
     }
@@ -109,7 +113,9 @@ impl Database {
     pub fn workspace_delete(&self, kind: &str, id: &str) -> rusqlite::Result<bool> {
         let tx = self.conn.unchecked_transaction()?;
         if kind == "project" {
-            tx.execute("DELETE FROM workspace_records WHERE kind='item' AND project_id=?1", params![id])?;
+            tx.execute("DELETE FROM workspace_records WHERE kind IN ('item','resume') AND project_id=?1", params![id])?;
+            // Keep captured material and named routines after removing their optional project.
+            tx.execute("UPDATE workspace_records SET project_id=NULL,data=json_remove(data,'$.projectId') WHERE kind IN ('capture','routine') AND project_id=?1", params![id])?;
         }
         let deleted = tx.execute("DELETE FROM workspace_records WHERE kind=?1 AND id=?2", params![kind,id])? > 0;
         tx.commit()?;
@@ -147,8 +153,8 @@ impl Database {
             SELECT 'thread','thread',id,NULL,title FROM threads
                 WHERE instr(lower(title),lower(?1)) > 0 OR instr(lower(COALESCE(title,'')),lower(?1)) > 0
             UNION ALL
-            SELECT 'fact','fact',id,NULL,fact FROM facts
-                WHERE instr(lower(fact),lower(?1)) > 0 OR instr(lower(category),lower(?1)) > 0
+            SELECT 'fact','fact',id,NULL,content FROM facts
+                WHERE instr(lower(content),lower(?1)) > 0
             UNION ALL
             SELECT 'message',role,id,thread_id,substr(COALESCE(say,show,''),1,160) FROM messages
                 WHERE instr(lower(COALESCE(say,'')),lower(?1)) > 0
@@ -160,7 +166,8 @@ impl Database {
             "source": r.get::<_,String>(0)?,
             "kind": r.get::<_,String>(1)?,
             "id": r.get::<_,String>(2)?,
-            "threadId": r.get::<_,Option<String>>(3)?,
+            "threadId": if r.get::<_,String>(0)?=="message" {r.get::<_,Option<String>>(3)?} else {None},
+            "projectId": if r.get::<_,String>(0)?=="record" {r.get::<_,Option<String>>(3)?} else {None},
             "title": r.get::<_,String>(4)?,
         })))?;
         rows.collect()

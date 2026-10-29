@@ -33,6 +33,8 @@ export interface NetworkSocketArc {
   origin_coords: [number, number]
   remote_coords: [number, number]
   cable_landing_ref?: string
+  /** True when the socket record comes from a sample/simulated feed (audit F01). */
+  simulated?: boolean
 }
 
 export interface NetworkTelemetryResponse {

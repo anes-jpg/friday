@@ -8,6 +8,8 @@
  */
 
 import { invokeCommand, isDesktop } from "./ipc"
+import { useDailyWork, quoteSources, type SharedSource } from "./daily-work"
+import { useProjects } from "./projects"
 import { DEFAULT_AI_URL, DEFAULT_HEAVY_MODEL, validateProviderConfig, isLocalAiEndpoint } from "./ai-config"
 import type { Emotion, ToolCall, PendingPlanBackend } from "./types"
 import {
@@ -100,10 +102,11 @@ export async function executeAiTurn(
   userPrompt: string,
   history: Array<{ role: string; content: string }> = [],
   mode: string = "command",
-  context: { requestId?: string; threadId?: string; projectId?: string; providerProfileId?: string } = {},
+  context: { requestId?: string; threadId?: string; projectId?: string; providerProfileId?: string; sourceIds?: string[]; taskId?: string; routineId?: string; toolCall?: { name: string; args: Record<string, unknown> }; sharedSources?: SharedSource[]; providerConfig?: ReturnType<typeof getAiConfig> } = {},
 ): Promise<AiTurnResult> {
   const startTime = performance.now()
   const cleanPrompt = userPrompt.trim()
+  const config = context.providerConfig || getAiConfig()
 
   // 1. Try Desktop Tauri IPC Backend (or test mock runner)
   try {
@@ -122,7 +125,8 @@ export async function executeAiTurn(
     const res = await invokeCommand<BackendTurnRes>("submit_utterance", {
       utterance: cleanPrompt,
       mode,
-      ...context,
+      requestId: context.requestId, threadId: context.threadId, projectId: context.projectId, providerProfileId: context.providerProfileId,
+      sourceIds: context.sourceIds, taskId: context.taskId, routineId: context.routineId, toolCall: context.toolCall,
     })
 
       if (res && (res.say || res.show)) {
@@ -132,7 +136,7 @@ export async function executeAiTurn(
           say: normalizeSay(res.say || "All set."),
           show: res.show || res.say,
           emotion: "focused",
-          model: res.model || (res.tokens === 0 ? "on-device-engine" : getAiConfig().model),
+          model: res.model || (res.tokens === 0 ? "on-device-engine" : config.model),
           tokens: typeof res.tokens === "number" ? res.tokens : 60,
           ttftMs: typeof res.ttft_ms === "number" ? res.ttft_ms : 250,
           totalMs,
@@ -162,7 +166,6 @@ export async function executeAiTurn(
     }
 
   // 2. Direct HTTP / Browser Execution
-  const config = getAiConfig()
   const configError = validateProviderConfig(config.baseUrl, config.model)
   if (configError) {
     return { say: "Update the reasoning settings before trying again.", show: configError, emotion: "calm-concerned", model: config.model, tokens: 0, ttftMs: 0, totalMs: Math.round(performance.now() - startTime), toolCalls: [], failed: true }
@@ -269,10 +272,21 @@ export async function executeAiTurn(
     }
   }
 
+  const selectedSources = context.sharedSources || (context.sourceIds || []).map(id => {
+    const capture = useDailyWork.getState().captures.find(record => record.id === id)
+    if (capture?.extractionError) throw new Error(capture.extractionError)
+    if (capture) return { id, title: capture.title, text: capture.text, url: capture.url, capturedAt: capture.capturedAt }
+    const note = useProjects.getState().items.find(record => record.id === id)
+    if (!note) throw new Error(`Selected source ${id} no longer exists.`)
+    return { id, title: note.title, text: note.description || "" }
+  })
+  const project = useProjects.getState().projects.find(record => record.id === context.projectId)
+  const projectContext = project ? `Selected project: ${JSON.stringify({ name: project.name, directive: project.directive, instructions: project.instructions, responseLanguage: project.responseLanguage, rootPath: project.rootPath })}. Use its instructions and language. Context links are only included when shared.` : ""
   const messagesPayload = [
     { role: "system", content: FRIDAY_SYSTEM_PROMPT },
+    ...(projectContext ? [{ role: "system", content: projectContext }] : []),
     ...history.slice(-6).map((m) => ({ role: m.role, content: m.content })),
-    { role: "user", content: cleanPrompt },
+    { role: "user", content: quoteSources(cleanPrompt, selectedSources) },
   ]
 
   const requestBody: Record<string, unknown> = {

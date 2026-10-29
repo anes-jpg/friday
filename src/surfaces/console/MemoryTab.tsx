@@ -1,17 +1,15 @@
-import { lazy, Suspense, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import { useFriday } from "@/lib/store"
 import { isDesktop } from "@/lib/ipc"
 import { Search, Plus, Trash2, X, List, Globe2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { Fact } from "@/lib/types"
-
-const MemoryGlobe = lazy(() => import("@/components/memory/MemoryGlobe").then((module) => ({ default: module.MemoryGlobe })))
+import { MemoryGraph } from "@/components/memory/MemoryGraph"
 
 export function MemoryTab() {
   const facts = useFriday((state) => state.facts)
   const [query, setQuery] = useState("")
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [view, setView] = useState<"list" | "globe">("list")
+  const [view, setView] = useState<"list" | "globe">("globe")
   const [loading, setLoading] = useState(isDesktop)
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
@@ -19,6 +17,14 @@ export function MemoryTab() {
   const [busy, setBusy] = useState(false)
   const [subject, setSubject] = useState("")
   const [value, setValue] = useState("")
+  useEffect(() => {
+    const select = (id: string) => { setQuery(""); setSelectedId(id); sessionStorage.removeItem("friday-open-memory") }
+    const pending = sessionStorage.getItem("friday-open-memory")
+    if (pending) select(pending)
+    const open = (event: Event) => { if (event instanceof CustomEvent && typeof event.detail === "string") select(event.detail) }
+    window.addEventListener("friday:open-memory", open)
+    return () => window.removeEventListener("friday:open-memory", open)
+  }, [])
   useEffect(() => {
     if (!isDesktop) return
     let disposed = false
@@ -48,11 +54,11 @@ export function MemoryTab() {
   return (
     <section className="records-workspace">
       <header className="records-heading"><div><span className="instrument-label">Saved context</span><h1 className="page-heading">Memory</h1><p>What FRIDAY remembers about your work.</p></div><button type="button" className="primary-action" disabled={!isDesktop} onClick={() => { setError(null); setAdding(true) }}><Plus size={16} />Add memory</button></header>
-      <div className="records-toolbar"><label className="records-search"><Search size={16} /><input aria-label="Search memory" placeholder="Find a fact or preference" value={query} onChange={(event) => setQuery(event.target.value)} /></label><div className="records-view"><button type="button" aria-label="List view" aria-pressed={view === "list"} className={cn(view === "list" && "is-selected")} onClick={() => setView("list")}><List size={16} /></button><button type="button" aria-label="Globe view" aria-pressed={view === "globe"} className={cn(view === "globe" && "is-selected")} onClick={() => setView("globe")}><Globe2 size={16} /></button></div><span className="instrument-label">{filtered.length} {filtered.length === 1 ? "record" : "records"}</span></div>
+      <div className="records-toolbar"><label className="records-search"><Search size={16} /><input aria-label="Search memory" placeholder="Find a fact or preference" value={query} onChange={(event) => setQuery(event.target.value)} /></label><div className="records-view"><button type="button" aria-label="List view" aria-pressed={view === "list"} className={cn(view === "list" && "is-selected")} onClick={() => setView("list")}><List size={16} /></button><button type="button" aria-label="Graph view" aria-pressed={view === "globe"} className={cn(view === "globe" && "is-selected")} onClick={() => setView("globe")}><Globe2 size={16} /></button></div><span className="instrument-label">{filtered.length} {filtered.length === 1 ? "record" : "records"}</span></div>
       {error && !adding && !deleting && <p className="settings-notice is-error" role="alert">{error}</p>}
       {!isDesktop && <p className="records-note">Saved memory is available in the Windows app.</p>}
       {loading ? <p className="records-note" role="status">Reading saved memory…</p> : filtered.length === 0 ? <div className="records-empty"><span className="instrument-label">{query ? "No matches" : "A clean slate"}</span><h2>{query ? "Try another search." : "Keep the useful details."}</h2><p>{query ? "Search by subject or by the saved text." : "Save a preference here, or ask FRIDAY to remember it during a conversation."}</p></div> : <div className={cn("memory-composition", view === "globe" && "has-globe")}>
-        {view === "globe" && <div className="memory-globe"><Suspense fallback={<p className="records-note">Opening memory view…</p>}><MemoryGlobe facts={filtered} selectedFactId={selected?.id ?? null} onSelectFact={(fact: Fact) => setSelectedId(fact.id)} searchQuery={query} className="w-full h-full" /></Suspense></div>}
+        {view === "globe" && <MemoryGraph facts={filtered} selectedId={selected?.id} onSelect={setSelectedId} />}
         <div className="memory-list" role="list" aria-label="Memory records">{filtered.map((fact) => <div role="listitem" key={fact.id}><button type="button" className={cn("memory-row", selected?.id === fact.id && "is-selected")} onClick={() => setSelectedId(fact.id)}><span>{fact.subject}</span><p>{fact.value}</p><small>{new Date(fact.created_at).toLocaleDateString()}</small></button></div>)}</div>
         {selected && <aside className="memory-detail"><span className="instrument-label">Selected record</span><h2>{selected.subject}</h2><p>{selected.value}</p><dl><div><dt>Saved</dt><dd>{new Date(selected.created_at).toLocaleString()}</dd></div><div><dt>Source</dt><dd>{selected.source_message_id === "user-direct" ? "Added by you" : selected.source_message_id || "Saved context"}</dd></div><div><dt>Confidence</dt><dd>{Math.round(selected.confidence * 100)}%</dd></div></dl><button type="button" className="quiet-action" disabled={!isDesktop} onClick={() => { setError(null); setDeleting(true) }}><Trash2 size={14} />Delete memory</button></aside>}
       </div>}

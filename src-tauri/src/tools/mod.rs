@@ -4,6 +4,7 @@ pub mod hardware;
 pub mod net_telemetry;
 pub mod orbital_maritime;
 pub mod scaffold;
+pub mod daily;
 
 pub use geospatial::*;
 pub use hardware::*;
@@ -972,6 +973,7 @@ impl ToolRegistry {
             mcp_client: Arc::new(tokio::sync::Mutex::new(None)),
         };
         registry.register_defaults();
+        daily::register(&mut registry);
         registry
     }
 
@@ -1653,6 +1655,7 @@ impl ToolRegistry {
         let start = Instant::now();
 
         let output = match canonical_name.as_str() {
+            "workspace.save" | "project.command" => daily::execute(&canonical_name,&args).await?,
             "os.settings" => {
                 #[cfg(target_os = "windows")]
                 {
@@ -1793,6 +1796,9 @@ impl ToolRegistry {
                                 json!({ "status": "error", "message": "Failed to write temp bitmap" })
                             };
 
+                            if ocr_result["status"] != "ok" {
+                                return Err(ocr_result["message"].as_str().or_else(||ocr_result["error"].as_str()).unwrap_or("Local OCR failed").to_string());
+                            }
                             let text = ocr_result
                                 .get("text")
                                 .and_then(|t| t.as_str())
@@ -2347,16 +2353,18 @@ impl ToolRegistry {
 
                 #[cfg(target_os = "windows")]
                 {
-                    use std::os::windows::process::CommandExt;
-                    let mut cmd = std::process::Command::new("powershell");
+                    let mut cmd = tokio::process::Command::new("powershell");
                     cmd.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"])
-                        .arg(format!("Start-Process '{}'", target_path.display()));
+                        .arg(format!("$ErrorActionPreference = 'Stop'; Start-Process -FilePath '{}' -ErrorAction Stop", target_path.display().to_string().replace('\'', "''")));
                     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-                    cmd.spawn().map_err(|e| format!("Failed to launch {}: {}", target, e))?;
+                    cmd.kill_on_drop(true);
+                    let result=cmd.output().await.map_err(|e|format!("Failed to launch {target}: {e}"))?;
+                    if !result.status.success() {return Err(format!("Failed to launch {target}: {}",String::from_utf8_lossy(&result.stderr)));}
                 }
                 #[cfg(not(target_os = "windows"))]
                 {
-                    let _ = std::process::Command::new("open").arg(&target_path).spawn();
+                    let result=tokio::process::Command::new("open").arg(&target_path).output().await.map_err(|e|e.to_string())?;
+                    if !result.status.success() {return Err(String::from_utf8_lossy(&result.stderr).to_string());}
                 }
 
                 json!({
@@ -2769,6 +2777,12 @@ impl ToolRegistry {
         };
 
         let duration_ms = start.elapsed().as_millis() as u64;
+
+        if crate::agent::runs::current().is_some() && (
+            output["exit_code"].as_i64().is_some_and(|code|code!=0)
+            || output["status"].as_str().is_some_and(|status|["error","failed","fallback","timeout","unknown_tool"].contains(&status))) {
+            return Err(serde_json::to_string_pretty(&output).map_err(|e|e.to_string())?);
+        }
 
         Ok(ToolExecutionResult {
             receipt_id: None,

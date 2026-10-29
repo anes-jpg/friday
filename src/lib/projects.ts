@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import { z } from "zod"
-import { isDesktop } from "./ipc"
+import { isDesktop, invokeCommand } from "./ipc"
 import { importBrowserWorkspace, nativeSave, nativeDelete, queueWorkspaceWrite, flushWorkspaceWrites } from "./workspace-native"
 
 const referenceLinkSchema = z.string().url().refine(value => {
@@ -17,10 +17,12 @@ const projectSchema = z.object({
   threadId: z.string().optional(),
 })
 const itemSchema = z.object({
-  id: z.string(), projectId: z.string(), type: z.enum(["project", "task", "note", "goal", "milestone", "reminder"]),
+  id: z.string(), projectId: z.string().default(""), type: z.enum(["project", "task", "note", "goal", "milestone", "reminder"]),
   title: z.string().trim().min(1), description: z.string().optional(), status: z.enum(["todo", "in-progress", "done"]),
   priority: z.enum(["low", "medium", "high", "critical"]).optional(), dueDate: z.string().optional(), tag: z.string().optional(),
   sourceLinks: z.array(referenceLinkSchema).optional(),
+  sourceIds: z.array(z.string()).optional(),
+  origin: z.object({ threadId: z.string(), messageId: z.string() }).optional(),
 })
 const workspaceSchema = z.object({ version: z.literal(2), projects: z.array(projectSchema), items: z.array(itemSchema), activeId: z.string().nullable() })
 export type WorkspaceProject = z.infer<typeof projectSchema>
@@ -64,7 +66,7 @@ function writeWorkspace(data: WorkspaceData) { localStorage.setItem(storageKey, 
 interface ProjectStore extends WorkspaceData {
   loadError: string | null
   ready: boolean
-  hydrate: () => Promise<void>
+  hydrate: (refresh?: boolean) => Promise<void>
   saveProject: (project: WorkspaceProject) => void
   select: (id: string) => void
   saveItem: (item: ProjectItem) => void
@@ -86,13 +88,14 @@ export const useProjects = create<ProjectStore>((set, get) => {
           for (const record of after) if (!before.some(existing => existing.id === record.id && JSON.stringify(existing) === JSON.stringify(record))) await nativeSave(kind, record)
           for (const record of before) if (!after.some(existing => existing.id === record.id)) await nativeDelete(kind, record.id)
         }
+        if (current.activeId !== next.activeId) await invokeCommand("workspace_select", { id: next.activeId })
       }, report)
     } else writeWorkspace(next)
     set(patch)
   }
   return { ...readWorkspace(), ready: !isDesktop,
-    hydrate: async () => {
-      if (!isDesktop || get().ready) return
+    hydrate: async (refresh = false) => {
+      if (!isDesktop || (get().ready && !refresh)) return
       try {
         if (get().loadError) throw new Error(get().loadError || "Unreadable browser workspace")
         const snapshot = await importBrowserWorkspace(get().projects, get().items)
@@ -109,6 +112,20 @@ export const useProjects = create<ProjectStore>((set, get) => {
 })
 
 export const flushProjects = flushWorkspaceWrites
+
+/** Capture and answer actions publish to the store only after storage acknowledges the save. */
+export async function saveDurableItem(item: Omit<ProjectItem, "sourceIds"> & { sourceIds?: string[] }) {
+  const parsed = itemSchema.parse(item)
+  const state = useProjects.getState()
+  if (!state.ready || state.loadError) throw new Error(state.loadError || "Local workspace is still opening.")
+  if (parsed.projectId && !state.projects.some(project => project.id === parsed.projectId)) throw new Error("Project no longer exists.")
+  if (isDesktop) {
+    const { durableWorkspaceWrite } = await import("./workspace-native")
+    await durableWorkspaceWrite(() => nativeSave("item", parsed))
+    useProjects.setState(current => ({ items: [...current.items.filter(record => record.id !== parsed.id), parsed] }))
+  } else useProjects.getState().saveItem(parsed)
+  return parsed
+}
 
 export type ProjectPreset = "blank" | "personal" | "research" | "errand" | "development"
 export const projectPresets: Record<ProjectPreset, { label: string; kind: WorkspaceProject["kind"]; directive: string; tasks: string[] }> = {

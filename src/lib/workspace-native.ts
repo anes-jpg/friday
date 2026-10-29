@@ -8,6 +8,9 @@ export interface NativeWorkspace {
   items: unknown[]
   places: unknown[]
   collections: unknown[]
+  captures?: unknown[]
+  routines?: unknown[]
+  resumes?: unknown[]
   activeId: string | null
 }
 export interface SavedCollection { id: string; name: string; placeIds: string[] }
@@ -22,18 +25,40 @@ export interface RunEvent {
 }
 
 let pendingWrites: Promise<void> = Promise.resolve()
+let lastQueueError: Error | null = null
 export function queueWorkspaceWrite(write: () => Promise<void>, onError: (error: Error) => void) {
-  pendingWrites = pendingWrites.then(write).catch(failure => {
-    const error = failure instanceof Error ? failure : new Error(String(failure))
-    onError(error)
-    throw error
-  })
-  // Retain rejection for dependent sends while reporting it in the originating UI.
+  // Audit F04: a single failed write must not poison the queue. The chain heals
+  // before the next write attaches, so later saves still run after earlier
+  // failures; the originating UI still gets the error via its report callback.
+  pendingWrites = pendingWrites
+    .catch(() => {})
+    .then(write)
+    .catch(failure => {
+      lastQueueError = failure instanceof Error ? failure : new Error(String(failure))
+      onError(lastQueueError)
+    })
   void pendingWrites.catch(() => {})
 }
-export function flushWorkspaceWrites() { return pendingWrites }
-export function nativeSave(kind: "project" | "item" | "place" | "collection", record: unknown) {
+export function flushWorkspaceWrites(): Promise<void> {
+  // Resolves only once the queue has drained, then surfaces the most recent
+  // failure exactly once so callers (e.g. chat submission) see that persisted
+  // state may be stale instead of assuming everything saved.
+  return pendingWrites.then(() => {
+    if (lastQueueError) {
+      const error = lastQueueError
+      lastQueueError = null
+      throw error
+    }
+  })
+}
+export function nativeSave(kind: "project" | "item" | "place" | "collection" | "capture" | "routine" | "resume", record: unknown) {
   return invokeCommand<void>("workspace_save", { kind, record })
+}
+/** Serialize durable saves with the legacy write queue, while returning this save's failure. */
+export function durableWorkspaceWrite(write: () => Promise<void>): Promise<void> {
+  const operation = pendingWrites.catch(() => {}).then(write)
+  pendingWrites = operation.catch(() => {})
+  return operation
 }
 export function nativeDelete(kind: string, id: string) { return invokeCommand<boolean>("workspace_delete", { kind, id }) }
 export async function importBrowserWorkspace(projects: unknown[], items: unknown[]) {

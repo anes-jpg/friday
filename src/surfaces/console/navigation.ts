@@ -2,8 +2,8 @@ import type { ConsoleTab } from "@/lib/store"
 export type WorkspaceGroup = "talk" | "work" | "monitor" | "library" | "settings"
 export const workspaceRoutes: Record<WorkspaceGroup, { id: ConsoleTab; label: string }[]> = {
   talk: [{ id: "chat", label: "Conversation" }],
-  work: [{ id: "projects", label: "Projects" }, { id: "automations", label: "Automations" }, { id: "browser", label: "Browser" }, { id: "beast", label: "Code search" }, { id: "review", label: "Review" }, { id: "delphi", label: "Utilities" }],
-  monitor: [{ id: "map", label: "Map" }, { id: "cameras", label: "Cameras" }, { id: "recordings", label: "Recordings" }, { id: "alerts", label: "Activity" }],
+  work: [{ id: "projects", label: "Projects" }, { id: "analytics", label: "Analytics" }, { id: "history", label: "Run history" }, { id: "automations", label: "Automations" }, { id: "browser", label: "Browser" }, { id: "beast", label: "Code search" }, { id: "review", label: "Review" }, { id: "delphi", label: "Utilities" }],
+  monitor: [{ id: "map", label: "Map" }, { id: "cameras", label: "Cameras" }, { id: "recordings", label: "Recordings" }, { id: "alerts", label: "Activity" }, { id: "telemetry", label: "Telemetry" }],
   library: [{ id: "memory", label: "Memory" }, { id: "skills", label: "Skills" }, { id: "audit", label: "Audit" }],
   settings: [{ id: "settings", label: "Settings" }],
 }

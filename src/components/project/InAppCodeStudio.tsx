@@ -21,6 +21,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import type { Capture } from "@/lib/daily-work"
 import type { ProjectFileNode } from "@/lib/types"
 import {
   inspectProjectTree,
@@ -33,7 +34,7 @@ import {
 interface InAppCodeStudioProps {
   projectPath: string
   projectName: string
-  onAskFriday?: (prompt: string) => void
+  onAskFriday?: (prompt: string, source?: Partial<Capture>) => void
 }
 
 function getFileIcon(filename: string) {
@@ -210,9 +211,9 @@ export const InAppCodeStudio: React.FC<InAppCodeStudioProps> = ({
     e.preventDefault()
     if (!fridayPrompt.trim()) return
 
-    const directive = `[Project: ${projectName} at ${projectPath}] File: ${selectedFileName}\nInstruction: ${fridayPrompt.trim()}\n\nCurrent content preview:\n${fileContent.slice(0, 500)}`
+    const directive = fridayPrompt.trim()
     if (onAskFriday) {
-      onAskFriday(directive)
+      onAskFriday(directive, { title: selectedFileName || "Selected code", path: selectedFilePath || undefined, text: fileContent, sourceKind: "file" })
       setShowPromptBox(false)
       setFridayPrompt("")
       toast.success("Dispatched edit instruction to FRIDAY!")
