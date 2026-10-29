@@ -2,6 +2,14 @@ import type { ProjectItem } from "./projects"
 import type { RunRecord } from "./workspace-native"
 
 const terminal = new Set(["completed", "failed", "cancelled", "interrupted"])
+/** Keep the entire unfinished backlog visible, including undated personal tasks. */
+export function taskQueue(items: ProjectItem[]): ProjectItem[] {
+  const priority = { critical: 0, high: 1, medium: 2, low: 3 }
+  return items.filter(item => item.type === "task" && item.status !== "done").sort((a, b) =>
+    Number(b.status === "in-progress") - Number(a.status === "in-progress") ||
+    (a.dueDate || "9999").localeCompare(b.dueDate || "9999") ||
+    priority[a.priority || "medium"] - priority[b.priority || "medium"] || a.title.localeCompare(b.title))
+}
 export function taskSnapshot(items: ProjectItem[], now: Date) {
   const tasks = items.filter(item => item.type === "task")
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`

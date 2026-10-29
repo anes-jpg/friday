@@ -2,12 +2,17 @@ import { useFriday } from "./store"
 import { useProjects } from "./projects"
 import { useDailyWork, type ResumeRecord } from "./daily-work"
 
-export function openWorkRecord(projectId: string, view = "overview", itemId?: string) {
+export function openWorkRecord(projectId: string, view = "overview", itemId?: string, request?: string) {
   if (projectId) useProjects.getState().select(projectId)
-  const record = { projectId, view, itemId }
+  const record = { projectId, view, itemId, request }
   sessionStorage.setItem("friday-open-work-record", JSON.stringify(record))
   useFriday.getState().setTab("projects")
   window.dispatchEvent(new CustomEvent("friday:open-work-record", { detail: record }))
+}
+
+export function prepareWorkRequest(projectId: string, request: string, sourceIds: string[] = [], taskId?: string) {
+  useDailyWork.setState({ contextProjectId: projectId, selectedSourceIds: [...sourceIds], selectedTaskId: taskId })
+  openWorkRecord(projectId, "overview", undefined, request)
 }
 export function resumeProject(record: ResumeRecord) {
   useProjects.getState().select(record.projectId)

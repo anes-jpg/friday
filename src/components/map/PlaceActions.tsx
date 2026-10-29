@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { useSavedPlaces } from "@/lib/saved-places"
 import { useProjects, emptyProjectDraft, projectFromDraft, flushProjects, type ProjectItem } from "@/lib/projects"
 import type { MapPlace } from "@/lib/places"
+import { WebsiteProjectDialog } from "./WebsiteProjectDialog"
 
 export function placeLink(place: MapPlace) {
   return place.osmType && place.osmId ? `https://www.openstreetmap.org/${place.osmType}/${place.osmId}` : `https://www.openstreetmap.org/?mlat=${place.lat}&mlon=${place.lng}`
@@ -15,6 +16,7 @@ export function placeNote(place: MapPlace) {
   return [`Place: ${place.name}`, `Address: ${place.address || "Not supplied"}`, `Phone: ${place.tags.phone || place.tags["contact:phone"] || "Not supplied"}`, `Opening hours (source listing): ${place.tags.opening_hours || "Not supplied"}`, `Source: ${placeLink(place)}`, place.provenance ? `Retrieved: ${new Date(place.provenance.fetchedAt).toISOString()}${place.provenance.stale ? " (stale cache)" : ""}` : "Retrieval time unavailable"].join("\n")
 }
 export function PlaceActions({ place }: { place: MapPlace }) {
+  const [websiteOpen, setWebsiteOpen] = useState(false)
   const projects=useProjects(state=>state.projects)
   const collections=useSavedPlaces(state=>state.collections)
   const [mode,setMode]=useState<"task" | "note" | "collection" | null>(null)
@@ -52,6 +54,8 @@ export function PlaceActions({ place }: { place: MapPlace }) {
     } catch (failure) {setError(String(failure))} finally {setBusy(false)}
   }
   return <section aria-label="Use this place" className="flex flex-col gap-2">
+    <Button variant="outline" onClick={() => setWebsiteOpen(true)}>Build a website for this business</Button>
+    {websiteOpen && <WebsiteProjectDialog place={place} onClose={() => setWebsiteOpen(false)} />}
     <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={busy} onClick={()=>{setBusy(true);setError(null);void create("task").catch(failure=>setError(String(failure))).finally(()=>setBusy(false))}}>Create errand</Button><Button variant="ghost" size="sm" onClick={()=>open("task")}>Add to project</Button><Button variant="ghost" size="sm" onClick={()=>open("note")}>Save research note</Button><Button variant="ghost" size="sm" onClick={()=>open("collection")}>Save to collection</Button></div>
     {notice && <p role="status" className="place-source">{notice}</p>}{!mode && error && <p role="alert">{error}</p>}
     {mode && <Dialog open onOpenChange={value=>{if(!value && !busy)setMode(null)}}><DialogContent><DialogHeader><DialogTitle>{mode==="collection" ? "Named collection" : mode==="note" ? "Save research note" : "Add errand to project"}</DialogTitle><DialogDescription>{place.name}. The source link and supplied details stay with the record.</DialogDescription></DialogHeader><form onSubmit={event=>{event.preventDefault();void save()}}><FieldGroup><Field><FieldLabel htmlFor="place-record-title">{mode==="collection" ? "Collection name" : "Title"}</FieldLabel><Input id="place-record-title" value={title} onChange={event=>setTitle(event.target.value)} required maxLength={120}/></Field>{mode!=="collection" && <Field><FieldLabel>Project</FieldLabel><Select value={projectId} onValueChange={setProjectId}><SelectTrigger aria-label="Place destination project"><SelectValue/></SelectTrigger><SelectContent><SelectGroup><SelectItem value="new">{mode==="note" ? "Place research" : "Errands"} inbox</SelectItem>{projects.map(project=><SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>}{mode==="collection" && collections.length>0 && <p className="place-source">Existing collections: {collections.map(collection=>collection.name).join(", ")}. Use a name to add to it.</p>}{error && <p role="alert">{error}</p>}</FieldGroup><DialogFooter><Button type="button" variant="ghost" onClick={()=>setMode(null)} disabled={busy}>Cancel</Button><Button variant="outline" type="submit" disabled={busy || !title.trim()}>{busy ? "Saving…" : "Save"}</Button></DialogFooter></form></DialogContent></Dialog>}

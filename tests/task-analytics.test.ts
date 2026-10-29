@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { runAnalytics, taskSnapshot } from "../src/lib/task-analytics"
-import { memoryLinks } from "../src/lib/memory-graph"
+import { runAnalytics, taskSnapshot, taskQueue } from "../src/lib/task-analytics"
+import { memoryLinks, memoryLabel } from "../src/lib/memory-graph"
 import type { RunRecord } from "../src/lib/workspace-native"
 import type { ProjectItem } from "../src/lib/projects"
 import type { Fact } from "../src/lib/types"
@@ -15,6 +15,17 @@ function run(id: string, status: string, offset: number, duration = 1000): RunRe
   return { id, status, created_at: date.getTime(), updated_at: date.getTime() + duration, utterance: id, project_id: null, thread_id: "thread", provider_profile_id: null, request_id: null }
 }
 describe("Recorded task and run analytics", () => {
+  it("keeps undated backlog and personal tasks visible and orders active work before queued work", () => {
+    const items: ProjectItem[] = [
+      { id: "undated", projectId: "p", type: "task", title: "Build the next feature", status: "todo" },
+      { id: "personal", projectId: "", type: "task", title: "Personal idea", status: "todo" },
+      { id: "active", projectId: "p", type: "task", title: "Current work", status: "in-progress" },
+      { id: "done", projectId: "p", type: "task", title: "Finished", status: "done" },
+      { id: "note", projectId: "p", type: "note", title: "Context", status: "todo" },
+    ]
+    expect(taskQueue(items).map(item => item.id)).toEqual(["active", "undated", "personal"])
+    expect(items[0].id).toBe("undated")
+  })
   it("does not count active runs as finished or assume an empty completion rate", () => {
     expect(runAnalytics([], 7, now).successRate).toBeNull()
     const result = runAnalytics([run("a", "completed", -1), run("b", "failed", -1), run("c", "cancelled", -1), run("d", "interrupted", -1), run("e", "running", -1), run("f", "awaiting_confirmation", -1)], 7, now)
@@ -46,6 +57,15 @@ function fact(id: string, subject: string, source: string): Fact {
   return { id, subject, value: id, source_message_id: source, confidence: 1, tier: "semantic", pinned: false, created_at: now.toISOString() }
 }
 describe("Explainable memory associations", () => {
+  it("never links unrelated records through fallback labels and gives them useful display text", () => {
+    const first = { ...fact("a", "Saved fact", "Saved context"), value: "Use short paragraphs when writing" }
+    const second = { ...fact("b", "Saved fact", "Saved context"), value: "Plan trips around school holidays" }
+    expect(memoryLinks([first, second])).toEqual([])
+    expect(memoryLabel(first)).toBe("Use short paragraphs when writing")
+    const markup = renderToStaticMarkup(createElement(MemoryGraph, { facts: [first, second], onSelect: () => {} }))
+    expect(markup).toContain("Use short paragraphs")
+    expect(markup).toContain("No shared subjects or source messages")
+  })
   it("connects shared subjects and actual source messages without linking all manual entries", () => {
     const links = memoryLinks([fact("a", "Writing", "user-direct"), fact("b", " writing ", "user-direct"), fact("c", "Travel", "user-direct"), fact("d", "Food", "message-1"), fact("e", "Places", "message-1")])
     expect(links).toEqual([{ from: "a", to: "b", kind: "subject" }, { from: "d", to: "e", kind: "source" }])

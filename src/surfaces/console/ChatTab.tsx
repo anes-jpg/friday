@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react"
 import { useFriday, useActiveThread, sendChatMessage, stopNativeVoice } from "@/lib/store"
 import { ToolCallCard } from "./ToolCallCard"
 import { ContourCore } from "@/components/orb/ContourCore"
+import { AsciiLoader } from "@/components/ui/ascii-loader"
 import { VoiceContract } from "@/components/voice/VoiceContract"
 import { FridayOrb } from "@/components/orb"
 import { Button } from "@/components/ui/button"
@@ -843,7 +844,7 @@ export const ChatTab: React.FC = () => {
           {/* Current response state */}
           {busy && (
             <div className="rounded-[14px] border border-[hsl(var(--signal))]/40 bg-[hsl(var(--surface-raised))] p-3.5 flex items-center gap-3 text-xs font-mono shadow-xs">
-              <ContourCore />
+              <AsciiLoader label={orbState === "speaking" ? "Speaking" : "Working on your request"} />
               <div className="flex flex-col min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-semibold uppercase tracking-wider text-[hsl(var(--signal))] text-[11px]">

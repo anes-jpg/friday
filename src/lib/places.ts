@@ -9,7 +9,7 @@ export const ALGERIA_CITIES = [
   { name: "Annaba", center: [7.7667, 36.9] as [number, number] },
   { name: "Tizi Ouzou", center: [4.0497, 36.7169] as [number, number] },
 ]
-export type PlaceCategory = "all" | "shop" | "food" | "health" | "services" | "leisure"
+export type PlaceCategory = "all" | "shop" | "food" | "health" | "services" | "leisure" | "beauty" | "hotel"
 export interface MapPlace {
   id: string
   osmType?: "node" | "way" | "relation"
@@ -50,6 +50,8 @@ let nominatimRetryAt = 0
 function matchesCategory(tags: Record<string, string>, category: PlaceCategory): boolean {
   const amenity = tags.amenity || ""
   if (category === "shop") return Boolean(tags.shop)
+  if (category === "beauty") return ["hairdresser", "beauty", "cosmetics", "massage"].includes(tags.shop || "")
+  if (category === "hotel") return ["hotel", "motel", "guest_house", "hostel"].includes(tags.tourism || "")
   if (category === "food") return ["restaurant", "cafe", "fast_food"].includes(amenity) || tags.shop === "bakery"
   if (category === "health") return ["pharmacy", "hospital", "clinic", "dentist", "doctors"].includes(amenity)
   if (category === "services") return Boolean(tags.office || tags.craft) || ["bank", "atm", "post_office", "fuel", "police", "townhall"].includes(amenity)
@@ -80,7 +82,7 @@ export function parsePlaceSearch(data: unknown): MapPlace[] {
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return []
     return [{ id: `${item.osm_type}/${item.osm_id}`, osmType: item.osm_type, osmId: item.osm_id,
       name: item.name || item.display_name.split(",")[0], address: item.display_name, lat, lng,
-      category: item.type || item.category || "Place", tags: item.extratags || {} }]
+      category: item.type || item.category || "Place", tags: { ...item.extratags, ...(item.category && item.type ? { [item.category]: item.type } : {}) } }]
   })
 }
 export function parsePhotonPlaces(data: unknown, country: "dz" | "all"): MapPlace[] {
@@ -146,6 +148,7 @@ export async function nearbyPlaces(center: [number, number], category: PlaceCate
   const filters: Record<PlaceCategory, string[]> = {
     all: ['["shop"]', '["amenity"]["amenity"!~"^(bench|waste_basket|parking_space|waste_disposal|recycling|parking_entrance)$"]', '["tourism"]', '["office"]', '["craft"]', '["leisure"]'],
     shop: ['["shop"]'], food: ['["amenity"~"^(restaurant|cafe|fast_food)$"]', '["shop"="bakery"]'],
+    beauty: ['["shop"~"^(hairdresser|beauty|cosmetics|massage)$"]'], hotel: ['["tourism"~"^(hotel|motel|guest_house|hostel)$"]'],
     health: ['["amenity"~"^(pharmacy|hospital|clinic|dentist|doctors)$"]'], services: ['["amenity"~"^(bank|atm|post_office|fuel|police|townhall)$"]', '["office"]', '["craft"]'],
     leisure: ['["tourism"]', '["leisure"]', '["amenity"~"^(cinema|theatre|library|arts_centre)$"]'],
   }

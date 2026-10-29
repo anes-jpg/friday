@@ -1,77 +1,68 @@
 import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { ArrowUpRight, Plus } from "lucide-react"
+import { ArrowUpRight, Check, Globe, Plus, Play, Search, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Field, FieldLabel } from "@/components/ui/field"
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
-import { useProjects, flushProjects, saveDurableItem, type ProjectItem } from "@/lib/projects"
+import { AsciiLoader } from "@/components/ui/ascii-loader"
+import { useProjects, saveDurableItem, type ProjectItem } from "@/lib/projects"
 import { invokeCommand, isDesktop } from "@/lib/ipc"
 import type { RunRecord } from "@/lib/workspace-native"
-import type { SavedAutomation } from "@/lib/automations"
-
-import { useDailyWork, newCapture } from "@/lib/daily-work"
-import { resumeProject } from "@/lib/work-navigation"
-import { openSearchResult } from "@/components/work/WorkspaceSearch"
+import { useDailyWork } from "@/lib/daily-work"
+import { prepareWorkRequest, resumeProject } from "@/lib/work-navigation"
 import { useFriday } from "@/lib/store"
+import { taskQueue } from "@/lib/task-analytics"
 
-interface WorkspaceSearchResult { source: string; kind: string; id: string; threadId?: string; title: string }
-interface ReconcileAction { id: string; run_id: string; tool: string; status: string; reconcile_required: boolean }
-function localDate() {
-  const date = new Date()
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
-}
+interface ReconcileAction { id: string; run_id: string; tool: string; status: string }
 export function TodayView({ onOpen, onCreate }: { onOpen: (projectId: string, view?: string, itemId?: string) => void; onCreate: () => void }) {
-  const { projects, items, activeId, ready, loadError } = useProjects()
+  const { projects, items, ready, loadError } = useProjects()
   const { captures, resumes, routines } = useDailyWork()
-  const [capture, setCapture] = useState("")
-  const [captureId, setCaptureId] = useState<string | undefined>()
-  const [capturing, setCapturing] = useState(false)
-  const [projectId, setProjectId] = useState(activeId || projects[0]?.id || "")
+  const [text, setText] = useState("")
+  const [projectId, setProjectId] = useState("")
+  const [query, setQuery] = useState("")
+  const [scope, setScope] = useState("all")
+  const [status, setStatus] = useState("open")
+  const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [searchQuery, setSearchQuery] = useState("")
-
-  const workspaceSearch = useQuery({ queryKey: ["workspace-search", searchQuery], enabled: isDesktop && searchQuery.trim().length > 2, queryFn: () => invokeCommand<WorkspaceSearchResult[]>("workspace_search", { query: searchQuery }) })
-  const date = localDate()
-  const tasks = useMemo(() => items.filter(item => item.type === "task" && item.status !== "done"), [items])
-  const overdue = tasks.filter(task => task.dueDate && task.dueDate.slice(0, 10) < date)
-  const today = tasks.filter(task => task.dueDate?.slice(0, 10) === date)
-  const inProgress = tasks.filter(task => task.status === "in-progress")
-  const activity = useQuery({ queryKey: ["run-history", "today"], enabled: isDesktop, queryFn: () => invokeCommand<RunRecord[]>("get_run_history"), refetchInterval: 30_000 })
-  const reconciliation = useQuery({ queryKey: ["reconcile-actions"], enabled: isDesktop, queryFn: () => invokeCommand<ReconcileAction[]>("get_reconcile_actions"), refetchInterval: 30_000 })
-  const needsReview = reconciliation.data ?? []
-  const activeRuns = (activity.data ?? []).filter(run => ["queued", "running", "awaiting_confirmation"].includes(run.status))
-  const attentionCount = overdue.length + needsReview.length
-  const schedules = useQuery({ queryKey: ["agenda-reminders"], enabled: isDesktop, queryFn: () => invokeCommand<SavedAutomation[]>("get_automations"), refetchInterval: 30_000 })
-  const reminders = [...(schedules.data ?? [])].filter(item => item.enabled && item.next_run != null).sort((a, b) => (a.next_run ?? 0) - (b.next_run ?? 0)).slice(0, 6)
-  const captureTask = async () => {
-    if (!capture.trim() || capturing) return
-    setCapturing(true)
-    setError(null)
-    try {
-      const record = newCapture({ id: captureId, text: capture.trim(), projectId: projectId || undefined })
-      setCaptureId(record.id)
-      await useDailyWork.getState().saveCapture(record)
-      await saveDurableItem({ id: `capture-${record.id}-task`, projectId, type: "task", title: capture.trim(), status: "todo", dueDate: date, sourceIds: [record.id] })
-      await flushProjects()
-      setCapture("")
-      setCaptureId(undefined)
-    } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)) }
-    finally { setCapturing(false) }
+  const [undo, setUndo] = useState<ProjectItem | null>(null)
+  const tasks = useMemo(() => taskQueue(items), [items])
+  const visible = tasks.filter(task => (scope === "all" || task.projectId === scope) && (status !== "active" || task.status === "in-progress") && `${task.title} ${task.description || ""}`.toLowerCase().includes(query.toLowerCase()))
+  const history = useQuery({ queryKey: ["run-history", "today"], enabled: isDesktop, queryFn: () => invokeCommand<RunRecord[]>("get_run_history"), refetchInterval: 10_000, refetchIntervalInBackground: false })
+  const review = useQuery({ queryKey: ["reconcile-actions"], enabled: isDesktop, queryFn: () => invokeCommand<ReconcileAction[]>("get_reconcile_actions"), refetchInterval: 30_000 })
+  const activeRuns = (history.data ?? []).filter(run => ["queued", "running", "awaiting_confirmation"].includes(run.status))
+  const inbox = captures.filter(record => record.inbox).slice().reverse().slice(0, 5)
+  const pinned = routines.filter(record => record.pinned)
+  const update = async (task: ProjectItem, next: ProjectItem["status"]) => {
+    setBusy(task.id); setError(null)
+    try { await saveDurableItem({ ...task, status: next }); setUndo(task) }
+    catch (failure) { setError(String(failure)) }
+    finally { setBusy(null) }
   }
-  const taskList = (label: string, records: ProjectItem[], emptyMessage = "Nothing scheduled here.") => <section className="today-section"><h3><span>{label}</span><small>{records.length}</small></h3>{records.length ? <ul className="today-rows">{records.map(task => <li key={task.id}><button type="button" onClick={() => onOpen(task.projectId, "tasks", task.id)}><span><strong dir="auto">{task.title}</strong><small>{[projects.find(project => project.id === task.projectId)?.name, task.dueDate ? `Due ${task.dueDate}` : ""].filter(Boolean).join(" · ")}</small></span><ArrowUpRight size={16} /></button></li>)}</ul> : <p className="text-muted-foreground">{emptyMessage}</p>}</section>
-  return <div className="today-view"><header className="today-heading"><div className="today-title"><span className="instrument-label">{new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</span><h2>Today</h2><p>Your daily work, active runs, and anything that needs a decision.</p></div><div className="today-metrics" aria-label="Daily summary"><div className="today-metric"><strong>{tasks.length}</strong><span>Open tasks</span></div><div className="today-metric" data-attention={attentionCount > 0}><strong>{attentionCount}</strong><span>Need attention</span></div><div className="today-metric" data-active={activeRuns.length > 0}><strong>{activeRuns.length}</strong><span>Runs in motion</span></div></div></header>
-    <div className="work-actions"><Button variant="outline" onClick={() => useDailyWork.getState().openCapture()}>Quick capture</Button><Button variant="outline" onClick={() => useDailyWork.setState({ searchOpen: true })}>Search workspace</Button><Button variant="outline" onClick={() => useDailyWork.setState({ routineOpen: true })}>Manage routines</Button></div>
-    <div className="today-grid">
-      <section className="today-section"><h3><span>Inbox</span><small>{captures.filter(record => record.inbox).length}</small></h3><ul className="today-rows">{captures.filter(record => record.inbox).slice().reverse().slice(0, 8).map(record => <li key={record.id}><button type="button" onClick={() => useDailyWork.getState().openCapture(record)}><span><strong>{record.title}</strong><small>{record.sourceKind} · {new Date(record.capturedAt).toLocaleString()}{record.extractionError ? " · Extraction unavailable" : ""}</small></span><ArrowUpRight size={16} /></button></li>)}</ul>{!captures.length && <p className="text-muted-foreground">Capture an idea or source without choosing a project.</p>}</section>
-      <section className="today-section"><h3>Continue working</h3><ul className="today-rows">{resumes.slice().reverse().map(record => <li key={record.id}><button type="button" onClick={() => resumeProject(record)}><span><strong>{projects.find(project => project.id === record.projectId)?.name || record.name}</strong><small>{record.checkpoint}</small><small>Next: {record.nextStep || "Choose your next step"}</small></span><ArrowUpRight size={16} /></button></li>)}</ul>{!resumes.length && <p className="text-muted-foreground">Save a checkpoint from a project to resume later.</p>}</section>
-      <section className="today-section"><h3>Pinned routines</h3><ul className="today-rows">{routines.filter(record => record.pinned).map(record => <li key={record.id}><button type="button" onClick={() => { sessionStorage.setItem("friday-open-routine", record.id); useDailyWork.setState({ routineOpen: true }) }}><span><strong>{record.name}</strong><small>{record.steps.length} steps · Review current inputs</small></span><ArrowUpRight size={16} /></button></li>)}</ul>{!routines.some(record => record.pinned) && <p className="text-muted-foreground">Pin a named routine after saving it.</p>}</section>
-    </div>
-    <div className="today-tools"><form className="today-capture" onSubmit={event => { event.preventDefault(); void captureTask() }}><Field><FieldLabel htmlFor="today-capture">Quick capture</FieldLabel><Input id="today-capture" value={capture} onChange={event => setCapture(event.target.value)} placeholder="Add the next thing you need to do…" /></Field><Select value={projectId || "none"} onValueChange={value => setProjectId(value === "none" ? "" : value)}><SelectTrigger aria-label="Capture project"><SelectValue placeholder="Choose a project" /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="none">No project</SelectItem>{projects.map(project => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}</SelectGroup></SelectContent></Select><Button type="submit" variant="outline" disabled={capturing || !capture.trim() || !ready || Boolean(loadError)}><Plus data-icon="inline-start" />Add task</Button></form>
-    {(error || loadError) && <p role="alert" className="project-error">{error || loadError}</p>}
-    <section className="today-section today-search"><Field><FieldLabel htmlFor="today-search">Search workspace memory</FieldLabel><Input id="today-search" value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Messages, facts, files, project work…" /></Field>{workspaceSearch.isError && <p role="alert">{workspaceSearch.error.message}</p>}{workspaceSearch.data?.length ? <ul className="today-rows">{workspaceSearch.data.map(item => <li key={`${item.source}-${item.id}`}><button type="button" onClick={() => openSearchResult(item)}><span><strong dir="auto">{item.title}</strong><small>{item.source} · {item.kind}{item.id ? ` · ${item.id}` : ""}</small></span></button></li>)}</ul> : searchQuery.trim().length > 2 && !workspaceSearch.isFetching ? <p className="text-muted-foreground">No matching workspace records.</p> : null}</section></div>
-    {!projects.length && <Empty><EmptyHeader><EmptyTitle>Create a project when you need one</EmptyTitle><EmptyDescription>Your inbox and tasks work without a project. Add one to organize a goal.</EmptyDescription></EmptyHeader><Button variant="outline" onClick={onCreate} disabled={!ready}>Create project</Button></Empty>}
-    <div className="today-grid"><section className="today-section today-attention" data-attention={attentionCount > 0}><h3><span>Needs attention</span><small>{attentionCount}</small></h3>{reconciliation.isError && <p role="alert">Could not load actions awaiting review: {reconciliation.error.message}</p>}{overdue.length > 0 && <><h4 className="today-subheading">Overdue tasks</h4><ul className="today-rows">{overdue.slice(0, 5).map(task => <li key={task.id}><button type="button" onClick={() => onOpen(task.projectId, "tasks", task.id)}><span><strong dir="auto">{task.title}</strong><small>{projects.find(project => project.id === task.projectId)?.name} · Due {task.dueDate}</small></span><ArrowUpRight size={16} /></button></li>)}</ul>{overdue.length > 5 && <p className="today-overflow">{overdue.length - 5} more overdue tasks</p>}</>}{needsReview.length > 0 && <><h4 className="today-subheading">Actions to reconcile</h4><ul className="today-rows">{needsReview.slice(0, 5).map(action => { const run = activity.data?.find(item => item.id === action.run_id); return <li key={action.id}><button type="button" disabled={!run?.project_id} onClick={() => run?.project_id && onOpen(run.project_id, "history")}><span><strong>{action.tool} · {action.status.replaceAll("_", " ")}</strong><small>{run?.utterance.slice(0, 88) || `Run ${action.run_id.slice(0, 8)}`} · Review before retrying</small></span>{run?.project_id && <ArrowUpRight size={16} />}</button></li>})}</ul>{needsReview.length > 5 && <p className="today-overflow">{needsReview.length - 5} more actions need review</p>}</>}{attentionCount === 0 && !reconciliation.isError && <p className="text-muted-foreground">Nothing needs your attention right now.</p>}</section>{taskList("In progress", inProgress, "No tasks marked in progress.")}{taskList("Due tasks", today)}<section className="today-section"><h3><span>Upcoming reminders</span><small>{reminders.length}</small></h3>{schedules.isError && <p role="alert">{schedules.error.message}</p>}{reminders.length ? <ul className="today-rows">{reminders.map(reminder => <li key={reminder.id}><span><strong>{reminder.name}</strong><small>{new Date((reminder.next_run ?? 0) * 1000).toLocaleString()}</small></span></li>)}</ul> : <p className="text-muted-foreground">No upcoming reminders.</p>}</section><section className="today-section"><h3><span>Recent activity</span><small>{activity.data?.length ?? 0}</small></h3>{activity.isError && <p role="alert">{activity.error.message}</p>}{activity.data?.length ? <ul className="today-rows">{activity.data.slice(0, 8).map(run => <li key={run.id}><button type="button"  onClick={() => { if (run.project_id) onOpen(run.project_id, "history"); else { useFriday.getState().setActiveThread(run.thread_id); useFriday.getState().setTab("chat") } }}><span><strong>{run.utterance.slice(0, 100)}</strong><small>{run.status.replaceAll("_", " ")} · {new Date(run.created_at).toLocaleTimeString()}</small></span><ArrowUpRight size={16} /></button></li>)}</ul> : <p className="text-muted-foreground">Run activity appears here after you send a request.</p>}</section></div>
+  const add = async () => {
+    if (!text.trim() || busy) return
+    setBusy("capture"); setError(null)
+    try { await saveDurableItem({ id: crypto.randomUUID(), projectId, type: "task", title: text.trim(), status: "todo" }); setText("") }
+    catch (failure) { setError(String(failure)) }
+    finally { setBusy(null) }
+  }
+  return <div className="work-command-center">
+    <header className="work-center-heading"><div><span className="instrument-label">{new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</span><h2>Make progress.</h2><p>{tasks.length} open tasks · {projects.filter(project => project.status === "active").length} active projects · {activeRuns.length} live runs</p></div><Button variant="outline" onClick={onCreate} disabled={!ready || Boolean(loadError)}><Plus size={16} />New project</Button></header>
+    <div className="work-launch-strip"><button type="button" onClick={() => useFriday.getState().setTab("map")}><Globe size={20} /><span><strong>Find businesses. Build websites.</strong><small>Explore an area → shortlist → website brief → project</small></span><ArrowUpRight size={18} /></button><button type="button" onClick={() => useDailyWork.getState().openCapture()}><Plus size={20} /><span><strong>Capture an idea or source</strong><small>Files, links, notes, and screenshots in one inbox</small></span><ArrowUpRight size={18} /></button></div>
+    {(loadError || error) && <p className="project-error" role="alert">{loadError || error}</p>}
+    {!ready && <AsciiLoader label="Opening saved work" />}
+    {undo && <div className="work-undo" role="status"><span>Task updated.</span><Button variant="ghost" size="sm" disabled={Boolean(busy)} onClick={async () => { setBusy(undo.id); try { await saveDurableItem(undo); setUndo(null) } catch (failure) { setError(String(failure)) } finally { setBusy(null) } }}>Undo last change</Button></div>}
+    <div className="work-center-grid"><section className="work-queue" aria-label="Your task queue"><header><div><span className="instrument-label">Execution queue</span><h3>What’s next</h3></div><span>{visible.length} tasks</span></header>
+      <form className="work-task-composer" onSubmit={event => { event.preventDefault(); void add() }}><Input aria-label="New task" value={text} onChange={event => setText(event.target.value)} placeholder="Write a task and press Enter…" /><select aria-label="New task project" value={projectId} onChange={event => setProjectId(event.target.value)}><option value="">Personal inbox</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select><Button variant="outline" size="icon" type="submit" aria-label="Add task" disabled={!text.trim() || Boolean(busy) || !ready || Boolean(loadError)}><Plus size={16} /></Button></form>
+      <div className="work-queue-filters"><div><Search size={14} /><Input aria-label="Search task queue" placeholder="Filter tasks…" value={query} onChange={event => setQuery(event.target.value)} /></div><select aria-label="Task project filter" value={scope} onChange={event => setScope(event.target.value)}><option value="all">All projects</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}<option value="">Personal inbox</option></select><button type="button" aria-pressed={status === "active"} onClick={() => setStatus(current => current === "active" ? "open" : "active")}>In progress</button></div>
+      <ul className="work-task-queue">{visible.map(task => <li key={task.id} data-state={task.status}><button type="button" className="work-complete" aria-label={`Complete ${task.title}`} disabled={Boolean(busy)} onClick={() => void update(task, "done")}><Check size={16} /></button><button type="button" className="work-task-title" onClick={() => onOpen(task.projectId, "tasks", task.id)}><strong dir="auto">{task.title}</strong><small>{projects.find(project => project.id === task.projectId)?.name || "Personal inbox"} · {task.status === "in-progress" ? "In progress" : "To do"}{task.dueDate ? ` · Due ${task.dueDate}` : ""}{task.priority ? ` · ${task.priority}` : ""}</small></button><div className="work-task-actions"><Button variant="ghost" size="icon" aria-label={`${task.status === "in-progress" ? "Pause" : "Start"} ${task.title}`} disabled={Boolean(busy)} onClick={() => void update(task, task.status === "in-progress" ? "todo" : "in-progress")}><Play size={14} /></Button><Button variant="ghost" size="sm" disabled={!task.projectId || Boolean(busy)} onClick={() => prepareWorkRequest(task.projectId, `${task.title}\n${task.description || ""}`, task.sourceIds, task.id)}><Sparkles size={14} />Work on this</Button></div></li>)}</ul>
+      {!visible.length && <div className="work-queue-empty"><h4>{tasks.length ? "No tasks match these filters" : "Ready for your next move"}</h4><p>{tasks.length ? "Change the project or task filter to see the rest of your queue." : "Add a task above, open a project, or find a business to build for."}</p></div>}
+    </section><aside className="work-context-stack"><section><header><h3>Your projects</h3><button type="button" onClick={onCreate} aria-label="Create a project"><Plus size={16} /></button></header>{projects.filter(project => project.status === "active").map(project => { const work = tasks.filter(task => task.projectId === project.id); return <button key={project.id} type="button" className="work-project-launch" onClick={() => onOpen(project.id)}><span className="project-monogram">{project.name.slice(0, 2).toUpperCase()}</span><span><strong>{project.name}</strong><small>{work.length} open · {project.tags.includes("business-website") ? "Business website" : project.kind}{project.rootPath ? " · Folder connected" : ""}</small></span><ArrowUpRight size={14} /></button>})}{!projects.length && <p>Create a project or start one from a business on the map.</p>}</section>
+      {activeRuns.length > 0 && <section><h3>FRIDAY is working</h3>{activeRuns.map(run => <button className="work-activity-row" key={run.id} type="button" onClick={() => { useFriday.getState().setActiveThread(run.thread_id); useFriday.getState().setTab("chat") }}><AsciiLoader label={run.status.replaceAll("_", " ")} /><span>{run.utterance.slice(0, 100)}</span></button>)}</section>}
+      {resumes.length > 0 && <section><h3>Continue where you left off</h3>{resumes.slice().reverse().slice(0, 3).map(record => <button className="work-activity-row" key={record.id} type="button" onClick={() => resumeProject(record)}><strong>{projects.find(project => project.id === record.projectId)?.name || record.name}</strong><small>{record.nextStep || record.checkpoint}</small></button>)}</section>}
+      {inbox.length > 0 && <section><h3>Captured sources</h3>{inbox.map(record => <button type="button" key={record.id} className="work-activity-row" onClick={() => useDailyWork.getState().openCapture(record)}><strong>{record.title}</strong><small>{record.sourceKind}</small></button>)}</section>}
+      {pinned.length > 0 && <section><h3>Pinned routines</h3>{pinned.map(record => <button type="button" key={record.id} className="work-activity-row" onClick={() => { sessionStorage.setItem("friday-open-routine", record.id); useDailyWork.setState({ routineOpen: true }) }}><strong>{record.name}</strong><small>{record.steps.length} steps</small></button>)}</section>}
+      {(review.data?.length || review.isError) ? <section><h3>Review before retrying</h3>{review.isError ? <p role="alert">{review.error.message}</p> : review.data?.map(action => <button key={action.id} type="button" className="work-activity-row" onClick={() => useFriday.getState().setTab("history")}><strong>{action.tool}</strong><small>{action.status.replaceAll("_", " ")}</small></button>)}</section> : null}
+      <section><header><h3>Recent execution</h3><button type="button" onClick={() => useFriday.getState().setTab("history")}>History<ArrowUpRight size={14} /></button></header>{history.isFetching && !history.data && <AsciiLoader label="Reading run history" />}{history.isError && <p role="alert">{history.error.message}</p>}{history.data?.slice(0, 4).map(run => <button type="button" key={run.id} className="work-activity-row" onClick={() => { useFriday.getState().setActiveThread(run.thread_id); useFriday.getState().setTab("chat") }}><strong>{run.utterance.slice(0, 90)}</strong><small>{run.status.replaceAll("_", " ")} · {new Date(run.created_at).toLocaleTimeString()}</small></button>)}{!history.data?.length && !history.isFetching && <p>Project requests record their plan, approvals, and result here.</p>}</section>
+      <div className="work-context-links"><Button variant="ghost" size="sm" onClick={() => useFriday.getState().setTab("analytics")}>Task analytics<ArrowUpRight size={14} /></Button><Button variant="ghost" size="sm" onClick={() => useDailyWork.setState({ searchOpen: true })}>Search everything<Search size={14} /></Button><Button variant="ghost" size="sm" onClick={() => useDailyWork.setState({ routineOpen: true })}>Routines<ArrowUpRight size={14} /></Button></div>
+    </aside></div>
   </div>
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { ContourCore } from "@/components/orb/ContourCore"
+import { AsciiLoader } from "@/components/ui/ascii-loader"
 import { invokeCommand, isDesktop } from "@/lib/ipc"
 import { ipcGetPiperStatus } from "@/lib/piper"
 import { useFriday } from "@/lib/store"
@@ -38,7 +38,7 @@ export function HudBootSequence({ onComplete, onSkip }: HudBootSequenceProps) {
   return (
     <div className="boot-screen" role="dialog" aria-modal="true" aria-labelledby="boot-title">
       <div className="boot-composition">
-        <div className="boot-graphic"><ContourCore large staticMark /></div>
+        <div className="boot-graphic"><AsciiLoader variant="core" active={checking} label={checking ? "Restoring your workspace" : "Workspace checks complete"} detail="CONTEXT / WORK / VOICE" /></div>
         <div className="boot-content">
           <span className="instrument-label">FRIDAY / Control room</span>
           <h1 id="boot-title">CONTROL<br />ROOM.</h1>
@@ -48,7 +48,7 @@ export function HudBootSequence({ onComplete, onSkip }: HudBootSequenceProps) {
           </div>
           <div className="boot-actions">
             <button type="button" className="primary-action" disabled={checking} autoFocus onClick={onComplete}>{checking ? "Checking workspace…" : "Open control room"}</button>
-            <button type="button" className="quiet-action" onClick={() => setAttempt((value) => value + 1)} disabled={checking}>Check again</button>
+            <button type="button" className="quiet-action" onClick={() => { setChecks(current => current.map(check => ({ ...check, state: "checking" }))); setAttempt(value => value + 1) }} disabled={checking}>Check again</button>
             {onSkip && <button type="button" className="quiet-action" onClick={onSkip}>Back to workspace</button>}
           </div>
         </div>

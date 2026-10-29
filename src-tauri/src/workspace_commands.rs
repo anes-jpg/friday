@@ -1,6 +1,37 @@
 use crate::{AppState,memory::{workspace::{WorkspaceSnapshot,WorkspaceImport},runs::{RunRecord,RunEvent}}};
 use serde_json::{json,Value};
-use tauri::State;
+use tauri::{State, Manager};
+
+#[tauri::command]
+pub fn workspace_create_website_folder(id:String,app:tauri::AppHandle)->Result<String,String> {
+    let root=website_project_folder(&app.path().app_data_dir().map_err(|e|e.to_string())?,&id)?;
+    std::fs::create_dir_all(&root).map_err(|e|format!("Could not create website working folder: {e}"))?;
+    Ok(root.to_string_lossy().to_string())
+}
+
+fn website_project_folder(base:&std::path::Path,id:&str)->Result<std::path::PathBuf,String> {
+    // Use a parsed UUID as the directory component; business names never become paths.
+    let id=uuid::Uuid::parse_str(id).map_err(|_|"Invalid website project ID")?;
+    Ok(base.join("website-projects").join(id.to_string()))
+}
+
+#[cfg(test)]
+mod website_folder_tests {
+    use super::website_project_folder;
+    #[test]
+    fn website_folder_stays_inside_app_projects() {
+        let base=std::path::Path::new("app-data");
+        let id="550e8400-e29b-41d4-a716-446655440000";
+        let path=website_project_folder(base,id).expect("Valid project UUID");
+        assert_eq!(path,base.join("website-projects").join(id));
+    }
+    #[test]
+    fn website_folder_rejects_traversal_and_absolute_paths() {
+        for id in ["../outside","..\\outside","C:\\outside","","website; command"] {
+            assert!(website_project_folder(std::path::Path::new("app-data"),id).is_err());
+        }
+    }
+}
 
 #[tauri::command]
 pub fn workspace_select(id:Option<String>,state:State<'_,AppState>)->Result<(),String> {

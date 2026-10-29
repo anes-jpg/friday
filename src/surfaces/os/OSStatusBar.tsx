@@ -12,7 +12,7 @@ export interface OSStatusBarProps {
 }
 const modes = [
   { id: "console", label: "Talk", icon: MessageSquare }, { id: "godseye", label: "Map", icon: Globe },
-  { id: "legion", label: "Tasks", icon: Share2 }, { id: "history", label: "History", icon: History },
+  { id: "legion", label: "Work", icon: Share2 }, { id: "history", label: "History", icon: History },
 ] as const
 export function OSStatusBar({ activeMode, onModeChange, onToggleFullscreen, overwatchEnabled, onToggleOverwatch,
   isInspectorOpen, onToggleInspector, cpuPercent, ramMb, activeModelName, className }: OSStatusBarProps) {

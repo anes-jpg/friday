@@ -9,6 +9,7 @@ import { Minus, Square, X, Copy, Maximize2, Scan, Search } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useWindowMode } from "@/lib/window-mode"
 import { useDailyWork } from "@/lib/daily-work"
+import { AsciiLoader } from "@/components/ui/ascii-loader"
 
 const BeastTab = lazy(() => import("./BeastTab").then((m) => ({ default: m.BeastTab })))
 const BrowserTab = lazy(() => import("./BrowserTab").then((m) => ({ default: m.BrowserTab })))
@@ -78,7 +79,7 @@ export const Console: React.FC<ConsoleProps> = ({ embedded = false }) => {
           </nav>
         )}
         <section className="workspace-content" aria-label={groupLabel}>
-          <div className="workspace-route" key={group === "monitor" ? "monitor" : tab}><React.Suspense fallback={<div role="status" className="workspace-loading">Opening workspace…</div>}>
+          <div className="workspace-route" key={group === "monitor" ? "monitor" : tab}><React.Suspense fallback={<AsciiLoader label="Opening workspace" variant="core" className="workspace-loading" />}>
             {tab === "chat" && <ChatTab />}
             {tab === "browser" && <BrowserTab />}
             {tab === "automations" && <AutomationsTab />}

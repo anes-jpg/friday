@@ -129,6 +129,7 @@ export const App: React.FC = () => {
 
   const handleBootComplete = () => {
     setIsBootingHud(false);
+    setFullscreenReveal(true);
   };
 
   const handleExitHud = async () => {
@@ -463,7 +464,7 @@ export const App: React.FC = () => {
           onSkip={() => void handleExitHud()}
         />
       )}
-      {fullscreenReveal && !spatialHudActive && <FullscreenReveal onComplete={() => setFullscreenReveal(false)} />}
+      {fullscreenReveal && !isBootingHud && <FullscreenReveal onComplete={() => setFullscreenReveal(false)} />}
       {windowError && <div className="window-error" role="alert">Window mode could not change: {windowError}</div>}
 
       <Palette />
