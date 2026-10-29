@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ArrowLeft, Bookmark, ExternalLink, MapPin, Search, X, LocateFixed } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -18,6 +18,7 @@ import { BusinessResearchPanel } from "./BusinessResearchPanel"
 import { BlockReveal } from "@/components/ui/block-reveal"
 import { WebsiteProjectDialog } from "./WebsiteProjectDialog"
 import { GoogleBusinessSearch } from "./GoogleBusinessSearch"
+import { BusinessDossier } from "./BusinessDossier"
 
 const categories: { id: PlaceCategory; label: string }[] = [{ id: "all", label: "All" }, { id: "shop", label: "Shops" }, { id: "food", label: "Food & coffee" }, { id: "beauty", label: "Salons" }, { id: "hotel", label: "Hotels" }, { id: "health", label: "Health" }, { id: "services", label: "Services" }, { id: "leisure", label: "Leisure" }]
 
@@ -32,6 +33,29 @@ export function PlacesPanel({ center, selected, mapPlaces, onSelect, onResults, 
   const [websiteFilter, setWebsiteFilter] = useState<WebsiteFilter>("all")
   const [contactOnly, setContactOnly] = useState(false)
   const [websitePlace, setWebsitePlace] = useState<MapPlace | null>(null)
+  const [expanded, setExpanded] = useState(false)
+  const panel = useRef<HTMLElement>(null)
+  useEffect(() => { setExpanded(false) }, [selected?.id])
+  useEffect(() => {
+    if (!expanded || !panel.current) return
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const focusPanel = () => panel.current?.querySelector<HTMLButtonElement>("header button")?.focus()
+    focusPanel()
+    const retainFocus = (event: FocusEvent) => {
+      if (event.target instanceof HTMLElement && !panel.current?.contains(event.target) && !event.target.closest('[data-slot="dialog-content"]')) focusPanel()
+    }
+    document.addEventListener("focusin", retainFocus)
+    return () => { document.removeEventListener("focusin", retainFocus); if (previous?.isConnected) previous.focus() }
+  }, [expanded])
+  const overlayKeyboard = (event: KeyboardEvent<HTMLElement>) => {
+    if (!expanded || websitePlace || event.defaultPrevented) return
+    if (event.key === "Escape") { event.preventDefault(); setExpanded(false); return }
+    if (event.key !== "Tab") return
+    const controls = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), summary, [tabindex="0"]')].filter(element => element.getClientRects().length > 0)
+    const first = controls[0], last = controls[controls.length - 1]
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
+  }
   const [shortlisting, setShortlisting] = useState<string | null>(null)
   const [text, setText] = useState("")
   const [country, setCountry] = useState<"dz" | "all">("dz")
@@ -91,27 +115,31 @@ export function PlacesPanel({ center, selected, mapPlaces, onSelect, onResults, 
   const searchCenter = area?.center ?? center
   const searchCity = ALGERIA_CITIES.find(city => Math.hypot(city.center[0] - searchCenter[0], city.center[1] - searchCenter[1]) < .4)?.name
   const googleQuery = text || `${category === "all" ? "Businesses" : categories.find(item => item.id === category)?.label} ${searchCity ? `in ${searchCity}` : `near ${searchCenter[1].toFixed(3)}, ${searchCenter[0].toFixed(3)}`}`
-  return <aside className="places-panel" aria-label="Places and businesses">
-    <header><div><span className="instrument-label">Discovery → project</span><h2>{place ? "Business & place details" : "Find your next client."}</h2></div><Button variant="ghost" size="icon" aria-label="Hide place search" onClick={onClose}><X data-icon="inline-start" /></Button></header>
+  return <>{expanded && <div className="business-dossier-backdrop" onClick={() => setExpanded(false)} aria-hidden="true" />}<aside ref={panel} className={`places-panel${expanded ? " places-panel-expanded" : ""}`} aria-label="Places and businesses" role={expanded ? "dialog" : undefined} aria-modal={expanded || undefined} aria-labelledby={expanded ? "business-dossier-title" : undefined} onKeyDown={overlayKeyboard}>
+    <header><div><span className="instrument-label">Discovery → project</span><h2 id="business-dossier-title">{expanded ? "Business dossier" : place ? "Business & place details" : "Find your next client."}</h2></div><Button variant="ghost" size="icon" aria-label={expanded ? "Collapse business dossier" : "Hide place search"} onClick={expanded ? () => setExpanded(false) : onClose}><X data-icon="inline-start" /></Button></header>
     {savedData.error && <p role="alert" className="places-error">{savedData.error}</p>}
     {place ? <div className="place-detail">
-      <Button variant="ghost" onClick={() => onSelect(null)}><ArrowLeft data-icon="inline-start" />Back to places</Button>
-      <span className="instrument-label">{place.category.replaceAll("_", " ")}</span><h3 dir="auto">{place.name}</h3>
+      {!expanded && <><Button variant="ghost" onClick={() => onSelect(null)}><ArrowLeft data-icon="inline-start" />Back to places</Button>
+      <span className="instrument-label">{place.category.replaceAll("_", " ")}</span><h3 dir="auto">{place.name}</h3></>}
+      <BusinessDossier key={place.id} place={place} city={ALGERIA_CITIES.find(city => Math.hypot(city.center[0] - place.lng, city.center[1] - place.lat) < .4)?.name || searchCity || ""} expanded={expanded} onExpand={setExpanded} onSave={async updated => { await savedData.save(updated); onSelect(updated) }} onBuild={setWebsitePlace} />
+      {!expanded && <>
       <details className="place-media-disclosure"><summary>Source photos</summary><PlacePhotos key={place.id} place={place} /></details>
-      {details.isFetching && <p role="status">Loading business details…</p>}
       {details.isError && <p className="places-error" role="alert">Details could not load. <button type="button" onClick={() => void details.refetch()}>Try again</button></p>}
-      <BlockReveal loading={details.isPending && !businessPhone(place) && !businessHours(place)} label="Reading business contact fields" lines={3}><dl><dt>Phone</dt><dd>{businessPhone(place) ? <a href={businessPhoneLink(place)}>{businessPhone(place)}</a> : "Not supplied by available sources"}</dd><dt>Email</dt><dd>{businessEmail(place) || "Not supplied by available sources"}</dd><dt>Address</dt><dd dir="auto">{businessAddress(place) || "No street address listed"}</dd><dt>Opening hours</dt><dd>{businessHours(place) || "Not listed"}</dd>{place.tags.cuisine && <><dt>Cuisine</dt><dd>{place.tags.cuisine.replaceAll(";", ", ")}</dd></>}{place.tags.wheelchair && <><dt>Wheelchair access</dt><dd>{place.tags.wheelchair}</dd></>}</dl></BlockReveal>
-      <BusinessResearchPanel key={place.id} place={place} onSave={async updated => { await savedData.save(updated); onSelect(updated) }} />
+      <BlockReveal loading={details.isPending && !businessPhone(place) && !businessHours(place)} label="Reading contacts" lines={3}><dl><dt>Phone</dt><dd>{businessPhone(place) ? <a href={businessPhoneLink(place)}>{businessPhone(place)}</a> : "Not listed"}</dd><dt>Email</dt><dd>{businessEmail(place) || "Not listed"}</dd><dt>Address</dt><dd dir="auto">{businessAddress(place) || "Not listed"}</dd><dt>Opening hours</dt><dd>{businessHours(place) || "Not listed"}</dd>{place.tags.cuisine && <><dt>Cuisine</dt><dd>{place.tags.cuisine.replaceAll(";", ", ")}</dd></>}{place.tags.wheelchair && <><dt>Wheelchair access</dt><dd>{place.tags.wheelchair}</dd></>}</dl></BlockReveal>
       <div className="place-detail-actions"><Button variant="outline" onClick={()=>void save()} disabled={Boolean(savedData.error) || !savedData.ready}><Bookmark data-icon="inline-start" />{saved.some(item => item.id === place.id) ? "Remove saved place" : "Save place"}</Button>{website && <a href={website} target="_blank" rel="noopener noreferrer">Website<ExternalLink size={14} /></a>}{place.locationPrecision !== "area" && <a href={`https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lng}`} target="_blank" rel="noopener noreferrer">Directions<ExternalLink size={14} /></a>}</div>
-      <PlaceActions key={place.id} place={place}/>
+      <Button variant="outline" onClick={() => setWebsitePlace(place)}>Build website</Button>
+      <details className="place-media-disclosure"><summary>More actions and research</summary><BusinessResearchPanel key={place.id} place={place} onSave={async updated => { await savedData.save(updated); onSelect(updated) }} /><PlaceActions key={place.id} place={place}/>
       <Button variant="ghost" size="sm" disabled={comparison.length>=3 && !comparison.some(item=>item.id===place.id)} onClick={()=>setComparison(items=>items.some(item=>item.id===place.id) ? items.filter(item=>item.id!==place.id) : [...items,place])}>{comparison.some(item=>item.id===place.id) ? "Remove from comparison" : "Add to comparison"}</Button>
       {comparison.length>0 && <Button variant="outline" size="sm" onClick={()=>setComparing(true)}>Compare ({comparison.length}/3)</Button>}
+      </details>
       {saveError && <p role="alert" className="places-error">{saveError}</p>}
-      <p className="place-source">{place.locationPrecision === "area" ? "Browser research lead. No verified business coordinates yet. Open the Google source to check its location." : "OpenStreetMap community data. Details may be incomplete; opening hours are the source listing, not live opening status."}</p>
+      <details className="place-media-disclosure"><summary>Sources and saved evidence</summary>
       {place.researchSourceUrl && <a className="place-source" href={place.researchSourceUrl} target="_blank" rel="noopener noreferrer">View research source ↗</a>}
       {place.researchExcerpt && <details className="google-page-excerpt"><summary>Quoted discovery text</summary><pre dir="auto">{place.researchExcerpt}</pre></details>}
       <p className="place-source">{place.provenance ? `${place.provenance.source} · ${place.provenance.cached ? "cached" : "retrieved"} ${new Date(place.provenance.fetchedAt).toLocaleString()}${place.provenance.stale ? " · stale; refresh when online" : ""}` : "Source retrieval time unavailable"}</p>
       {place.osmType && place.osmId && <a className="place-source" href={`https://www.openstreetmap.org/${place.osmType}/${place.osmId}`} target="_blank" rel="noopener noreferrer">View source listing ↗</a>}
+      </details>
+      </>}
     </div> : <>
       <p className="business-discovery-intro">Find local businesses, save leads, and turn a sourced brief into a website you can build and preview.</p>
       <Tabs value={tab} onValueChange={setTab}><TabsList><TabsTrigger value="nearby">Explore area</TabsTrigger><TabsTrigger value="search">Find a place</TabsTrigger><TabsTrigger value="saved">Saved / leads ({saved.length})</TabsTrigger></TabsList></Tabs>
@@ -137,5 +165,5 @@ export function PlacesPanel({ center, selected, mapPlaces, onSelect, onResults, 
     </>}
     {comparing && <PlaceComparison places={comparison} center={center} onClose={()=>setComparing(false)}/>}
     {websitePlace && <WebsiteProjectDialog place={websitePlace} onClose={() => setWebsitePlace(null)} />}
-  </aside>
+  </aside></>
 }

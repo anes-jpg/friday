@@ -1,12 +1,15 @@
 import { z } from "zod"
 import { invokeCommand, isDesktop } from "./ipc"
 import { safePlaceWebsite, type MapPlace } from "./places"
+import { businessAddress } from "./business-workflow"
 
 const sourceUrl = z.string().max(4000).url().refine(value => Boolean(safePlaceWebsite(value)))
 const captureSchema = z.object({
   url: sourceUrl, title: z.string().max(200), text: z.string().max(20000),
   selectedName: z.string().max(180).nullable(), phones: z.array(z.string().max(120)).max(12),
   addresses: z.array(z.string().max(500)).max(8),
+  website: sourceUrl.nullable().optional(), hours: z.string().max(2000).nullable().optional(), category: z.string().max(100).nullable().optional(),
+  photos: z.array(sourceUrl.refine(value => /^lh[3-6]\.googleusercontent\.com$/.test(new URL(value).hostname) && new URL(value).protocol === "https:")).max(6).default([]),
   results: z.array(z.object({ title: z.string().max(200), url: sourceUrl, snippet: z.string().max(900) })).max(20),
 })
 export type BusinessSearchCapture = z.infer<typeof captureSchema>
@@ -20,6 +23,28 @@ export async function openBusinessSearch(query: string, maps: boolean): Promise<
 export async function captureBusinessSearch(label: string): Promise<BusinessSearchCapture> {
   if (!isDesktop) throw new Error("Google result import runs in the Windows app.")
   return captureSchema.parse(await invokeCommand<unknown>("capture_business_search", { label }))
+}
+export type BusinessSelection = { name: string; address: string; city: string; lat: number; lng: number; source: string | null }
+export function selectedBusinessRequest(place: MapPlace, city: string): BusinessSelection {
+  let source: string | null = null
+  if (place.researchSourceUrl) {
+    const url = new URL(place.researchSourceUrl)
+    if (["www.google.com", "google.com", "maps.google.com"].includes(url.hostname) && url.pathname.startsWith("/maps/place/")) source = url.href
+  }
+  return { name: place.name, address: businessAddress(place) || "", city, lat: place.lat, lng: place.lng, source }
+}
+export async function openSelectedBusiness(label: string, selection: BusinessSelection): Promise<void> {
+  if (!isDesktop) throw new Error("Automatic Google Maps research runs in the Windows app.")
+  await invokeCommand("open_selected_business", { label, selection })
+}
+export async function captureSelectedBusiness(label: string, selection: BusinessSelection): Promise<BusinessSearchCapture> {
+  return captureSchema.parse(await invokeCommand<unknown>("capture_selected_business", { label, selection }))
+}
+export async function closeBusinessSearch(label: string): Promise<void> {
+  await invokeCommand("close_business_search", { label })
+}
+export async function pullSelectedBusiness(label: string): Promise<BusinessSearchCapture> {
+  return captureSchema.parse(await invokeCommand<unknown>("pull_selected_business", { label }))
 }
 /** The search area's center is context only; never represent it as a business pin. */
 export function businessSearchLead(name: string, source: string, center: [number, number], query: string, text: string): MapPlace {

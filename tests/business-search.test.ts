@@ -61,3 +61,72 @@ describe("Google browser business research", () => {
     expect(output.addresses).toEqual(["2eme étage, Bir Mourad Raïs 16000"])
   })
 })
+
+describe("automatic selected listing capture", () => {
+  const selection = { name: "Atlas Café", city: "Oran", lat: 35.6969, lng: -0.6417 }
+  function capture({ selected = false, urls = ["https://www.google.com/maps/place/Atlas/data=!8m2!3d35.697!4d-0.641"], address = "12 Rue, Oran", website = "https://atlas.example/", name = "Atlas Café" } = {}) {
+    let clicks = 0
+    const visible = { getClientRects: () => [1] }
+    const anchors = urls.map(href => ({ ...visible, href, innerText: "", parentElement: { innerText: address }, getAttribute: () => name, click: () => { clicks++ } }))
+    const heading = { ...visible, innerText: name, closest: () => null }
+    const buttons = [{ ...visible, innerText: "", getAttribute: () => `Adresse: ${address}` }, { ...visible, innerText: "", getAttribute: () => "Numéro de téléphone: 0555 12 34 56" }, { ...visible, innerText: "", getAttribute: () => "Horaires: Ouvert · Ferme à 18:00" }]
+    const document = { title: "Google Maps", body: { innerText: `${name}\nOuvert · Ferme à 18:00` }, querySelector: () => null,
+      querySelectorAll: (selector: string) => selector === "h1" ? selected ? [heading] : [] : selector === "button[aria-label]" ? buttons : selector === "a[href]" ? [{ ...visible, href: website, getAttribute: () => "Site Web: atlas.example" }] : selector.includes("main a[href]") ? anchors : [] }
+    const script = captureScript.replace("const request = null;", `const request = ${JSON.stringify(selection)};`)
+    const result = runInNewContext(script, { location: new URL(selected ? urls[0] : "https://www.google.com/maps/search/atlas"), document, URL, getComputedStyle: () => ({ visibility: "visible" }) }) as { selectionState: string; selectedName: string; website: string; hours: string; phones: string[]; error: string | null }
+    return { result, clicks }
+  }
+  it("selects a unique nearby Oran listing and captures its displayed fields", () => {
+    expect(capture().clicks).toBe(1)
+    const { result } = capture({ selected: true })
+    expect(result.error).toBeNull()
+    expect(result.selectionState).toBe("matched")
+    expect(result.website).toBe("https://atlas.example/")
+    expect(result.hours).toBe("Ouvert · Ferme à 18:00")
+    expect(result.phones).toContain("0555 12 34 56")
+  })
+  it("does not choose among two branches or use the camera as business coordinates", () => {
+    const duplicate = capture({ urls: ["https://www.google.com/maps/place/Atlas/data=!8m2!3d35.697!4d-0.641", "https://www.google.com/maps/place/Atlas2/data=!8m2!3d35.698!4d-0.642"] })
+    expect(duplicate.result.selectionState).toBe("ambiguous")
+    expect(duplicate.clicks).toBe(0)
+    expect(capture({ urls: ["https://www.google.com/maps/place/Atlas/@35.6969,-0.6417,15z"], address: "" }).clicks).toBe(0)
+    expect(capture({ selected: true, urls: ["https://www.google.com/maps/place/Atlas/data=!8m2!3d36.732!4d3.029"], address: "Alger" }).result.selectionState).toBe("mismatch")
+    expect(capture({ selected: true, name: "Another Café" }).result.selectionState).toBe("mismatch")
+  })
+  it("isolates the selected business from other visible listing contacts", () => {
+    const scope = { innerText: "Atlas Café\nOuvert", querySelectorAll: (selector: string) => selector === "button[aria-label]" ? [{ getClientRects: () => [1], getAttribute: () => "Adresse: Rue, Oran" }] : [] }
+    const heading = { innerText: "Atlas Café", getClientRects: () => [1], closest: (selector: string) => selector.includes("main") ? scope : null }
+    const document = { title: "Maps", body: { innerText: "Other Store\n0555 00 00 00" }, querySelector: () => null, querySelectorAll: (selector: string) => selector === "h1" ? [heading] : [] }
+    const result = runInNewContext(captureScript, { location: new URL("https://www.google.com/maps/place/Atlas"), document, URL, getComputedStyle: () => ({ visibility: "visible" }) }) as { phones: string[]; text: string; error: string | null }
+    expect(result.error).toBeNull()
+    expect(result.phones).toEqual([])
+    expect(result.text).not.toContain("Other Store")
+  })
+  it("handles a bilingual hotel identity without importing a tenant's closed status", () => {
+    const visible = { getClientRects: () => [1], closest: () => null }
+    const information = { ...visible, innerText: "Boulevard du 19 Mars, Oran\n041 59 02 59\nHeure d'arrivée : 3:00 PM", getAttribute: () => "Four Points by Sheraton Oran - Informations",
+      querySelectorAll: (selector: string) => selector === "button[aria-label]" ? [{ ...visible, getAttribute: () => "Adresse: Boulevard du 19 Mars, Oran" }, { ...visible, getAttribute: () => "Numéro de téléphone: 041 59 02 59" }] : [] }
+    const main = { innerText: "Four Points by Sheraton Oran\nفور بوينتس شيراطون\nHôtel 4 étoiles\nArena Club\nFermé · Ouvre à 22:30\n0555 99 99 99", getAttribute: () => "Four Points by Sheraton Oran",
+      querySelectorAll: (selector: string) => selector === '[role="region"]' ? [information] : [] }
+    const headings = ["Four Points by Sheraton Oran", "فور بوينتس شيراطون"].map(innerText => ({ ...visible, innerText, closest: (selector: string) => selector.includes("main") ? main : null }))
+    const document = { title: "Maps", body: main, querySelector: () => null, querySelectorAll: (selector: string) => selector === "h1" ? headings : [] }
+    const script = captureScript.replace("const request = null;", `const request = ${JSON.stringify({ name: "Hôtel Four Points by Sheraton Oran", city: "Oran", lat: 35.7167, lng: -0.6106 })};`)
+    const result = runInNewContext(script, { location: new URL("https://www.google.com/maps/place/FourPoints/data=!8m2!3d35.716781!4d-0.610165"), document, URL, getComputedStyle: () => ({ visibility: "visible" }) }) as { selectedName: string; selectionState: string; hours: string | null; phones: string[]; error: string | null }
+    expect(result.error).toBeNull()
+    expect(result.selectedName).toBe("Four Points by Sheraton Oran")
+    expect(result.selectionState).toBe("matched")
+    expect(result.hours).toBeNull()
+    expect(result.phones).toEqual(["041 59 02 59"])
+  })
+  it("captures photos only from the selected business photo control", () => {
+    const visible = { getClientRects: () => [1], closest: () => null }
+    const photo = (label: string, urls: string[]) => ({ ...visible, getAttribute: () => label, querySelectorAll: () => urls.map(src => ({ ...visible, src })) })
+    const buttons = [photo("Photo de Atlas Café", ["https://lh3.googleusercontent.com/p/atlas", "https://attacker.example/tracker"]), photo("Photo de Other Café", ["https://lh3.googleusercontent.com/p/other"])]
+    const scope = { innerText: "Atlas Café", querySelectorAll: (selector: string) => selector === "button[aria-label]" ? buttons : [] }
+    const heading = { ...visible, innerText: "Atlas Café", closest: (selector: string) => selector.includes("main") ? scope : null }
+    const document = { title: "Maps", body: scope, querySelector: () => null, querySelectorAll: (selector: string) => selector === "h1" ? [heading] : [] }
+    const result = runInNewContext(captureScript, { location: new URL("https://www.google.com/maps/place/Atlas"), document, URL, getComputedStyle: () => ({ visibility: "visible" }) }) as { photos: string[]; error: string | null }
+    expect(result.error).toBeNull()
+    expect(result.photos).toEqual(["https://lh3.googleusercontent.com/p/atlas"])
+  })
+})

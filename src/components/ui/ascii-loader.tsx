@@ -3,6 +3,10 @@ import { cn } from "@/lib/utils"
 import { useSettings } from "@/lib/settings"
 
 const bands = ["[ # : . . . : # ]", "[ : # : . : # : ]", "[ . : # : # : . ]", "[ . . : # : . . ]"]
+const blockFrames = Array.from({ length: 4 }, (_, frame) => Array.from({ length: 7 }, (_, row) => {
+  if (row === 0 || row === 6) return "+-----------------------------+"
+  return `| ${Array.from({ length: 27 }, (_, column) => " .:+#"[(column * 7 + row * 3 + frame) % 5]).join("")} |`
+}).join("\n"))
 export const asciiCoreFrames = Array.from({ length: 4 }, (_, frame) =>
   Array.from({ length: 17 }, (_, row) => Array.from({ length: 37 }, (_, col) => {
     const x = (col - 18) / 2, y = row - 8
@@ -14,7 +18,7 @@ export const asciiCoreFrames = Array.from({ length: 4 }, (_, frame) =>
 
 /** Animate only while mounted for a pending operation. No canvas or idle RAF. */
 export function AsciiLoader({ label, detail, variant = "compact", active = true, className }: {
-  label: string; detail?: string; variant?: "compact" | "core"; active?: boolean; className?: string
+  label: string; detail?: string; variant?: "compact" | "core" | "block"; active?: boolean; className?: string
 }) {
   const [frame, setFrame] = useState(0)
   const userReduced = useSettings(state => state.saved.appearance.reducedMotion)
@@ -33,7 +37,7 @@ export function AsciiLoader({ label, detail, variant = "compact", active = true,
     return () => clearInterval(timer)
   }, [active, reduced, userReduced])
   return <div className={cn("ascii-loader", `ascii-loader-${variant}`, active && "is-working", className)} role="status">
-    <div className="ascii-glyphs" aria-hidden="true">{(variant === "core" ? asciiCoreFrames : bands).map((glyphs, index) => <pre key={index} className={index === (active ? frame : 0) ? "is-visible" : undefined}>{glyphs}</pre>)}</div>
+    <div className="ascii-glyphs" aria-hidden="true">{(variant === "core" ? asciiCoreFrames : variant === "block" ? blockFrames : bands).map((glyphs, index) => <pre key={index} className={index === (active ? frame : 0) ? "is-visible" : undefined}>{glyphs}</pre>)}</div>
     <div className="ascii-caption"><span>{label}</span>{detail && <small>{detail}</small>}</div>
   </div>
 }
