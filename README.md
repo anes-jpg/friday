@@ -2,44 +2,58 @@
 
 # FRIDAY.
 
-### Your work. Your model. One desktop.
-
-A voice-first Windows operator for conversations, research, projects, and everyday work.
+A Windows desktop assistant with local speech, project workspaces, research tools, and an Android companion.
 
 **Windows 10 / 11** · **Tauri 2 + React 19 + Rust** · **Local speech** · **Development preview**
 
-[Explore the interface](#a-look-inside) · [Get started](#get-started) · [Architecture](#how-it-fits-together) · [2026 roadmap](#2026-rollout-roadmap)
+[Downloads](#downloads) · [Screenshots](#a-look-inside) · [Build from source](#get-started) · [Architecture](#how-it-fits-together) · [2026 roadmap](#2026-rollout-roadmap)
 
 ![FRIDAY project workspace with tasks, saved context, and checkpoints](docs/images/workspace.png)
 
 </div>
 
-FRIDAY brings the request, its context, and the next action into the same workspace. Start with a conversation or a goal. Keep notes and tasks together, attach an existing folder when you need local tools, and choose the model provider that fits the work.
+Type or dictate a request, review the plan, and follow its progress. Each project keeps its own tasks, notes, sources, and model provider. Attach a folder for file and terminal tools, or use a workspace without one.
 
-The interface follows the **Atmospheric Halftone OS** design: quiet dark surfaces, clear typography, compact instruments, and violet reserved for active work and focus. See [the design system](DESIGN.md) and [the project constitution](AGENTS.md).
+The interface follows [Atmospheric Halftone OS](DESIGN.md): dark surfaces, halftone edges, and violet for active work and focus.
+
+## Downloads
+
+![FRIDAY preview packages for Windows and Android](docs/images/releases/friday-release-cover.png)
+
+| Windows setup | Windows Installer | Android companion |
+| --- | --- | --- |
+| [![Windows EXE setup cover](docs/images/releases/friday-windows-exe-cover.png)](https://github.com/anes-jpg/friday/releases/download/v1.0.0-preview.20261030/FRIDAY-1.0.0-windows-x64-setup.exe) | [![Windows MSI cover](docs/images/releases/friday-windows-msi-cover.png)](https://github.com/anes-jpg/friday/releases/download/v1.0.0-preview.20261030/FRIDAY-1.0.0-windows-x64.msi) | [![Android companion APK cover](docs/images/releases/friday-android-cover.png)](https://github.com/anes-jpg/friday/releases/download/v1.0.0-preview.20261030/FRIDAY-Companion-1.1-android-debug.apk) |
+| **[Download EXE](https://github.com/anes-jpg/friday/releases/download/v1.0.0-preview.20261030/FRIDAY-1.0.0-windows-x64-setup.exe)** · v1.0.0 | **[Download MSI](https://github.com/anes-jpg/friday/releases/download/v1.0.0-preview.20261030/FRIDAY-1.0.0-windows-x64.msi)** · v1.0.0 | **[Download APK](https://github.com/anes-jpg/friday/releases/download/v1.0.0-preview.20261030/FRIDAY-Companion-1.1-android-debug.apk)** · v1.1 |
+| Windows 10 / 11, x64. Installs for your account. | Windows 10 / 11, x64. Uses Windows Installer. | Android 7+ for typed requests. Android 12+ and a local recognition service for dictation. |
+
+These are **development previews**: Windows packages are unsigned, and Android uses a debug certificate. Choose one Windows installer. The phone app needs FRIDAY running on Windows and a separately provisioned companion Python runtime. Clean-machine installation and phone hardware checks are still pending.
+
+[Release and setup guide](https://github.com/anes-jpg/friday/releases/tag/v1.0.0-preview.20261030) · [SHA-256 checksums](https://github.com/anes-jpg/friday/releases/download/v1.0.0-preview.20261030/SHA256SUMS.txt) · [Installation instructions](docs/releases/INSTALL.md)
+
+[Download the matching development source](https://github.com/anes-jpg/friday/releases/download/v1.0.0-preview.20261030/FRIDAY-preview-2026-10-30-source.zip). It includes companion and research changes not yet committed to master, file hashes, and the local Rust speech wrappers. Model weights and Python environments are separate prerequisites.
 
 ## A look inside
 
-These are real captures of the browser preview using disposable example projects and provider profiles. They contain no personal workspace records or credentials. Native Windows tools and speech require the desktop app.
+Screenshots show the browser preview with example projects and provider profiles. Native Windows tools and speech require the desktop app.
 
-### A useful place to start
+### Onboarding
 
-The optional guide starts from software, research, or everyday goals. Leave for Settings or a workspace and return to your saved place. Finishing the guide is a separate action.
+Start from a software, research, or everyday goal. The guide is optional and saves progress when you leave for Settings or a workspace.
 
 ![Resumable first-use guide with software, research, and everyday-work entry points](docs/images/onboarding.png)
 
 <table>
 <tr>
-<td width="50%"><strong>Make the workspace yours</strong><br />Custom goals, optional folders and presets, any saved provider, and your response language.</td>
-<td width="50%"><strong>Keep the next steps visible</strong><br />Searchable tasks, priorities, status, and actions tied to the selected project.</td>
+<td width="50%"><strong>Project setup</strong><br />Custom goals, optional folders and presets, a saved provider, and a response language.</td>
+<td width="50%"><strong>Project tasks</strong><br />Searchable tasks, priorities, status, and actions for the selected project.</td>
 </tr>
 <tr>
 <td><img src="docs/images/project-setup.png" alt="Flexible project setup with an optional folder and editable goal" /></td>
 <td><img src="docs/images/project-tasks.png" alt="Project task table with priorities and contextual actions" /></td>
 </tr>
 <tr>
-<td><strong>Pick up the day</strong><br />A task queue, captures, saved checkpoints, and the next piece of work.</td>
-<td><strong>Bring your own model</strong><br />Local or remote OpenAI-compatible endpoints, exact model names, API mode, and isolated credentials.</td>
+<td><strong>Today</strong><br />Tasks, captures, and saved checkpoints.</td>
+<td><strong>Model providers</strong><br />Local or remote OpenAI-compatible endpoints, exact model names, API mode, and credentials.</td>
 </tr>
 <tr>
 <td><img src="docs/images/today.png" alt="Daily work dashboard showing a task queue and saved context" /></td>
@@ -58,8 +72,9 @@ The optional guide starts from software, research, or everyday goals. Leave for 
 | Developer tools | Native project file browsing and editing, terminal commands, Git views, and website previews. |
 | Maps and research | Map browsing, place details, selected-business research, source links, and a business-to-website workflow. External sources can be unavailable. |
 | Control and recovery | Plans, tiered confirmation, execution history, and undo receipts for supported reversible actions. |
+| Android companion | Preview client for reviewed requests, desktop progress, approval previews, results, and receipt-specific undo. Requires pairing and the companion runtime. |
 
-**This is a development preview.** The spatial control room, multi-agent visualizer, some world telemetry layers, and parts of browser automation contain demonstration or placeholder behavior. Wake-word activation is unavailable. Android companion integration and private remote access are under development. Their presence in the architecture map does not mean they are released or verified end to end.
+The spatial control room, multi-agent visualizer, some telemetry layers, and parts of browser automation contain demonstration or placeholder behavior. Wake-word activation is unavailable. The companion has automated protocol checks; physical phone use, remote networking, and native voice still need end-to-end testing.
 
 ## How it fits together
 
@@ -163,16 +178,16 @@ The repository does not currently include a root project license. Bundled assets
 
 ## 2026 rollout roadmap
 
-Updated **30 October 2026**. The remaining-year targets below are development priorities for **November–December**, subject to verification and release readiness; they are not guaranteed shipment dates.
+Updated **30 October 2026**. Planned work for **November–December**; dates depend on testing and release readiness.
 
 | Feature or improvement | 2026 status / target |
 | --- | --- |
-| Project switching and flexible setup | Completed in October: one selected-project identity, custom goals and languages, optional folders and presets, provider choice, and draft protection. |
-| Resumable onboarding | Completed in October: goal-based entry points, separate progress and completion, reachable actions, keyboard focus, and reduced-motion checks. |
-| Research reliability | November–December target: source-backed answers, faithful response rendering, retrieved images, and clear unavailable-source states. |
-| Business research controls | November–December target: clearer selected-branch extraction, cancellation, and protection against late results. |
-| Android companion | November–December target: readable answer history, on-device dictation where supported, paired desktop requests, and approvals tied to the originating session. |
-| Private remote companion access | November–December target: hotspot pairing, private Tailscale HTTPS, revocation, reconnection, and gateway lifecycle checks. |
-| Voice readiness and performance | November–December target: simpler runtime provisioning and measured microphone, playback, interruption, and latency checks on Windows hardware. |
-| Distribution and updates | November–December target: reproducible packaging, signing, update verification, and clean-machine install checks before a public release. |
-| Architecture and product clarity | Ongoing through year end: refreshed Floorplan snapshots, verified screenshots, and clear separation of working, experimental, and planned features. |
+| Project switching and setup | Shipped in October: fixed accumulating labels; added optional folders and presets, custom goals and languages, provider choice, and draft protection. |
+| Onboarding | Shipped in October: saved guide progress, optional setup, keyboard focus, small-window and reduced-motion checks. |
+| Research reliability | Preserve source links, prices, excerpts, and retrieved images; explain when a source cannot be read. |
+| Business research controls | Improve branch selection, cancellation, and rejection of late results. |
+| Android companion | Test readable history, local dictation, paired requests, approvals, and undo on phones. |
+| Private remote access | Verify hotspot and Tailscale pairing, revocation, reconnection, and gateway shutdown. |
+| Voice setup and performance | Simplify Python/model setup; measure microphone, playback, interruption, and latency on Windows hardware. |
+| Installers and updates | Sign packages, verify updates, and test installation on clean Windows machines. |
+| Documentation | Refresh screenshots and Floorplan as features change; keep preview limitations visible. |
