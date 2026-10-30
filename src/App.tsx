@@ -15,6 +15,7 @@ import { FullscreenReveal } from "@/components/hud/FullscreenReveal";
 import { useWindowMode } from "@/lib/window-mode";
 import { useSettings } from "@/lib/settings";
 import { surfaceLabel } from "@/lib/ipc";
+import { shouldShowGuide } from "@/lib/onboarding";
 
 const OnboardingModal = React.lazy(() =>
   import("@/surfaces/onboarding/OnboardingModal").then((m) => ({ default: m.OnboardingModal }))
@@ -71,13 +72,7 @@ export const App: React.FC = () => {
   const [showShowcase, setShowShowcase] = useState<boolean>(false);
   const [isBootingHud, setIsBootingHud] = useState<boolean>(false);
   const [fullscreenReveal, setFullscreenReveal] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem("friday_onboarded_v1_0") !== "true";
-    } catch {
-      return true;
-    }
-  });
+  const [showOnboarding, setShowOnboarding] = useState<boolean>(shouldShowGuide);
   const isHoldingPttRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -473,15 +468,7 @@ export const App: React.FC = () => {
         {showOnboarding && (
           <OnboardingModal
             isOpen={showOnboarding}
-            onClose={() => {
-              setShowOnboarding(false);
-              try {
-                localStorage.setItem("friday_onboarded_v1_0", "true");
-                localStorage.setItem("friday_onboarded", "true");
-              } catch {
-                // ignore
-              }
-            }}
+            onClose={() => setShowOnboarding(false)}
           />
         )}
         {showShowcase && (

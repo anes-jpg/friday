@@ -154,6 +154,24 @@ pub fn workspace_agenda(today:String,state:State<'_,AppState>)->Result<Value,Str
 pub fn get_run_history(project_id:Option<String>,thread_id:Option<String>,state:State<'_,AppState>)->Result<Vec<RunRecord>,String> {
     state.agent.db.lock().map_err(|e|e.to_string())?.run_history(project_id.as_deref(),thread_id.as_deref()).map_err(|e|e.to_string())
 }
+
+#[tauri::command]
+pub async fn choose_project_folder() -> Result<Option<String>, String> {
+    #[cfg(windows)]
+    {
+        let script = "Add-Type -AssemblyName System.Windows.Forms; $picker = New-Object System.Windows.Forms.FolderBrowserDialog; $picker.Description = 'Choose an existing folder for your FRIDAY workspace'; $picker.ShowNewFolderButton = $false; try { if ($picker.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::OutputEncoding = [Text.Encoding]::UTF8; [Console]::Write($picker.SelectedPath) } } finally { $picker.Dispose() }";
+        let mut command = tokio::process::Command::new("powershell.exe");
+        command.args(["-NoProfile", "-NonInteractive", "-Sta", "-Command", script]).creation_flags(0x08000000);
+        let output = command.output().await.map_err(|error| format!("Could not open the folder picker: {error}"))?;
+        if !output.status.success() { return Err("Folder picker could not open. Enter the folder path instead.".into()); }
+        let path = String::from_utf8(output.stdout).map_err(|_| "Folder picker returned an unreadable path")?.trim().to_string();
+        if path.is_empty() { return Ok(None); }
+        if !std::path::Path::new(&path).is_dir() { return Err("Select an existing folder.".into()); }
+        Ok(Some(path))
+    }
+    #[cfg(not(windows))]
+    Err("Folder selection is available in the Windows app.".into())
+}
 #[tauri::command]
 pub fn get_run_events(run_id:String,state:State<'_,AppState>)->Result<Vec<RunEvent>,String> {
     state.agent.db.lock().map_err(|e|e.to_string())?.run_events(&run_id).map_err(|e|e.to_string())

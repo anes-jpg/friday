@@ -2361,6 +2361,7 @@ pub fn run() {
             workspace_commands::save_daily_preferences,
             workspace_commands::workspace_save,
             workspace_commands::workspace_create_website_folder,
+            workspace_commands::choose_project_folder,
             workspace_commands::workspace_delete,
             workspace_commands::workspace_import,
             workspace_commands::workspace_search,

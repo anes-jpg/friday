@@ -42,6 +42,14 @@ describe("personal project workspaces", () => {
     const { projectFromDraft, emptyProjectDraft } = await import("../src/lib/projects")
     expect(() => projectFromDraft({ ...emptyProjectDraft, name: "Invalid", contextLinks: "javascript:alert(1)" })).toThrow(/HTTP/)
   })
+  it("validates arbitrary languages at the field that needs attention", async () => {
+    const { projectDraftIssue, projectFromDraft, emptyProjectDraft } = await import("../src/lib/projects")
+    expect(projectDraftIssue({ ...emptyProjectDraft, name: "Research", responseLanguage: " " })?.field).toBe("responseLanguage")
+    expect(projectDraftIssue({ ...emptyProjectDraft, name: "Research", responseLanguage: "x".repeat(81) })?.field).toBe("responseLanguage")
+    expect(projectFromDraft({ ...emptyProjectDraft, name: "Research", responseLanguage: "Español" }).responseLanguage).toBe("Español")
+    expect(projectFromDraft({ ...emptyProjectDraft, name: "بحث", responseLanguage: "العربية" }).responseLanguage).toBe("العربية")
+    expect(projectDraftIssue({ ...emptyProjectDraft, name: "x".repeat(120) })).toBeUndefined()
+  })
   it("preserves corrupt saved records and blocks overwriting them", async () => {
     const { emptyProjectDraft, projectFromDraft } = await import("../src/lib/projects")
     const project = projectFromDraft({ ...emptyProjectDraft, name: "Saved" })
